@@ -154,9 +154,14 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
 
       if (active != null) {
         final trip = Map<String, dynamic>.from(active!['trip'] as Map);
-        final stops = List<Map<String, dynamic>>.from(active!['stops'] as List? ?? []);
+        final allStops = List<Map<String, dynamic>>.from(active!['stops'] as List? ?? []);
         events = List<Map<String, dynamic>>.from(active!['events'] as List? ?? []);
-        final ordered = orderedStops(stops, trip['direction'] as String?);
+        final tripKids = List<Map<String, dynamic>>.from(trip['kidIds'] as List? ?? []);
+        final myKids = List<Map<String, dynamic>>.from(active!['myKids'] as List? ?? []);
+        // Parent map: school + their kids' stops (and trip peers if populated)
+        final mapStops = stopsForTripKids(allStops, tripKids.isNotEmpty ? tripKids : myKids);
+        active!['stops'] = mapStops;
+        final ordered = orderedStops(mapStops, trip['direction'] as String?);
         routePoints = await fetchRoadRoute(stopLatLngs(ordered));
 
         final tripId = trip['_id'].toString();

@@ -34,16 +34,25 @@ router.get('/trips/active', async (req, res) => {
         const myKids = kids.filter((k) =>
           trip.kidIds.some((tk) => tk._id?.toString() === k._id.toString() || tk.toString() === k._id.toString())
         );
-        const [events, stops, profile] = await Promise.all([
+        const [events, allStops, profile] = await Promise.all([
           TripEvent.find({ tripId: trip._id, kidId: { $in: myKids.map((k) => k._id) } }),
           Stop.find({ routeId: trip.routeId._id || trip.routeId }).sort({ order: 1 }),
           DriverProfile.findOne({ userId: trip.driverId._id || trip.driverId }),
         ]);
+        const homeIds = new Set(
+          (trip.kidIds || [])
+            .map((k) => (k.homeStopId?._id || k.homeStopId)?.toString())
+            .filter(Boolean)
+        );
+        const school = allStops.find((s) => s.type === 'school');
+        const homes = allStops.filter(
+          (s) => s.type !== 'school' && homeIds.has(s._id.toString())
+        );
         return {
           trip,
           myKids,
           events,
-          stops,
+          stops: [...(school ? [school] : []), ...homes],
           driverProfile: profile,
         };
       })

@@ -3,6 +3,7 @@ import { api } from '../../lib/api';
 import { connectSocket } from '../../lib/socket';
 import MapView from '../../components/MapView';
 import { useAuth } from '../../context/AuthContext';
+import { stopsForTripKids } from '../../lib/geo';
 
 export default function ParentHome() {
   const { showToast } = useAuth();
@@ -160,7 +161,10 @@ export default function ParentHome() {
                 }
                 zoom={15}
                 driverLocation={driverLocation}
-                stops={selected.stops}
+                stops={stopsForTripKids(
+                  selected.stops,
+                  selected.trip.kidIds || selected.myKids || []
+                )}
                 direction={selected.trip.direction}
                 showRoute
                 followDriver

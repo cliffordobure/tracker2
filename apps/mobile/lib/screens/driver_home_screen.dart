@@ -84,9 +84,11 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
     final auth = context.read<AuthState>();
     final detail = await auth.api.get('/trips/${t['_id']}');
     trip = Map<String, dynamic>.from(detail['trip'] as Map);
-    stops = List<Map<String, dynamic>>.from(detail['stops'] as List? ?? []);
+    final allStops = List<Map<String, dynamic>>.from(detail['stops'] as List? ?? []);
     events = List<Map<String, dynamic>>.from(detail['events'] as List? ?? []);
     kids = List<Map<String, dynamic>>.from(trip!['kidIds'] as List? ?? []);
+    // Only school + this trip's student drop/pickup points (not every stop ever saved on the route)
+    stops = stopsForTripKids(allStops, kids);
     final ordered = orderedStops(stops, trip!['direction'] as String?);
     routePoints = await fetchRoadRoute(stopLatLngs(ordered));
     bus = latLngFrom(trip!['latestLocation']) ??

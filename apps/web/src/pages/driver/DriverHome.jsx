@@ -8,6 +8,7 @@ import {
   haversineMeters,
   nextPendingStop,
   orderedStopsForDirection,
+  stopsForTripKids,
 } from '../../lib/geo';
 import { advanceAlongRoute, nearestRouteIndex } from '../../lib/directions';
 
@@ -86,8 +87,9 @@ export default function DriverHome() {
       const detail = await api(`/trips/${active._id}`);
       setTrip(detail.trip);
       setEvents(detail.events);
-      setStops(detail.stops);
-      seedBusLocation(detail.stops, detail.trip.direction, detail.trip.latestLocation);
+      const tripStops = stopsForTripKids(detail.stops, detail.trip.kidIds || []);
+      setStops(tripStops);
+      seedBusLocation(tripStops, detail.trip.direction, detail.trip.latestLocation);
     }
   }, [seedBusLocation]);
 
@@ -183,15 +185,16 @@ export default function DriverHome() {
     const detail = await api(`/trips/${t._id}`);
     setTrip(detail.trip);
     setEvents(detail.events);
-    setStops(detail.stops);
+    const tripStops = stopsForTripKids(detail.stops, detail.trip.kidIds || []);
+    setStops(tripStops);
     setVisitedStopIds([]);
     visitedRef.current = [];
     notifiedRef.current = new Set();
     setRouteCoords([]);
     routeIndexRef.current = 0;
-    seedBusLocation(detail.stops, direction, detail.trip.latestLocation);
+    seedBusLocation(tripStops, direction, detail.trip.latestLocation);
     showToast(`Trip started (${direction === 'to_school' ? 'to school' : 'to home'})`);
-    const first = orderedStopsForDirection(detail.stops, direction)[0];
+    const first = orderedStopsForDirection(tripStops, direction)[0];
     if (first) showToast(`First stop: ${first.name}`, 'success');
   };
 

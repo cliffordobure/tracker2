@@ -23,8 +23,31 @@ export function orderedStopsForDirection(stops, direction) {
   const list = [...(stops || [])];
   const school = list.filter((s) => s.type === 'school').sort((a, b) => a.order - b.order);
   const homes = list.filter((s) => s.type !== 'school').sort((a, b) => a.order - b.order);
-  if (direction === 'to_home') return [...school, ...homes];
-  return [...homes, ...school];
+  const schoolOne = school.slice(0, 1);
+  if (direction === 'to_home') return [...schoolOne, ...homes];
+  return [...homes, ...schoolOne];
+}
+
+/** School + boarding/drop stops for kids on this trip (ignore leftover route stops). */
+export function stopsForTripKids(stops, kids = []) {
+  const homeIds = new Set(
+    kids
+      .map((k) => (typeof k.homeStopId === 'object' ? k.homeStopId?._id : k.homeStopId))
+      .filter(Boolean)
+      .map(String)
+  );
+  const list = stops || [];
+  const school = list.filter((s) => s.type === 'school').sort((a, b) => a.order - b.order);
+  const homes = list
+    .filter((s) => s.type !== 'school' && homeIds.has(String(s._id)))
+    .sort((a, b) => a.order - b.order);
+
+  const deduped = [];
+  for (const stop of homes) {
+    const near = deduped.some((kept) => haversineMeters(kept.location, stop.location) < 35);
+    if (!near) deduped.push(stop);
+  }
+  return [...(school[0] ? [school[0]] : []), ...deduped];
 }
 
 export function nextPendingStop(orderedStops, visitedStopIds = new Set()) {

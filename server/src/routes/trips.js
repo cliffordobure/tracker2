@@ -341,10 +341,20 @@ router.get('/:id', authenticate, async (req, res) => {
       return res.status(403).json({ error: 'Not authorized for this trip' });
     }
 
-    const [events, stops] = await Promise.all([
+    const [events, allStops] = await Promise.all([
       TripEvent.find({ tripId: trip._id }).sort({ at: 1 }),
       Stop.find({ routeId: trip.routeId._id || trip.routeId }).sort({ order: 1 }),
     ]);
+
+    // Only school + home stops for kids on this trip (drop leftover route stops)
+    const homeIds = new Set(
+      (trip.kidIds || [])
+        .map((k) => (k.homeStopId?._id || k.homeStopId)?.toString())
+        .filter(Boolean)
+    );
+    const school = allStops.find((s) => s.type === 'school');
+    const homes = allStops.filter((s) => s.type !== 'school' && homeIds.has(s._id.toString()));
+    const stops = [...(school ? [school] : []), ...homes];
 
     res.json({ trip, events, stops });
   } catch (err) {

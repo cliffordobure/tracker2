@@ -60,7 +60,10 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
       return;
     }
     final trip = Map<String, dynamic>.from(selected!['trip'] as Map);
-    final stops = List<Map<String, dynamic>>.from(selected!['stops'] as List? ?? []);
+    final allStops = List<Map<String, dynamic>>.from(selected!['stops'] as List? ?? []);
+    final tripKids = List<Map<String, dynamic>>.from(trip['kidIds'] as List? ?? []);
+    final stops = stopsForTripKids(allStops, tripKids);
+    selected!['stops'] = stops;
     final ordered = orderedStops(stops, trip['direction'] as String?);
     routePoints = await fetchRoadRoute(stopLatLngs(ordered));
     bus = latLngFrom(trip['latestLocation']) ??

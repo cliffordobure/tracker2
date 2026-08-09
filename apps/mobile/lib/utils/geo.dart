@@ -10,8 +10,49 @@ List<Map<String, dynamic>> orderedStops(
     ..sort((a, b) => ((a['order'] ?? 0) as num).compareTo((b['order'] ?? 0) as num));
   final homes = list.where((s) => s['type'] != 'school').toList()
     ..sort((a, b) => ((a['order'] ?? 0) as num).compareTo((b['order'] ?? 0) as num));
-  if (direction == 'to_home') return [...school, ...homes];
-  return [...homes, ...school];
+  // Only one school pin on the map
+  final schoolOne = school.isEmpty ? <Map<String, dynamic>>[] : [school.first];
+  if (direction == 'to_home') return [...schoolOne, ...homes];
+  return [...homes, ...schoolOne];
+}
+
+/// Keep school + boarding/drop stops for [kids] on this trip (not every old route stop).
+List<Map<String, dynamic>> stopsForTripKids(
+  List<Map<String, dynamic>> stops,
+  List<Map<String, dynamic>> kids,
+) {
+  final homeIds = <String>{};
+  for (final kid in kids) {
+    final raw = kid['homeStopId'];
+    final id = raw is Map ? raw['_id']?.toString() : raw?.toString();
+    if (id != null && id.isNotEmpty) homeIds.add(id);
+  }
+
+  final school = stops.where((s) => s['type'] == 'school').toList()
+    ..sort((a, b) => ((a['order'] ?? 0) as num).compareTo((b['order'] ?? 0) as num));
+  final homes = stops.where((s) {
+    if (s['type'] == 'school') return false;
+    final id = s['_id']?.toString();
+    return id != null && homeIds.contains(id);
+  }).toList()
+    ..sort((a, b) => ((a['order'] ?? 0) as num).compareTo((b['order'] ?? 0) as num));
+
+  // Dedupe homes that land on nearly the same point
+  final deduped = <Map<String, dynamic>>[];
+  for (final stop in homes) {
+    final loc = latLngFrom(stop['location']);
+    if (loc == null) continue;
+    final near = deduped.any((kept) {
+      final kLoc = latLngFrom(kept['location']);
+      return kLoc != null && distanceMeters(kLoc, loc) < 35;
+    });
+    if (!near) deduped.add(stop);
+  }
+
+  return [
+    if (school.isNotEmpty) school.first,
+    ...deduped,
+  ];
 }
 
 LatLng? latLngFrom(dynamic location) {
