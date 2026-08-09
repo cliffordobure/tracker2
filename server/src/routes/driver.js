@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { DriverProfile, Route, Stop, Kid, Trip } from '../models/index.js';
+import { DriverProfile, Route, Stop, Kid, Trip, Notification } from '../models/index.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 
 const router = Router();
@@ -131,6 +131,34 @@ router.get('/trips/active', async (req, res) => {
       .populate('busId', 'plate label seats')
       .populate('kidIds');
     res.json({ trip });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/notifications', async (req, res) => {
+  try {
+    const notifications = await Notification.find({ userId: req.user.id })
+      .sort({ createdAt: -1 })
+      .limit(50);
+    res.json({ notifications });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/notifications/read', async (req, res) => {
+  try {
+    const { ids } = req.body || {};
+    if (Array.isArray(ids) && ids.length) {
+      await Notification.updateMany(
+        { _id: { $in: ids }, userId: req.user.id },
+        { $set: { read: true } }
+      );
+    } else {
+      await Notification.updateMany({ userId: req.user.id, read: false }, { $set: { read: true } });
+    }
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

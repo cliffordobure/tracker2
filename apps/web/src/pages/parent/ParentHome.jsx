@@ -22,6 +22,9 @@ export default function ParentHome() {
   const [driverLocation, setDriverLocation] = useState(null);
   const [error, setError] = useState('');
   const [sheetTab, setSheetTab] = useState('ride');
+  const [lateNote, setLateNote] = useState('');
+  const [lateKidId, setLateKidId] = useState('');
+  const [lateBusy, setLateBusy] = useState(false);
   const selectedRef = useRef(null);
 
   useEffect(() => {
@@ -132,6 +135,30 @@ export default function ParentHome() {
   const markRead = async () => {
     await api('/parent/notifications/read', { method: 'POST', body: {} });
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+  };
+
+  const requestLatePickup = async (kidId) => {
+    if (!kidId || lateBusy) return;
+    setLateBusy(true);
+    setError('');
+    try {
+      await api('/parent/late-pickup-request', {
+        method: 'POST',
+        body: {
+          kidId,
+          message: lateNote,
+          tripId: selected?.trip?._id,
+        },
+      });
+      setLateNote('');
+      setLateKidId('');
+      showToast('Late pickup request sent to the driver');
+    } catch (e) {
+      setError(e.message);
+      showToast(e.message, 'error');
+    } finally {
+      setLateBusy(false);
+    }
   };
 
   const onBus = selected ? anyKidOnBus(selected.events, selected.myKids) : false;
@@ -247,21 +274,68 @@ export default function ParentHome() {
                         String(e.kidId?._id || e.kidId) === String(kid._id) &&
                         e.type === 'dropped_off'
                     );
+                    const waiting = !picked && !dropped;
+                    const composing = lateKidId === kid._id;
                     return (
-                      <li key={kid._id} className="kid-row">
-                        <div>
-                          <strong>{kid.name}</strong>
-                          <div className="muted">
-                            {dropped
-                              ? 'Dropped off'
-                              : picked
-                                ? 'On the bus · tracking'
-                                : 'Waiting for pickup'}
+                      <li key={kid._id} className="kid-row kid-row--stack">
+                        <div className="kid-row-main">
+                          <div>
+                            <strong>{kid.name}</strong>
+                            <div className="muted">
+                              {dropped
+                                ? 'Dropped off'
+                                : picked
+                                  ? 'On the bus · tracking'
+                                  : 'Waiting for pickup'}
+                            </div>
                           </div>
+                          <span className={`pill ${picked && !dropped ? 'pill-live' : ''}`}>
+                            {dropped ? 'Done' : picked ? 'Live' : 'Wait'}
+                          </span>
                         </div>
-                        <span className={`pill ${picked && !dropped ? 'pill-live' : ''}`}>
-                          {dropped ? 'Done' : picked ? 'Live' : 'Wait'}
-                        </span>
+                        {waiting && (
+                          <div className="late-pickup">
+                            {!composing ? (
+                              <button
+                                type="button"
+                                className="btn btn-secondary"
+                                onClick={() => {
+                                  setLateKidId(kid._id);
+                                  setLateNote('');
+                                }}
+                              >
+                                Request late pickup
+                              </button>
+                            ) : (
+                              <>
+                                <textarea
+                                  rows={2}
+                                  placeholder="Optional note for the driver (e.g. running 10 minutes late)"
+                                  value={lateNote}
+                                  onChange={(e) => setLateNote(e.target.value)}
+                                />
+                                <div className="row-actions">
+                                  <button
+                                    type="button"
+                                    className="btn btn-ghost"
+                                    onClick={() => setLateKidId('')}
+                                    disabled={lateBusy}
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn btn-primary"
+                                    onClick={() => requestLatePickup(kid._id)}
+                                    disabled={lateBusy}
+                                  >
+                                    {lateBusy ? 'Sending…' : 'Send to driver'}
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )}
                       </li>
                     );
                   })}
@@ -301,6 +375,47 @@ export default function ParentHome() {
                   <strong>{k.name}</strong>
                   <div className="muted">
                     {k.schoolId?.name} · {k.routeId?.name} · {k.homeStopId?.name}
+                  </div>
+                  <div className="late-pickup" style={{ marginTop: '0.65rem' }}>
+                    {lateKidId === k._id ? (
+                      <>
+                        <textarea
+                          rows={2}
+                          placeholder="Optional note for the driver"
+                          value={lateNote}
+                          onChange={(e) => setLateNote(e.target.value)}
+                        />
+                        <div className="row-actions">
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            onClick={() => setLateKidId('')}
+                            disabled={lateBusy}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-primary"
+                            onClick={() => requestLatePickup(k._id)}
+                            disabled={lateBusy}
+                          >
+                            {lateBusy ? 'Sending…' : 'Send late pickup request'}
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => {
+                          setLateKidId(k._id);
+                          setLateNote('');
+                        }}
+                      >
+                        Request late pickup
+                      </button>
+                    )}
                   </div>
                 </li>
               ))}

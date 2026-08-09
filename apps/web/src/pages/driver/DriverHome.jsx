@@ -10,6 +10,8 @@ import {
   orderedStopsForDirection,
   stopsForTripKids,
 } from '../../lib/geo';
+import { notificationTypeLabel } from '../../lib/webPush';
+
 const APPROACH_M = 180;
 const ARRIVE_M = 60;
 
@@ -31,6 +33,7 @@ export default function DriverHome() {
   const [error, setError] = useState('');
   const [visitedStopIds, setVisitedStopIds] = useState([]);
   const [routeCoords, setRouteCoords] = useState([]);
+  const [notifications, setNotifications] = useState([]);
   const watchRef = useRef(null);
   const notifiedRef = useRef(new Set());
   const visitedRef = useRef([]);
@@ -86,12 +89,14 @@ export default function DriverHome() {
   );
 
   const loadRoutes = useCallback(async () => {
-    const [routesData, todayData] = await Promise.all([
+    const [routesData, todayData, notifData] = await Promise.all([
       api('/driver/routes'),
       api('/driver/trips/today'),
+      api('/driver/notifications'),
     ]);
     setRoutes(routesData.routes);
     setTodayTrips(todayData.trips || []);
+    setNotifications(notifData.notifications || []);
     const active =
       (todayData.trips || []).find((t) => t.status === 'active') ||
       routesData.routes.find((r) => r.activeTrip)?.activeTrip;
@@ -110,11 +115,26 @@ export default function DriverHome() {
   }, [loadRoutes]);
 
   useEffect(() => {
+    const socket = connectSocket();
+    if (!socket) return undefined;
+    const onNotif = (n) => {
+      setNotifications((prev) => [n, ...prev]);
+    };
+    socket.on('notification:new', onNotif);
+    return () => socket.off('notification:new', onNotif);
+  }, []);
+
+  useEffect(() => {
     if (!trip?._id) return undefined;
     const socket = connectSocket();
     socket?.emit('trip:join', trip._id);
     return () => socket?.emit('trip:leave', trip._id);
   }, [trip?._id]);
+
+  const markNotifsRead = async () => {
+    await api('/driver/notifications/read', { method: 'POST', body: {} });
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+  };
 
   const maybeNotifyStops = useCallback(
     (location) => {
@@ -292,9 +312,36 @@ export default function DriverHome() {
 
   const kids = trip?.kidIds || [];
 
+  const unreadAlerts = notifications.filter((n) => !n.read).length;
+
   return (
     <div className="stack">
       {error && <div className="alert">{error}</div>}
+
+      <div className="panel driver-alerts">
+        <div className="panel-head">
+          <div>
+            <h2>Parent alerts {unreadAlerts ? `(${unreadAlerts})` : ''}</h2>
+            <p className="muted">Late pickup requests and other parent messages</p>
+          </div>
+          {!!notifications.length && (
+            <button type="button" className="btn btn-ghost" onClick={markNotifsRead}>
+              Mark all read
+            </button>
+          )}
+        </div>
+        <ul className="notif-list">
+          {notifications.slice(0, 8).map((n) => (
+            <li key={n.id || n._id} className={n.read ? 'read' : 'unread'}>
+              <span className="pill">{notificationTypeLabel(n.type)}</span>
+              <strong>{n.title}</strong>
+              <p>{n.body}</p>
+              <small>{new Date(n.createdAt).toLocaleString()}</small>
+            </li>
+          ))}
+          {!notifications.length && <li className="muted">No parent alerts yet.</li>}
+        </ul>
+      </div>
 
       {!trip && (
         <div className="stack">

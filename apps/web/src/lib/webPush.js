@@ -82,6 +82,8 @@ export function notificationTypeLabel(type) {
       return 'Cancelled';
     case 'trip_assigned':
       return 'Assigned';
+    case 'late_pickup_request':
+      return 'Late pickup';
     default:
       return type || 'Alert';
   }

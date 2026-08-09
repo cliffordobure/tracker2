@@ -12,6 +12,7 @@ const notificationSchema = new mongoose.Schema(
         'trip_completed',
         'trip_cancelled',
         'trip_assigned',
+        'late_pickup_request',
       ],
       required: true,
     },

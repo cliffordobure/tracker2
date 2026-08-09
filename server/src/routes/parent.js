@@ -7,9 +7,12 @@ import {
   Stop,
   DriverProfile,
   DeviceToken,
+  User,
 } from '../models/index.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { getVapidPublicKey } from '../services/push.js';
+import { createAndEmitNotifications, NOTIFICATION_TYPES } from '../services/notifications.js';
+import { getIO } from '../socket.js';
 
 const router = Router();
 router.use(authenticate, requireRole('parent'));
@@ -112,6 +115,102 @@ router.post('/notifications/read', async (req, res) => {
       await Notification.updateMany({ userId: req.user.id, read: false }, { $set: { read: true } });
     }
     res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+function dayBounds(d = new Date()) {
+  const start = new Date(d);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(d);
+  end.setHours(23, 59, 59, 999);
+  return { start, end };
+}
+
+/** Parent requests a late pickup — notifies the assigned driver. */
+router.post('/late-pickup-request', async (req, res) => {
+  try {
+    const { kidId, message, tripId } = req.body || {};
+    if (!kidId) return res.status(400).json({ error: 'kidId is required' });
+
+    const kid = await Kid.findOne({ _id: kidId, parentIds: req.user.id, active: true });
+    if (!kid) return res.status(404).json({ error: 'Child not found' });
+
+    const parent = await User.findById(req.user.id).select('name phone');
+    const note = typeof message === 'string' ? message.trim().slice(0, 280) : '';
+
+    let trip = null;
+    if (tripId) {
+      trip = await Trip.findOne({
+        _id: tripId,
+        kidIds: kid._id,
+        status: { $in: ['scheduled', 'active'] },
+      });
+    }
+    if (!trip) {
+      trip = await Trip.findOne({
+        kidIds: kid._id,
+        status: 'active',
+      }).sort({ startedAt: -1 });
+    }
+    if (!trip) {
+      const { start, end } = dayBounds();
+      trip = await Trip.findOne({
+        kidIds: kid._id,
+        status: 'scheduled',
+        $or: [
+          { serviceDate: { $gte: start, $lte: end } },
+          { scheduledFor: { $gte: start, $lte: end } },
+        ],
+      }).sort({ sequence: 1, scheduledFor: 1 });
+    }
+    if (!trip?.driverId) {
+      return res.status(409).json({
+        error: 'No driver trip found for this child yet. Try again when a trip is scheduled or active.',
+      });
+    }
+
+    const recent = await Notification.findOne({
+      userId: trip.driverId,
+      kidId: kid._id,
+      type: NOTIFICATION_TYPES.LATE_PICKUP_REQUEST,
+      createdAt: { $gte: new Date(Date.now() - 2 * 60 * 1000) },
+    });
+    if (recent) {
+      return res.status(429).json({
+        error: 'Late pickup already requested a moment ago. Please wait before sending again.',
+      });
+    }
+
+    const parentName = parent?.name || 'A parent';
+    const bodyParts = [
+      `${parentName} requests a late pickup for ${kid.name}.`,
+      note ? `Note: ${note}` : null,
+      parent?.phone ? `Phone: ${parent.phone}` : null,
+    ].filter(Boolean);
+
+    const [created] = await createAndEmitNotifications(getIO(), [
+      {
+        userId: trip.driverId,
+        type: NOTIFICATION_TYPES.LATE_PICKUP_REQUEST,
+        title: 'Late pickup request',
+        body: bodyParts.join(' '),
+        tripId: trip._id,
+        kidId: kid._id,
+      },
+    ]);
+
+    res.status(201).json({
+      ok: true,
+      notification: created
+        ? {
+            id: created._id.toString(),
+            title: created.title,
+            body: created.body,
+          }
+        : null,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

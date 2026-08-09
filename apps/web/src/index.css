@@ -784,6 +784,43 @@ th {
   color: #047857;
 }
 
+.kid-row--stack {
+  display: grid !important;
+  gap: 0.65rem;
+}
+
+.kid-row-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.late-pickup {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.late-pickup textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.65rem 0.75rem;
+  font: inherit;
+  resize: vertical;
+  background: #f8fafc;
+}
+
+.driver-alerts {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.driver-alerts .notif-list {
+  max-height: 220px;
+  overflow: auto;
+}
+
 .marker-stop {
   display: grid;
   justify-items: center;
