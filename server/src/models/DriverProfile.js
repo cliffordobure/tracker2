@@ -6,6 +6,7 @@ const driverProfileSchema = new mongoose.Schema(
     vehiclePlate: { type: String, default: '' },
     vehicleModel: { type: String, default: '' },
     vehicleColor: { type: String, default: '' },
+    busId: { type: mongoose.Schema.Types.ObjectId, ref: 'Bus', default: null },
     assignedRouteIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Route' }],
   },
   { timestamps: true }

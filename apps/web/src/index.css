@@ -196,6 +196,64 @@ select {
   padding: 0.75rem 1rem;
 }
 
+.alert-ok {
+  background: #e5f4ef;
+  color: var(--accent);
+  border: 1px solid rgba(15, 106, 86, 0.2);
+}
+
+.wizard-steps {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.wizard-step {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  cursor: pointer;
+}
+
+.wizard-step.active {
+  background: var(--accent);
+  color: #f7f3ea;
+  border-color: var(--accent);
+}
+
+.wizard-step.done {
+  background: rgba(15, 106, 86, 0.15);
+  border-color: var(--accent);
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+  margin-bottom: 0.85rem;
+}
+
+.segmented button {
+  border: 1px solid var(--line);
+  background: transparent;
+  border-radius: 10px;
+  padding: 0.55rem 0.7rem;
+  cursor: pointer;
+}
+
+.segmented button.active {
+  background: rgba(15, 106, 86, 0.12);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.dispatch-preview {
+  font-weight: 600;
+  color: var(--ink);
+}
+
 .app-shell {
   min-height: 100vh;
   display: grid;

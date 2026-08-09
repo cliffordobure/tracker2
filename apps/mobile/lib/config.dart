@@ -6,8 +6,8 @@ class AppConfig {
   /// flutter run --dart-define=MAPBOX_TOKEN=pk.your_token
   static const mapboxToken = String.fromEnvironment('MAPBOX_TOKEN');
 
-  /// Uber/Bolt-like Mapbox style
-  static const mapStyleId = 'mapbox/navigation-day-v1';
+  /// Colorful streets map (not gray light style)
+  static const mapStyleId = 'mapbox/streets-v12';
 
   static bool get hasMapboxToken => mapboxToken.isNotEmpty;
 

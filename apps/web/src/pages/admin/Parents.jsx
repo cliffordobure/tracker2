@@ -29,6 +29,7 @@ export default function Parents() {
     <div className="split">
       <div className="stack">
         <h2>Parents</h2>
+        <p className="lede">Parents for your school. You can also create them while onboarding a student.</p>
         {error && <div className="alert">{error}</div>}
         <div className="table-wrap">
           <table>

@@ -8,7 +8,13 @@ const router = Router();
 
 function signToken(user) {
   return jwt.sign(
-    { id: user._id.toString(), role: user.role, email: user.email, name: user.name },
+    {
+      id: user._id.toString(),
+      role: user.role,
+      email: user.email,
+      name: user.name,
+      schoolId: user.schoolId?.toString?.() || user.schoolId || null,
+    },
     process.env.JWT_SECRET,
     { expiresIn: '7d' }
   );
@@ -38,16 +44,29 @@ router.post('/login', async (req, res) => {
 
 router.post('/register', authenticate, async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
+    if (!['super_admin', 'school_admin'].includes(req.user.role)) {
       return res.status(403).json({ error: 'Only admins can register users' });
     }
 
-    const { email, password, name, role, phone } = req.body;
+    const { email, password, name, role, phone, schoolId } = req.body;
     if (!email || !password || !name || !role) {
       return res.status(400).json({ error: 'email, password, name, and role are required' });
     }
-    if (!['admin', 'driver', 'parent', 'teacher'].includes(role)) {
+
+    const allowed =
+      req.user.role === 'super_admin'
+        ? ['super_admin', 'school_admin', 'driver', 'parent', 'teacher']
+        : ['driver', 'parent', 'teacher'];
+    if (!allowed.includes(role)) {
       return res.status(400).json({ error: 'Invalid role' });
+    }
+
+    let resolvedSchoolId = schoolId || null;
+    if (req.user.role === 'school_admin') {
+      resolvedSchoolId = req.user.schoolId;
+    }
+    if (['school_admin', 'driver', 'parent', 'teacher'].includes(role) && !resolvedSchoolId) {
+      return res.status(400).json({ error: 'schoolId is required for this role' });
     }
 
     const exists = await User.findOne({ email: email.toLowerCase().trim() });
@@ -60,6 +79,7 @@ router.post('/register', authenticate, async (req, res) => {
       name,
       role,
       phone: phone || '',
+      schoolId: resolvedSchoolId,
     });
 
     return res.status(201).json({ user: user.toSafeJSON() });

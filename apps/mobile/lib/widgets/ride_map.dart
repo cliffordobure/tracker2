@@ -3,57 +3,187 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../config.dart';
 import '../theme/app_theme.dart';
+import '../utils/geo.dart';
+import 'bolt_car_marker.dart';
 
-class RideMap extends StatelessWidget {
+/// Bolt-style map with smoothly animated vehicle + camera follow.
+class RideMap extends StatefulWidget {
   const RideMap({
     super.key,
     required this.center,
     this.busLocation,
+    this.busHeading,
     this.routePoints = const [],
     this.stops = const [],
-    this.zoom = 14.5,
+    this.zoom = 18.1,
+    this.followBus = true,
+    this.followNonce = 0,
+    this.continuous = false,
     this.mapController,
   });
 
+  /// Close street zoom so road movement is obvious (Bolt-like).
+  static const streetZoom = 18.1;
+
   final LatLng center;
   final LatLng? busLocation;
+  final double? busHeading;
   final List<LatLng> routePoints;
   final List<Map<String, dynamic>> stops;
   final double zoom;
+  final bool followBus;
+  final int followNonce;
+  /// When true, apply positions every frame (no stepped hop animation).
+  final bool continuous;
   final MapController? mapController;
 
   @override
-  Widget build(BuildContext context) {
-    final markers = <Marker>[
-      ...stops.map((stop) {
-        final loc = stop['location'] as Map? ?? {};
-        final lat = (loc['lat'] as num?)?.toDouble();
-        final lng = (loc['lng'] as num?)?.toDouble();
-        if (lat == null || lng == null) {
-          return Marker(point: center, child: const SizedBox.shrink());
+  State<RideMap> createState() => _RideMapState();
+}
+
+class _RideMapState extends State<RideMap> with TickerProviderStateMixin {
+  late final MapController _controller;
+  late final AnimationController _moveCtrl;
+  late final AnimationController _pulseCtrl;
+
+  LatLng? _displayBus;
+  LatLng? _from;
+  LatLng? _to;
+  double _bearing = 0;
+  double _fromBearing = 0;
+  double _toBearing = 0;
+  bool _userPanning = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = widget.mapController ?? MapController();
+    _displayBus = widget.busLocation ?? widget.center;
+
+    _moveCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 750),
+    )..addListener(_onMoveTick);
+
+    _pulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1600),
+    )..repeat();
+
+    if (widget.busLocation != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _controller.move(widget.busLocation!, _followZoom);
+      });
+    }
+  }
+
+  double get _followZoom =>
+      widget.zoom < RideMap.streetZoom ? RideMap.streetZoom : widget.zoom;
+
+  @override
+  void didUpdateWidget(covariant RideMap oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.followNonce != oldWidget.followNonce) {
+      _userPanning = false;
+      final bus = _displayBus ?? widget.busLocation;
+      if (bus != null) {
+        _controller.move(bus, _followZoom);
+      }
+    }
+    final next = widget.busLocation;
+    if (next == null) return;
+
+    if (oldWidget.busLocation == null || _displayBus == null) {
+      setState(() {
+        _displayBus = next;
+        if (widget.busHeading != null) _bearing = widget.busHeading!;
+      });
+      _controller.move(next, _followZoom);
+      return;
+    }
+
+    if ((next.latitude - _displayBus!.latitude).abs() < 1e-7 &&
+        (next.longitude - _displayBus!.longitude).abs() < 1e-7) {
+      return;
+    }
+
+    // Continuous test-drive / live stream: glide every frame, no stepped hops
+    if (widget.continuous) {
+      _moveCtrl.stop();
+      setState(() {
+        if (widget.busHeading != null) {
+          _bearing = widget.busHeading!;
+        } else if (_displayBus != null) {
+          _bearing = bearingDegrees(_displayBus!, next);
         }
-        final isSchool = stop['type'] == 'school';
-        return Marker(
-          width: 44,
-          height: 44,
-          point: LatLng(lat, lng),
-          child: _StopPin(label: '${(stop['order'] ?? 0)}', school: isSchool),
-        );
-      }),
-      if (busLocation != null)
-        Marker(
-          width: 56,
-          height: 56,
-          point: busLocation!,
-          child: const _BusMarker(),
-        ),
-    ];
+        _displayBus = next;
+      });
+      if (widget.followBus && !_userPanning) {
+        _controller.move(next, _followZoom);
+      }
+      return;
+    }
+
+    _animateTo(next);
+  }
+
+  void _animateTo(LatLng next) {
+    _from = _displayBus ?? next;
+    _to = next;
+    _fromBearing = _bearing;
+    _toBearing = bearingDegrees(_from!, _to!);
+
+    final dist = distanceMeters(_from!, _to!);
+    final turn = shortestAngleDelta(_fromBearing, _toBearing).abs();
+    // Slow down on corners / short segments so it eases around bends
+    final ms = turn > 25
+        ? 1100
+        : dist < 18
+            ? 900
+            : 750;
+
+    _moveCtrl
+      ..duration = Duration(milliseconds: ms)
+      ..forward(from: 0);
+  }
+
+  void _onMoveTick() {
+    if (_from == null || _to == null) return;
+    // Linear = constant road speed (Bolt-like), not ease that rushes corners
+    final t = _moveCtrl.value;
+    final pos = lerpLatLng(_from!, _to!, t);
+    final bearing = _fromBearing + shortestAngleDelta(_fromBearing, _toBearing) * t;
+    setState(() {
+      _displayBus = pos;
+      _bearing = bearing;
+    });
+    if (widget.followBus && !_userPanning) {
+      _controller.move(pos, _followZoom);
+    }
+  }
+
+  @override
+  void dispose() {
+    _moveCtrl.dispose();
+    _pulseCtrl.dispose();
+    if (widget.mapController == null) _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bus = _displayBus;
 
     return FlutterMap(
-      mapController: mapController,
+      mapController: _controller,
       options: MapOptions(
-        initialCenter: busLocation ?? center,
-        initialZoom: zoom,
+        initialCenter: bus ?? widget.center,
+        initialZoom: _followZoom,
+        minZoom: 12,
+        maxZoom: 19.5,
+        onPositionChanged: (pos, hasGesture) {
+          if (hasGesture) _userPanning = true;
+        },
         interactionOptions: const InteractionOptions(
           flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
         ),
@@ -67,81 +197,79 @@ class RideMap extends StatelessWidget {
           tileDimension: 512,
           zoomOffset: -1,
         ),
-        if (routePoints.length >= 2)
+        if (widget.routePoints.length >= 2)
           PolylineLayer(
             polylines: [
               Polyline(
-                points: routePoints,
-                strokeWidth: 10,
-                color: AppColors.route.withValues(alpha: 0.25),
-                borderStrokeWidth: 0,
+                points: widget.routePoints,
+                strokeWidth: 12,
+                color: AppColors.routeGlow.withValues(alpha: 0.22),
               ),
               Polyline(
-                points: routePoints,
-                strokeWidth: 5,
+                points: widget.routePoints,
+                strokeWidth: 5.5,
                 color: AppColors.route,
+                borderStrokeWidth: 1.5,
+                borderColor: Colors.white.withValues(alpha: 0.85),
               ),
             ],
           ),
-        MarkerLayer(markers: markers),
+        MarkerLayer(
+          markers: [
+            for (final stop in widget.stops)
+              if (latLngFrom(stop['location']) != null)
+                Marker(
+                  width: 36,
+                  height: 36,
+                  point: latLngFrom(stop['location'])!,
+                  child: _StopDot(school: stop['type'] == 'school'),
+                ),
+            if (bus != null)
+              Marker(
+                width: 88,
+                height: 88,
+                point: bus,
+                child: AnimatedBuilder(
+                  animation: _pulseCtrl,
+                  builder: (_, _) => BoltCarMarker(
+                    bearing: _bearing,
+                    pulse: _pulseCtrl.value,
+                  ),
+                ),
+              ),
+          ],
+        ),
       ],
     );
   }
 }
 
-class _BusMarker extends StatelessWidget {
-  const _BusMarker();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        shape: BoxShape.circle,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.25),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        border: Border.all(color: AppColors.ink, width: 2),
-      ),
-      child: const Center(
-        child: Icon(Icons.directions_bus_filled_rounded, color: AppColors.ink, size: 26),
-      ),
-    );
-  }
-}
-
-class _StopPin extends StatelessWidget {
-  const _StopPin({required this.label, required this.school});
-  final String label;
+class _StopDot extends StatelessWidget {
+  const _StopDot({required this.school});
   final bool school;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: school ? AppColors.accent : const Color(0xFFEA580C),
+        color: school ? AppColors.accentDark : Colors.white,
         shape: BoxShape.circle,
-        border: Border.all(color: Colors.white, width: 2.5),
+        border: Border.all(
+          color: school ? Colors.white : AppColors.ink,
+          width: 2.5,
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.2),
+            color: Colors.black.withValues(alpha: 0.18),
             blurRadius: 8,
-            offset: const Offset(0, 3),
+            offset: const Offset(0, 2),
           ),
         ],
       ),
-      child: Text(
-        label,
-        style: const TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.w800,
-          fontSize: 11,
-        ),
+      child: Icon(
+        school ? Icons.school_rounded : Icons.circle,
+        size: school ? 14 : 8,
+        color: school ? Colors.white : AppColors.ink,
       ),
     );
   }

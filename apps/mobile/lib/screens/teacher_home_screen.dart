@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import '../services/auth_state.dart';
@@ -17,7 +16,6 @@ class TeacherHomeScreen extends StatefulWidget {
 }
 
 class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
-  final mapController = MapController();
   Map<String, dynamic>? school;
   List<Map<String, dynamic>> kids = [];
   List<Map<String, dynamic>> activeTrips = [];
@@ -26,6 +24,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   LatLng? bus;
   bool loading = true;
   String? error;
+  int followNonce = 0;
 
   @override
   void initState() {
@@ -71,10 +70,10 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     auth.sockets.joinTrip(tripId);
     auth.sockets.socket?.off('location:update');
     auth.sockets.socket?.on('location:update', (data) {
-      if (data is Map && data['tripId'] == tripId) {
-        final next = LatLng((data['lat'] as num).toDouble(), (data['lng'] as num).toDouble());
-        setState(() => bus = next);
-        mapController.move(next, mapController.camera.zoom);
+      if (data is Map && data['tripId'] == tripId && mounted) {
+        setState(() {
+          bus = LatLng((data['lat'] as num).toDouble(), (data['lng'] as num).toDouble());
+        });
       }
     });
   }
@@ -92,42 +91,40 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
       body: Stack(
         children: [
           RideMap(
-            mapController: mapController,
             center: center,
             busLocation: bus,
             routePoints: routePoints,
             stops: stops,
+            followNonce: followNonce,
           ),
           SafeArea(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
               child: Row(
                 children: [
-                  _IconBtn(icon: Icons.logout_rounded, onTap: auth.logout),
-                  const Spacer(),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(24),
-                      boxShadow: [
-                        BoxShadow(color: Colors.black.withValues(alpha: 0.12), blurRadius: 16),
-                      ],
-                    ),
-                    child: Text(
-                      school?['name'] ?? 'Teacher',
-                      style: const TextStyle(fontWeight: FontWeight.w700),
+                  RoundMapButton(icon: Icons.menu_rounded, onTap: auth.logout),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FloatingPill(
+                      child: Text(
+                        school?['name'] ?? 'School rides',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  _IconBtn(icon: Icons.refresh_rounded, onTap: _load),
+                  const SizedBox(width: 10),
+                  RoundMapButton(
+                    icon: Icons.my_location_rounded,
+                    onTap: () => setState(() => followNonce++),
+                  ),
                 ],
               ),
             ),
           ),
           RideSheet(
             child: loading
-                ? const Center(child: CircularProgressIndicator())
+                ? const Center(child: CircularProgressIndicator(color: AppColors.ink))
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -135,33 +132,32 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                         Text(error!, style: const TextStyle(color: AppColors.danger)),
                         const SizedBox(height: 8),
                         const Text(
-                          'If this fails on the hosted API, redeploy the backend with the teacher routes.',
+                          'Redeploy backend for teacher routes if this fails on Render.',
                           style: TextStyle(color: AppColors.muted, fontSize: 12),
                         ),
                         const SizedBox(height: 12),
                       ],
-                      const Text(
-                        'School rides',
-                        style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
+                      Text(
+                        trip == null ? 'No buses live' : 'Live school transport',
+                        style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -0.5),
                       ),
                       const SizedBox(height: 6),
                       Text(
                         trip == null
-                            ? '${kids.length} kids · no active buses right now'
-                            : '${trip['routeId'] is Map ? trip['routeId']['name'] : 'Route'} is live',
+                            ? '${kids.length} students · waiting for drivers'
+                            : '${trip['routeId'] is Map ? trip['routeId']['name'] : 'Route'} is moving now',
                         style: const TextStyle(color: AppColors.muted),
                       ),
-                      const SizedBox(height: 14),
-                      if (activeTrips.length > 1)
+                      if (activeTrips.length > 1) ...[
+                        const SizedBox(height: 14),
                         Wrap(
                           spacing: 8,
                           children: activeTrips.map((t) {
                             final tr = Map<String, dynamic>.from(t['trip'] as Map);
                             final selectedId = trip?['_id'];
-                            final id = tr['_id'];
                             return ChoiceChip(
+                              selected: selectedId == tr['_id'],
                               label: Text(tr['routeId'] is Map ? tr['routeId']['name'] : 'Trip'),
-                              selected: selectedId == id,
                               onSelected: (_) async {
                                 setState(() => selected = t);
                                 await _bindSelected();
@@ -170,16 +166,27 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                             );
                           }).toList(),
                         ),
-                      const SizedBox(height: 12),
-                      Text('${kids.length} students on transport',
-                          style: const TextStyle(fontWeight: FontWeight.w700)),
+                      ],
+                      const SizedBox(height: 16),
+                      BoltPrimaryButton(label: 'Refresh', onPressed: _load),
+                      const SizedBox(height: 16),
+                      Text(
+                        '${kids.length} students',
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+                      ),
                       const SizedBox(height: 8),
-                      ...kids.take(8).map(
+                      ...kids.take(10).map(
                             (k) => ListTile(
                               contentPadding: EdgeInsets.zero,
                               leading: CircleAvatar(
-                                backgroundColor: AppColors.route.withValues(alpha: 0.12),
-                                child: const Icon(Icons.school, color: AppColors.route, size: 18),
+                                backgroundColor: AppColors.softBg,
+                                child: Text(
+                                  ((k['name'] as String?)?.isNotEmpty == true
+                                          ? (k['name'] as String)[0]
+                                          : '?')
+                                      .toUpperCase(),
+                                  style: const TextStyle(fontWeight: FontWeight.w800),
+                                ),
                               ),
                               title: Text(k['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
                               subtitle: Text(k['grade'] ?? ''),
@@ -189,26 +196,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                   ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _IconBtn extends StatelessWidget {
-  const _IconBtn({required this.icon, required this.onTap});
-  final IconData icon;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white,
-      shape: const CircleBorder(),
-      elevation: 3,
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: onTap,
-        child: SizedBox(width: 44, height: 44, child: Icon(icon, size: 20)),
       ),
     );
   }

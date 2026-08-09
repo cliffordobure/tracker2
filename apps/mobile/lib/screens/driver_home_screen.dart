@@ -1,6 +1,6 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
@@ -18,8 +18,8 @@ class DriverHomeScreen extends StatefulWidget {
   State<DriverHomeScreen> createState() => _DriverHomeScreenState();
 }
 
-class _DriverHomeScreenState extends State<DriverHomeScreen> {
-  final mapController = MapController();
+class _DriverHomeScreenState extends State<DriverHomeScreen>
+    with SingleTickerProviderStateMixin {
   List<Map<String, dynamic>> routes = [];
   Map<String, dynamic>? trip;
   List<Map<String, dynamic>> kids = [];
@@ -27,10 +27,17 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   List<Map<String, dynamic>> events = [];
   List<LatLng> routePoints = [];
   LatLng? bus;
+  double? busHeading;
   int routeIndex = 0;
+  int followNonce = 0;
   bool loading = true;
+  bool testDriving = false;
   String? message;
   StreamSubscription<Position>? gpsSub;
+  AnimationController? _driveCtrl;
+  Timer? _serverPushTimer;
+  List<LatLng> _drivePath = const [];
+  double _driveLength = 0;
 
   @override
   void initState() {
@@ -40,8 +47,17 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
 
   @override
   void dispose() {
+    _stopTestDrive(resetFlag: false);
     gpsSub?.cancel();
     super.dispose();
+  }
+
+  void _stopTestDrive({bool resetFlag = true}) {
+    _driveCtrl?.dispose();
+    _driveCtrl = null;
+    _serverPushTimer?.cancel();
+    _serverPushTimer = null;
+    if (resetFlag) testDriving = false;
   }
 
   Future<void> _load() async {
@@ -85,8 +101,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
         'direction': direction,
       });
       await _openTrip(Map<String, dynamic>.from(created['trip'] as Map));
-      message = 'Trip started';
-      setState(() {});
+      setState(() => message = 'Trip started');
     } catch (e) {
       setState(() => message = e.toString().replaceFirst('Exception: ', ''));
     }
@@ -103,36 +118,133 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     gpsSub = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.high,
-        distanceFilter: 8,
+        distanceFilter: 5,
       ),
     ).listen((pos) async {
-      final next = LatLng(pos.latitude, pos.longitude);
-      setState(() => bus = next);
-      mapController.move(next, mapController.camera.zoom);
-      if (trip != null) {
-        try {
-          await auth.api.post('/trips/${trip!['_id']}/location', {
-            'lat': next.latitude,
-            'lng': next.longitude,
-            'heading': pos.heading,
-            'speed': pos.speed,
-          });
-        } catch (_) {}
-      }
+      // Don't fight the test-drive animation with real GPS
+      if (!mounted || trip == null || testDriving) return;
+      setState(() => bus = LatLng(pos.latitude, pos.longitude));
+      try {
+        await auth.api.post('/trips/${trip!['_id']}/location', {
+          'lat': pos.latitude,
+          'lng': pos.longitude,
+          'heading': pos.heading,
+          'speed': pos.speed,
+        });
+      } catch (_) {}
     });
   }
 
-  Future<void> _simulateAlongRoute() async {
-    if (trip == null || routePoints.length < 2) return;
-    final auth = context.read<AuthState>();
-    routeIndex = (routeIndex + 4).clamp(0, routePoints.length - 1);
-    final next = routePoints[routeIndex];
-    setState(() => bus = next);
-    mapController.move(next, 15.2);
-    await auth.api.post('/trips/${trip!['_id']}/location', {
-      'lat': next.latitude,
-      'lng': next.longitude,
+  /// Continuous ~1 km road drive (frame-by-frame along the polyline).
+  Future<void> _testDriveOneKm() async {
+    if (trip == null || testDriving) return;
+
+    final start = bus ??
+        (routePoints.isNotEmpty ? routePoints.first : null) ??
+        (stops.isNotEmpty ? latLngFrom(stops.first['location']) : null) ??
+        const LatLng(-1.3965, 36.7542);
+
+    setState(() {
+      testDriving = true;
+      bus = start;
+      followNonce++;
+      message = 'Loading road path…';
     });
+
+    var road = routePoints;
+    if (road.length < 5) {
+      final ordered = orderedStops(stops, trip!['direction'] as String?);
+      road = await fetchRoadRoute(stopLatLngs(ordered));
+      if (mounted && road.length >= 2) {
+        setState(() => routePoints = road);
+      }
+    }
+
+    var path = walkAlongRoad(road, start, meters: 1000);
+    if (path.length < 4) {
+      final bearing = road.length >= 2
+          ? bearingDegrees(road.first, road[math.min(8, road.length - 1)])
+          : 45.0;
+      final dest = destinationPoint(start, bearing, 1000);
+      final driven = await fetchRoadRoute([start, dest]);
+      path = walkAlongRoad(driven, start, meters: 1000);
+      if (path.isEmpty) path = driven;
+    }
+
+    if (path.length < 2) {
+      if (!mounted) return;
+      setState(() {
+        testDriving = false;
+        message = 'Could not build a road path for test drive';
+      });
+      return;
+    }
+
+    // Dense geometry for smooth corner following
+    path = densifyPath(path, stepMeters: 6);
+    _drivePath = path;
+    _driveLength = pathLengthMeters(path);
+    if (_driveLength < 20) {
+      setState(() {
+        testDriving = false;
+        message = 'Road path too short for test drive';
+      });
+      return;
+    }
+
+    // ~28 km/h average → slow enough to watch, still continuous
+    final durationMs = ((_driveLength / 1000) * 130000).round().clamp(45000, 180000);
+
+    _stopTestDrive(resetFlag: false);
+    _driveCtrl = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: durationMs),
+    );
+
+    final auth = context.read<AuthState>();
+
+    void applyProgress() {
+      if (!mounted || _driveCtrl == null) return;
+      final dist = _driveLength * Curves.linear.transform(_driveCtrl!.value);
+      final pos = pointAtDistance(_drivePath, dist);
+      final heading = bearingAtDistance(_drivePath, dist);
+      setState(() {
+        bus = pos;
+        busHeading = heading;
+      });
+    }
+
+    _driveCtrl!.addListener(applyProgress);
+    _driveCtrl!.addStatusListener((status) {
+      if (status == AnimationStatus.completed && mounted) {
+        _serverPushTimer?.cancel();
+        setState(() {
+          testDriving = false;
+          message = 'Test drive finished (1 km on road)';
+        });
+        _driveCtrl?.dispose();
+        _driveCtrl = null;
+      }
+    });
+
+    // Push location to API periodically (not every frame)
+    _serverPushTimer = Timer.periodic(const Duration(milliseconds: 900), (_) async {
+      if (!mounted || trip == null || bus == null) return;
+      try {
+        await auth.api.post('/trips/${trip!['_id']}/location', {
+          'lat': bus!.latitude,
+          'lng': bus!.longitude,
+          'heading': busHeading ?? 0,
+          'speed': 8.0,
+        });
+      } catch (_) {}
+    });
+
+    setState(() {
+      message = 'Test drive: continuous 1 km on road…';
+      followNonce++;
+    });
+    await _driveCtrl!.forward(from: 0);
   }
 
   bool _hasEvent(String kidId, String type) => events.any((e) {
@@ -144,18 +256,19 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     final auth = context.read<AuthState>();
     final res = await auth.api.post('/trips/${trip!['_id']}/kids/$kidId/pickup');
     events.add(Map<String, dynamic>.from(res['event'] as Map));
-    setState(() => message = 'Kid picked up');
+    setState(() => message = 'Picked up');
   }
 
   Future<void> _dropoff(String kidId) async {
     final auth = context.read<AuthState>();
     final res = await auth.api.post('/trips/${trip!['_id']}/kids/$kidId/dropoff');
     events.add(Map<String, dynamic>.from(res['event'] as Map));
-    setState(() => message = 'Kid dropped off');
+    setState(() => message = 'Dropped off');
   }
 
   Future<void> _complete() async {
     final auth = context.read<AuthState>();
+    _stopTestDrive();
     await auth.api.post('/trips/${trip!['_id']}/complete');
     await gpsSub?.cancel();
     setState(() {
@@ -179,89 +292,142 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
       body: Stack(
         children: [
           RideMap(
-            mapController: mapController,
             center: center,
             busLocation: bus,
+            busHeading: busHeading,
             routePoints: routePoints,
             stops: stops,
-            zoom: 14.8,
+            followNonce: followNonce,
+            continuous: testDriving,
           ),
           SafeArea(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
               child: Row(
                 children: [
-                  _IconBtn(icon: Icons.logout_rounded, onTap: auth.logout),
+                  RoundMapButton(icon: Icons.close_rounded, onTap: auth.logout),
                   const Spacer(),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: AppColors.ink,
-                      borderRadius: BorderRadius.circular(24),
+                  FloatingPill(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: trip != null ? AppColors.accent : AppColors.muted,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          trip == null ? 'Driver offline' : 'Online · en route',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ],
                     ),
-                    child: const Text(
-                      'Driver mode',
-                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
-                    ),
+                  ),
+                  const Spacer(),
+                  RoundMapButton(
+                    icon: Icons.my_location_rounded,
+                    onTap: () => setState(() => followNonce++),
                   ),
                 ],
               ),
             ),
           ),
+          if (trip != null)
+            Positioned(
+              right: 16,
+              bottom: MediaQuery.sizeOf(context).height * 0.42,
+              child: SafeArea(
+                child: Material(
+                  color: AppColors.boltGreen,
+                  elevation: 8,
+                  shadowColor: Colors.black38,
+                  borderRadius: BorderRadius.circular(28),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(28),
+                    onTap: testDriving ? null : _testDriveOneKm,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            testDriving ? Icons.hourglass_top_rounded : Icons.play_arrow_rounded,
+                            color: AppColors.ink,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            testDriving ? 'Driving…' : 'Test drive 1 km',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.ink,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           RideSheet(
-            maxHeightFactor: 0.62,
+            initialSize: trip == null ? 0.42 : 0.4,
+            maxSize: 0.8,
             child: loading
-                ? const Center(child: CircularProgressIndicator())
+                ? const Center(child: CircularProgressIndicator(color: AppColors.ink))
                 : trip == null
                     ? Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('Ready to drive',
-                              style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
+                          const Text(
+                            'Ready when you are',
+                            style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -0.5),
+                          ),
                           const SizedBox(height: 6),
-                          const Text('Start a morning or evening trip on your route.',
-                              style: TextStyle(color: AppColors.muted)),
+                          const Text(
+                            'Start a morning or evening trip — parents track you live.',
+                            style: TextStyle(color: AppColors.muted),
+                          ),
                           if (message != null) ...[
                             const SizedBox(height: 10),
                             StatusChip(text: message!),
                           ],
-                          const SizedBox(height: 16),
+                          const SizedBox(height: 18),
                           ...routes.map((r) {
                             return Container(
                               margin: const EdgeInsets.only(bottom: 12),
-                              padding: const EdgeInsets.all(14),
+                              padding: const EdgeInsets.all(16),
                               decoration: BoxDecoration(
                                 color: AppColors.softBg,
-                                borderRadius: BorderRadius.circular(18),
+                                borderRadius: BorderRadius.circular(20),
                               ),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(r['name'] ?? 'Route',
-                                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                                  Text(
+                                    r['name'] ?? 'Route',
+                                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
+                                  ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    '${(r['kids'] as List?)?.length ?? 0} kids assigned',
+                                    '${(r['kids'] as List?)?.length ?? 0} kids on this route',
                                     style: const TextStyle(color: AppColors.muted),
                                   ),
-                                  const SizedBox(height: 12),
+                                  const SizedBox(height: 14),
                                   Row(
                                     children: [
                                       Expanded(
-                                        child: ElevatedButton(
+                                        child: BoltPrimaryButton(
+                                          label: 'Morning',
                                           onPressed: () => _startTrip(r['_id'], 'to_school'),
-                                          child: const Text('Morning'),
                                         ),
                                       ),
                                       const SizedBox(width: 8),
                                       Expanded(
                                         child: OutlinedButton(
-                                          style: OutlinedButton.styleFrom(
-                                            minimumSize: const Size.fromHeight(54),
-                                            shape: RoundedRectangleBorder(
-                                              borderRadius: BorderRadius.circular(28),
-                                            ),
-                                          ),
                                           onPressed: () => _startTrip(r['_id'], 'to_home'),
                                           child: const Text('Evening'),
                                         ),
@@ -281,10 +447,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                             children: [
                               Expanded(
                                 child: Text(
-                                  trip!['routeId'] is Map
-                                      ? trip!['routeId']['name']
-                                      : 'Active trip',
-                                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+                                  trip!['routeId'] is Map ? trip!['routeId']['name'] : 'Active trip',
+                                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
                                 ),
                               ),
                               StatusChip(
@@ -296,28 +460,19 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                             const SizedBox(height: 8),
                             StatusChip(text: message!),
                           ],
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: OutlinedButton(
-                                  onPressed: _simulateAlongRoute,
-                                  child: const Text('Simulate move'),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: ElevatedButton(
-                                  onPressed: _complete,
-                                  child: const Text('Complete'),
-                                ),
-                              ),
-                            ],
-                          ),
                           const SizedBox(height: 14),
-                          const Text('Kids on board',
-                              style: TextStyle(fontWeight: FontWeight.w800)),
+                          BoltPrimaryButton(
+                            label: testDriving ? 'Test drive running…' : 'Test drive 1 km',
+                            onPressed: testDriving ? null : _testDriveOneKm,
+                          ),
                           const SizedBox(height: 8),
+                          OutlinedButton(
+                            onPressed: testDriving ? null : _complete,
+                            child: const Text('Complete trip'),
+                          ),
+                          const SizedBox(height: 18),
+                          const Text('Passengers', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                          const SizedBox(height: 10),
                           ...kids.map((kid) {
                             final id = kid['_id'] as String? ?? kid.toString();
                             final name = kid['name'] as String? ?? 'Kid';
@@ -325,10 +480,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                             final dropped = _hasEvent(id, 'dropped_off');
                             return Container(
                               margin: const EdgeInsets.only(bottom: 10),
-                              padding: const EdgeInsets.all(12),
+                              padding: const EdgeInsets.all(14),
                               decoration: BoxDecoration(
-                                color: AppColors.softBg,
-                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: const Color(0xFFE5E7EB)),
+                                borderRadius: BorderRadius.circular(18),
                               ),
                               child: Row(
                                 children: [
@@ -336,14 +491,13 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                                     child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        Text(name,
-                                            style: const TextStyle(fontWeight: FontWeight.w700)),
+                                        Text(name, style: const TextStyle(fontWeight: FontWeight.w700)),
                                         Text(
                                           dropped
                                               ? 'Dropped off'
                                               : picked
                                                   ? 'On the bus'
-                                                  : 'Waiting',
+                                                  : 'Waiting at stop',
                                           style: const TextStyle(color: AppColors.muted, fontSize: 12),
                                         ),
                                       ],
@@ -355,7 +509,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                                   ),
                                   TextButton(
                                     onPressed: (!picked || dropped) ? null : () => _dropoff(id),
-                                    child: const Text('Drop off'),
+                                    child: const Text('Drop'),
                                   ),
                                 ],
                               ),
@@ -365,26 +519,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                       ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _IconBtn extends StatelessWidget {
-  const _IconBtn({required this.icon, required this.onTap});
-  final IconData icon;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white,
-      shape: const CircleBorder(),
-      elevation: 3,
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: onTap,
-        child: SizedBox(width: 44, height: 44, child: Icon(icon, size: 20)),
       ),
     );
   }

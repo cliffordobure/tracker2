@@ -46,20 +46,24 @@ npm run dev
 
 Password for all: `password123`
 
-| Role   | Email                         |
-|--------|-------------------------------|
-| Admin  | admin@schooltracker.test      |
-| Driver | driver@schooltracker.test     |
-| Parent | parent1@schooltracker.test    |
-| Parent | parent2@schooltracker.test    |
+| Role         | Email                            |
+|--------------|----------------------------------|
+| Super admin  | admin@schooltracker.test         |
+| School admin | schooladmin@schooltracker.test   |
+| Driver       | driver@schooltracker.test        |
+| Teacher      | teacher@schooltracker.test       |
+| Parent       | parent1@schooltracker.test       |
+| Parent       | parent2@schooltracker.test       |
+
+If an existing DB still has `role: 'admin'`, the API migrates those users to `super_admin` on startup. Re-run `npm run seed` in `server/` to get the school admin + bus demo data.
 
 ## Core flow
 
-1. Admin manages schools/routes and assigns kids + drivers.
-2. Driver signs in → **Start morning** (`to_school`) or **Start evening** (`to_home`).
-3. Parents of kids on that route get a `trip_started` notification and can watch the driver on the map.
-4. Driver marks each kid **Pick up** / **Drop off** → parents are notified.
-5. Driver **Complete trip**.
+1. Super admin creates schools and school admin accounts.
+2. School admin sets school location, buses (with seats), routes, and onboards students (map boarding + parent password).
+3. School admin **Dispatch**: pick date / route / bus / driver — over-capacity routes split into sequenced trips.
+4. Driver starts a dispatched trip (or an ad-hoc morning/evening run).
+5. Parents get `trip_started` and can watch live; pickup/dropoff/complete notify parents.
 
 If browser GPS is blocked, use **Simulate GPS** on the driver screen.
 
@@ -86,9 +90,9 @@ See [apps/mobile/README.md](apps/mobile/README.md). Redeploy backend to Render f
 ## API highlights
 
 - `POST /auth/login`, `GET /auth/me`
-- ` /admin/*` CRUD
-- `GET /driver/routes`
-- `POST /trips`, `POST /trips/:id/location`, pickup/dropoff/complete
+- `/admin/*` school-scoped CRUD (buses, dispatch, kids/onboard, school-admins)
+- `GET /driver/routes`, `GET /driver/trips/scheduled`
+- `POST /trips`, `POST /trips/:id/start`, location / pickup / dropoff / complete
 - `GET /parent/kids`, `/parent/trips/active`, `/parent/notifications`
 
 Socket rooms: `user:{userId}`, `trip:{tripId}`  

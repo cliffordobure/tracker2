@@ -179,6 +179,22 @@ export default function DriverHome() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trip?._id, trip?.status]);
 
+  const activateTrip = async (t, direction) => {
+    const detail = await api(`/trips/${t._id}`);
+    setTrip(detail.trip);
+    setEvents(detail.events);
+    setStops(detail.stops);
+    setVisitedStopIds([]);
+    visitedRef.current = [];
+    notifiedRef.current = new Set();
+    setRouteCoords([]);
+    routeIndexRef.current = 0;
+    seedBusLocation(detail.stops, direction, detail.trip.latestLocation);
+    showToast(`Trip started (${direction === 'to_school' ? 'to school' : 'to home'})`);
+    const first = orderedStopsForDirection(detail.stops, direction)[0];
+    if (first) showToast(`First stop: ${first.name}`, 'success');
+  };
+
   const startTrip = async (routeId, direction) => {
     setError('');
     try {
@@ -186,19 +202,17 @@ export default function DriverHome() {
         method: 'POST',
         body: { routeId, direction },
       });
-      const detail = await api(`/trips/${t._id}`);
-      setTrip(detail.trip);
-      setEvents(detail.events);
-      setStops(detail.stops);
-      setVisitedStopIds([]);
-      visitedRef.current = [];
-      notifiedRef.current = new Set();
-      setRouteCoords([]);
-      routeIndexRef.current = 0;
-      seedBusLocation(detail.stops, direction, detail.trip.latestLocation);
-      showToast(`Trip started (${direction === 'to_school' ? 'to school' : 'to home'})`);
-      const first = orderedStopsForDirection(detail.stops, direction)[0];
-      if (first) showToast(`First stop: ${first.name}`, 'success');
+      await activateTrip(t, direction);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const startScheduled = async (scheduledTrip) => {
+    setError('');
+    try {
+      const { trip: t } = await api(`/trips/${scheduledTrip._id}/start`, { method: 'POST' });
+      await activateTrip(t, t.direction);
     } catch (err) {
       setError(err.message);
     }
@@ -287,7 +301,9 @@ export default function DriverHome() {
 
       {!trip && (
         <div className="stack">
-          <p className="lede">Start a morning (to school) or evening (to home) trip on your route.</p>
+          <p className="lede">
+            Start a dispatched trip for today, or begin an ad-hoc morning/evening run.
+          </p>
           {routes.map((route) => (
             <div key={route._id} className="panel">
               <div className="panel-head">
@@ -314,9 +330,33 @@ export default function DriverHome() {
                   </button>
                 </div>
               </div>
+              {(route.scheduledTrips || []).length > 0 && (
+                <div className="stack" style={{ marginTop: '0.75rem' }}>
+                  <p className="hint">Dispatched for today</p>
+                  {route.scheduledTrips.map((st) => (
+                    <div key={st._id} className="row-actions" style={{ justifyContent: 'space-between' }}>
+                      <span>
+                        Trip {st.sequence}
+                        {st.busId ? ` · ${st.busId.label || st.busId.plate}` : ''} ·{' '}
+                        {(st.kidIds || []).length} students ·{' '}
+                        {st.direction === 'to_school' ? 'to school' : 'to home'}
+                      </span>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={() => startScheduled(st)}
+                      >
+                        Start trip {st.sequence}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
-          {!routes.length && <p>No routes assigned. Ask an admin to assign you a route.</p>}
+          {!routes.length && (
+            <p>No routes or dispatched trips yet. Ask your school admin to dispatch you.</p>
+          )}
         </div>
       )}
 

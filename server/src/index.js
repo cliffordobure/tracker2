@@ -71,6 +71,12 @@ const mongoUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/school_ki
 async function start() {
   await mongoose.connect(mongoUri);
   console.log('Connected to MongoDB');
+  // One-time role rename for existing databases
+  const { User } = await import('./models/index.js');
+  const migrated = await User.updateMany({ role: 'admin' }, { $set: { role: 'super_admin' } });
+  if (migrated.modifiedCount) {
+    console.log(`Migrated ${migrated.modifiedCount} admin user(s) → super_admin`);
+  }
   server.listen(port, () => {
     console.log(`API listening on http://localhost:${port}`);
   });

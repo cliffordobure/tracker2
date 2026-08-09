@@ -1,17 +1,18 @@
 import { useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { homePathForRole } from '../lib/roles';
 
 export default function Login() {
   const { user, login, loading } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState('admin@schooltracker.test');
+  const [email, setEmail] = useState('schooladmin@schooltracker.test');
   const [password, setPassword] = useState('password123');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   if (!loading && user) {
-    return <Navigate to={`/${user.role}`} replace />;
+    return <Navigate to={homePathForRole(user.role)} replace />;
   }
 
   const onSubmit = async (e) => {
@@ -20,7 +21,7 @@ export default function Login() {
     setSubmitting(true);
     try {
       const u = await login(email, password);
-      navigate(`/${u.role}`);
+      navigate(homePathForRole(u.role));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -35,8 +36,8 @@ export default function Login() {
           <p className="eyebrow">SchoolKids Tracker</p>
           <h1>Know where they are, from gate to home.</h1>
           <p className="lede">
-            Admin, drivers, and parents share one live trip loop — morning to school and evening
-            home.
+            Super admins onboard schools. School admins manage buses, routes, students, and daily
+            dispatch — parents track the ride live.
           </p>
         </div>
         <form className="login-form card-form" onSubmit={onSubmit}>
@@ -59,7 +60,7 @@ export default function Login() {
             {submitting ? 'Signing in…' : 'Sign in'}
           </button>
           <p className="hint">
-            Demo: admin@ / driver@ / parent1@ schooltracker.test — password123
+            Demo: admin@ / schooladmin@ / driver@ / parent1@ schooltracker.test — password123
           </p>
         </form>
       </div>

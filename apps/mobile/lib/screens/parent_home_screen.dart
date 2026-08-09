@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import '../services/auth_state.dart';
@@ -17,13 +16,13 @@ class ParentHomeScreen extends StatefulWidget {
 }
 
 class _ParentHomeScreenState extends State<ParentHomeScreen> {
-  final mapController = MapController();
   List<Map<String, dynamic>> kids = [];
   Map<String, dynamic>? active;
   List<LatLng> routePoints = [];
   LatLng? bus;
   String? status;
   bool loading = true;
+  int followNonce = 0;
 
   @override
   void initState() {
@@ -53,21 +52,23 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
         auth.sockets.joinTrip(tripId);
         auth.sockets.socket?.off('location:update');
         auth.sockets.socket?.on('location:update', (data) {
-          if (data is Map && data['tripId'] == tripId) {
-            final next = LatLng(
-              (data['lat'] as num).toDouble(),
-              (data['lng'] as num).toDouble(),
-            );
-            setState(() => bus = next);
-            mapController.move(next, mapController.camera.zoom);
+          if (data is Map && data['tripId'] == tripId && mounted) {
+            setState(() {
+              bus = LatLng(
+                (data['lat'] as num).toDouble(),
+                (data['lng'] as num).toDouble(),
+              );
+            });
           }
         });
         auth.sockets.socket?.on('kid:picked_up', (_) {
-          setState(() => status = 'Your child was picked up');
+          if (!mounted) return;
+          setState(() => status = 'Picked up');
           _load();
         });
         auth.sockets.socket?.on('kid:dropped_off', (_) {
-          setState(() => status = 'Your child was dropped off');
+          if (!mounted) return;
+          setState(() => status = 'Dropped off');
           _load();
         });
       } else {
@@ -84,94 +85,167 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthState>();
-    final center = bus ??
-        latLngFrom(kids.isNotEmpty ? (kids.first['schoolId'] is Map ? kids.first['schoolId']['location'] : null) : null) ??
-        const LatLng(-1.3965, 36.7542);
-
+    final center = bus ?? const LatLng(-1.3965, 36.7542);
     final trip = active == null ? null : Map<String, dynamic>.from(active!['trip'] as Map);
     final stops = active == null
         ? <Map<String, dynamic>>[]
         : List<Map<String, dynamic>>.from(active!['stops'] as List? ?? []);
+    final live = trip != null;
 
     return Scaffold(
       body: Stack(
         children: [
           RideMap(
-            mapController: mapController,
             center: center,
             busLocation: bus,
             routePoints: routePoints,
             stops: stops,
+            followNonce: followNonce,
           ),
           SafeArea(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
               child: Row(
                 children: [
-                  _RoundIcon(
-                    icon: Icons.logout_rounded,
-                    onTap: () => auth.logout(),
-                  ),
-                  const Spacer(),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(24),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.12),
-                          blurRadius: 16,
-                        ),
-                      ],
+                  RoundMapButton(icon: Icons.menu_rounded, onTap: auth.logout),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FloatingPill(
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 10,
+                            height: 10,
+                            decoration: BoxDecoration(
+                              color: live ? AppColors.accent : AppColors.muted,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              live
+                                  ? (trip['direction'] == 'to_school'
+                                      ? 'On the way to school'
+                                      : 'On the way home')
+                                  : 'Where is the bus?',
+                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    child: Text(
-                      auth.name ?? 'Parent',
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
                   ),
-                  const SizedBox(width: 8),
-                  _RoundIcon(icon: Icons.refresh_rounded, onTap: _load),
+                  const SizedBox(width: 10),
+                  RoundMapButton(
+                    icon: Icons.my_location_rounded,
+                    onTap: () => setState(() => followNonce++),
+                  ),
                 ],
               ),
             ),
           ),
           RideSheet(
             child: loading
-                ? const Center(child: CircularProgressIndicator())
+                ? const Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Center(child: CircularProgressIndicator(color: AppColors.ink)),
+                  )
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (status != null) ...[
-                        StatusChip(text: status!),
-                        const SizedBox(height: 10),
-                      ],
-                      Text(
-                        trip == null ? 'No active ride' : 'Live ride',
-                        style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  live ? 'Your ride is live' : 'No active ride',
+                                  style: const TextStyle(
+                                    fontSize: 26,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: -0.6,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  live
+                                      ? '${trip['routeId'] is Map ? trip['routeId']['name'] : 'School route'} · tracking bus'
+                                      : 'You’ll see the bus move here when the driver starts.',
+                                  style: const TextStyle(color: AppColors.muted, height: 1.35),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (status != null) StatusChip(text: status!),
+                        ],
                       ),
-                      const SizedBox(height: 6),
-                      Text(
-                        trip == null
-                            ? 'You will see the bus here when the driver starts a trip.'
-                            : '${trip['routeId'] is Map ? trip['routeId']['name'] : 'Route'} · '
-                                '${trip['direction'] == 'to_school' ? 'To school' : 'Going home'}',
-                        style: const TextStyle(color: AppColors.muted, height: 1.35),
-                      ),
+                      const SizedBox(height: 18),
+                      if (live)
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: AppColors.softBg,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 48,
+                                height: 48,
+                                decoration: BoxDecoration(
+                                  color: AppColors.boltGreen,
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                                child: const Icon(Icons.directions_car_filled_rounded, color: AppColors.ink),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      trip['driverId'] is Map
+                                          ? trip['driverId']['name'] ?? 'Driver'
+                                          : 'School bus',
+                                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+                                    ),
+                                    const Text(
+                                      'Moving along the route',
+                                      style: TextStyle(color: AppColors.muted, fontSize: 13),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const StatusChip(text: 'LIVE', color: AppColors.accentDark),
+                            ],
+                          ),
+                        ),
                       const SizedBox(height: 16),
+                      const Text('Your kids', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                      const SizedBox(height: 10),
                       ...kids.map(
                         (k) => Container(
                           margin: const EdgeInsets.only(bottom: 10),
                           padding: const EdgeInsets.all(14),
                           decoration: BoxDecoration(
-                            color: AppColors.softBg,
+                            border: Border.all(color: const Color(0xFFE5E7EB)),
                             borderRadius: BorderRadius.circular(18),
                           ),
                           child: Row(
                             children: [
                               CircleAvatar(
-                                backgroundColor: AppColors.accent.withValues(alpha: 0.15),
-                                child: const Icon(Icons.child_care, color: AppColors.accent),
+                                backgroundColor: AppColors.accent.withValues(alpha: 0.2),
+                                child: Text(
+                                  ((k['name'] as String?)?.isNotEmpty == true
+                                          ? (k['name'] as String)[0]
+                                          : '?')
+                                      .toUpperCase(),
+                                  style: const TextStyle(fontWeight: FontWeight.w800),
+                                ),
                               ),
                               const SizedBox(width: 12),
                               Expanded(
@@ -188,37 +262,19 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                                 ),
                               ),
                               StatusChip(
-                                text: trip == null ? 'Waiting' : 'Tracking',
-                                color: trip == null ? AppColors.muted : AppColors.accent,
+                                text: live ? 'On trip' : 'Idle',
+                                color: live ? AppColors.accentDark : AppColors.muted,
                               ),
                             ],
                           ),
                         ),
                       ),
+                      const SizedBox(height: 8),
+                      BoltPrimaryButton(label: 'Refresh', onPressed: _load),
                     ],
                   ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _RoundIcon extends StatelessWidget {
-  const _RoundIcon({required this.icon, required this.onTap});
-  final IconData icon;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white,
-      shape: const CircleBorder(),
-      elevation: 3,
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: onTap,
-        child: SizedBox(width: 44, height: 44, child: Icon(icon, size: 20)),
       ),
     );
   }

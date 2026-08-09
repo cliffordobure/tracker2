@@ -1,7 +1,9 @@
 export const ROLES = {
-  ADMIN: 'admin',
+  SUPER_ADMIN: 'super_admin',
+  SCHOOL_ADMIN: 'school_admin',
   DRIVER: 'driver',
   PARENT: 'parent',
+  TEACHER: 'teacher',
 };
 
 export const TRIP_DIRECTIONS = {

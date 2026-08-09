@@ -100,20 +100,22 @@ export default function RoutesPage() {
                 onChange={(e) => setRouteForm({ ...routeForm, name: e.target.value })}
               />
             </label>
-            <label>
-              School
-              <select
-                required
-                value={routeForm.schoolId}
-                onChange={(e) => setRouteForm({ ...routeForm, schoolId: e.target.value })}
-              >
-                {schools.map((s) => (
-                  <option key={s._id} value={s._id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {schools.length > 1 && (
+              <label>
+                School
+                <select
+                  required
+                  value={routeForm.schoolId}
+                  onChange={(e) => setRouteForm({ ...routeForm, schoolId: e.target.value })}
+                >
+                  {schools.map((s) => (
+                    <option key={s._id} value={s._id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <label>
               Description
               <input

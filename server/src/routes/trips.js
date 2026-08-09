@@ -6,7 +6,6 @@ import {
   Kid,
   Route,
   Stop,
-  DriverProfile,
 } from '../models/index.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { getIO } from '../socket.js';
@@ -14,16 +13,93 @@ import { createAndEmitNotifications } from '../services/notifications.js';
 
 const router = Router();
 
-router.post('/', authenticate, requireRole('driver'), async (req, res) => {
+async function emitTripStarted(trip, kids) {
+  const io = getIO();
+  const directionLabel = trip.direction === 'to_school' ? 'morning (to school)' : 'evening (to home)';
+  const notifications = [];
+  for (const kid of kids) {
+    for (const parentId of kid.parentIds || []) {
+      notifications.push({
+        userId: parentId,
+        type: 'trip_started',
+        title: 'Trip started',
+        body: `${kid.name}'s ${directionLabel} trip has started. You can track the driver live.`,
+        tripId: trip._id,
+        kidId: kid._id,
+      });
+    }
+  }
+  await createAndEmitNotifications(io, notifications);
+
+  const populated = await Trip.findById(trip._id)
+    .populate('routeId', 'name')
+    .populate('schoolId', 'name location address')
+    .populate('busId', 'plate label seats')
+    .populate('kidIds');
+
+  io?.to(`trip:${trip._id}`).emit('trip:started', { trip: populated });
+  for (const kid of kids) {
+    for (const parentId of kid.parentIds || []) {
+      io?.to(`user:${parentId}`).emit('trip:started', { trip: populated, kidId: kid._id });
+    }
+  }
+  return populated;
+}
+
+/** Start a scheduled dispatch trip assigned to this driver. */
+router.post('/:id/start', authenticate, requireRole('driver'), async (req, res) => {
   try {
-    const { routeId, direction } = req.body;
-    if (!routeId || !['to_school', 'to_home'].includes(direction)) {
-      return res.status(400).json({ error: 'routeId and valid direction are required' });
+    const existing = await Trip.findOne({ driverId: req.user.id, status: 'active' });
+    if (existing) {
+      return res.status(409).json({ error: 'You already have an active trip', trip: existing });
     }
 
-    const profile = await DriverProfile.findOne({ userId: req.user.id });
-    if (!profile?.assignedRouteIds?.some((id) => id.toString() === routeId)) {
-      return res.status(403).json({ error: 'Route not assigned to this driver' });
+    const trip = await Trip.findOne({
+      _id: req.params.id,
+      driverId: req.user.id,
+      status: 'scheduled',
+    });
+    if (!trip) return res.status(404).json({ error: 'Scheduled trip not found' });
+
+    trip.status = 'active';
+    trip.startedAt = new Date();
+    await trip.save();
+
+    const kids = await Kid.find({ _id: { $in: trip.kidIds }, active: true });
+    const populated = await emitTripStarted(trip, kids);
+    res.json({ trip: populated });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Ad-hoc trip start (no hard route assignment gate — day dispatch preferred). */
+router.post('/', authenticate, requireRole('driver'), async (req, res) => {
+  try {
+    const { routeId, direction, tripId } = req.body;
+
+    // Prefer starting a pre-dispatched scheduled trip
+    if (tripId) {
+      const existing = await Trip.findOne({ driverId: req.user.id, status: 'active' });
+      if (existing) {
+        return res.status(409).json({ error: 'You already have an active trip', trip: existing });
+      }
+      const scheduled = await Trip.findOne({
+        _id: tripId,
+        driverId: req.user.id,
+        status: 'scheduled',
+      });
+      if (!scheduled) return res.status(404).json({ error: 'Scheduled trip not found' });
+      scheduled.status = 'active';
+      scheduled.startedAt = new Date();
+      await scheduled.save();
+      const kids = await Kid.find({ _id: { $in: scheduled.kidIds }, active: true });
+      const populated = await emitTripStarted(scheduled, kids);
+      return res.status(200).json({ trip: populated });
+    }
+
+    if (!routeId || !['to_school', 'to_home'].includes(direction)) {
+      return res.status(400).json({ error: 'routeId and valid direction are required' });
     }
 
     const existing = await Trip.findOne({ driverId: req.user.id, status: 'active' });
@@ -49,35 +125,7 @@ router.post('/', authenticate, requireRole('driver'), async (req, res) => {
       startedAt: new Date(),
     });
 
-    const io = getIO();
-    const directionLabel = direction === 'to_school' ? 'morning (to school)' : 'evening (to home)';
-    const notifications = [];
-    for (const kid of kids) {
-      for (const parentId of kid.parentIds || []) {
-        notifications.push({
-          userId: parentId,
-          type: 'trip_started',
-          title: 'Trip started',
-          body: `${kid.name}'s ${directionLabel} trip has started. You can track the driver live.`,
-          tripId: trip._id,
-          kidId: kid._id,
-        });
-      }
-    }
-    await createAndEmitNotifications(io, notifications);
-
-    const populated = await Trip.findById(trip._id)
-      .populate('routeId', 'name')
-      .populate('schoolId', 'name location address')
-      .populate('kidIds');
-
-    io?.to(`trip:${trip._id}`).emit('trip:started', { trip: populated });
-    for (const kid of kids) {
-      for (const parentId of kid.parentIds || []) {
-        io?.to(`user:${parentId}`).emit('trip:started', { trip: populated, kidId: kid._id });
-      }
-    }
-
+    const populated = await emitTripStarted(trip, kids);
     res.status(201).json({ trip: populated });
   } catch (err) {
     res.status(500).json({ error: err.message });

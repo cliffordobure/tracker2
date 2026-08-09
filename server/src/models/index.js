@@ -3,6 +3,7 @@ export { School } from './School.js';
 export { Route } from './Route.js';
 export { Stop } from './Stop.js';
 export { Kid } from './Kid.js';
+export { Bus } from './Bus.js';
 export { DriverProfile } from './DriverProfile.js';
 export { Trip } from './Trip.js';
 export { TripEvent } from './TripEvent.js';

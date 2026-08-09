@@ -9,19 +9,26 @@ const empty = {
   vehiclePlate: '',
   vehicleModel: '',
   vehicleColor: '',
+  busId: '',
   assignedRouteIds: [],
 };
 
 export default function Drivers() {
   const [drivers, setDrivers] = useState([]);
   const [routes, setRoutes] = useState([]);
+  const [buses, setBuses] = useState([]);
   const [form, setForm] = useState(empty);
   const [error, setError] = useState('');
 
   const load = async () => {
-    const [d, r] = await Promise.all([api('/admin/drivers'), api('/admin/routes')]);
+    const [d, r, b] = await Promise.all([
+      api('/admin/drivers'),
+      api('/admin/routes'),
+      api('/admin/buses'),
+    ]);
     setDrivers(d.drivers);
     setRoutes(r.routes);
+    setBuses(b.buses);
   };
 
   useEffect(() => {
@@ -31,7 +38,13 @@ export default function Drivers() {
   const submit = async (e) => {
     e.preventDefault();
     try {
-      await api('/admin/drivers', { method: 'POST', body: form });
+      await api('/admin/drivers', {
+        method: 'POST',
+        body: {
+          ...form,
+          busId: form.busId || null,
+        },
+      });
       setForm(empty);
       await load();
     } catch (err) {
@@ -55,14 +68,17 @@ export default function Drivers() {
     <div className="split">
       <div className="stack">
         <h2>Drivers</h2>
+        <p className="lede">
+          Preferred routes/buses are optional. Daily dispatch can assign any bus to any route.
+        </p>
         {error && <div className="alert">{error}</div>}
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
                 <th>Name</th>
-                <th>Vehicle</th>
-                <th>Routes</th>
+                <th>Default bus</th>
+                <th>Preferred routes</th>
               </tr>
             </thead>
             <tbody>
@@ -73,8 +89,11 @@ export default function Drivers() {
                     <div className="muted">{d.email}</div>
                   </td>
                   <td>
-                    {d.profile?.vehiclePlate || '—'}
-                    <div className="muted">{d.profile?.vehicleModel}</div>
+                    {d.profile?.busId
+                      ? typeof d.profile.busId === 'object'
+                        ? d.profile.busId.label || d.profile.busId.plate
+                        : d.profile.busId
+                      : d.profile?.vehiclePlate || '—'}
                   </td>
                   <td>
                     {(d.profile?.assignedRouteIds || [])
@@ -111,21 +130,32 @@ export default function Drivers() {
           <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
         </label>
         <label>
-          Plate
+          Temp password
+          <input
+            value={form.password}
+            onChange={(e) => setForm({ ...form, password: e.target.value })}
+          />
+        </label>
+        <label>
+          Default bus
+          <select value={form.busId} onChange={(e) => setForm({ ...form, busId: e.target.value })}>
+            <option value="">None</option>
+            {buses.map((b) => (
+              <option key={b._id} value={b._id}>
+                {(b.label || b.plate) + ` (${b.seats} seats)`}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Plate (optional note)
           <input
             value={form.vehiclePlate}
             onChange={(e) => setForm({ ...form, vehiclePlate: e.target.value })}
           />
         </label>
-        <label>
-          Model
-          <input
-            value={form.vehicleModel}
-            onChange={(e) => setForm({ ...form, vehicleModel: e.target.value })}
-          />
-        </label>
         <fieldset className="checkbox-set">
-          <legend>Assigned routes</legend>
+          <legend>Preferred routes (optional)</legend>
           {routes.map((r) => (
             <label key={r._id} className="check">
               <input

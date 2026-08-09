@@ -7,6 +7,7 @@ import {
   Route,
   Stop,
   Kid,
+  Bus,
   DriverProfile,
   Trip,
   TripEvent,
@@ -26,6 +27,7 @@ async function seed() {
     Route.deleteMany({}),
     Stop.deleteMany({}),
     Kid.deleteMany({}),
+    Bus.deleteMany({}),
     DriverProfile.deleteMany({}),
     Trip.deleteMany({}),
     TripEvent.deleteMany({}),
@@ -35,36 +37,12 @@ async function seed() {
 
   const passwordHash = await bcrypt.hash('password123', 10);
 
-  const admin = await User.create({
+  const superAdmin = await User.create({
     email: 'admin@schooltracker.test',
     passwordHash,
     name: 'System Admin',
-    role: 'admin',
+    role: 'super_admin',
     phone: '+254700000001',
-  });
-
-  const parent1 = await User.create({
-    email: 'parent1@schooltracker.test',
-    passwordHash,
-    name: 'Alice Wanjiku',
-    role: 'parent',
-    phone: '+254700000011',
-  });
-
-  const parent2 = await User.create({
-    email: 'parent2@schooltracker.test',
-    passwordHash,
-    name: 'Brian Otieno',
-    role: 'parent',
-    phone: '+254700000012',
-  });
-
-  const driverUser = await User.create({
-    email: 'driver@schooltracker.test',
-    passwordHash,
-    name: 'Daniel Kamau',
-    role: 'driver',
-    phone: '+254700000021',
   });
 
   // Rongai / Nairobi area sample coordinates
@@ -74,6 +52,42 @@ async function seed() {
     location: { lat: -1.3965, lng: 36.7542 },
   });
 
+  const schoolAdmin = await User.create({
+    email: 'schooladmin@schooltracker.test',
+    passwordHash,
+    name: 'School Admin',
+    role: 'school_admin',
+    phone: '+254700000002',
+    schoolId: school._id,
+  });
+
+  const parent1 = await User.create({
+    email: 'parent1@schooltracker.test',
+    passwordHash,
+    name: 'Alice Wanjiku',
+    role: 'parent',
+    phone: '+254700000011',
+    schoolId: school._id,
+  });
+
+  const parent2 = await User.create({
+    email: 'parent2@schooltracker.test',
+    passwordHash,
+    name: 'Brian Otieno',
+    role: 'parent',
+    phone: '+254700000012',
+    schoolId: school._id,
+  });
+
+  const driverUser = await User.create({
+    email: 'driver@schooltracker.test',
+    passwordHash,
+    name: 'Daniel Kamau',
+    role: 'driver',
+    phone: '+254700000021',
+    schoolId: school._id,
+  });
+
   const teacher = await User.create({
     email: 'teacher@schooltracker.test',
     passwordHash,
@@ -81,6 +95,15 @@ async function seed() {
     role: 'teacher',
     phone: '+254700000031',
     schoolId: school._id,
+  });
+
+  const bus = await Bus.create({
+    schoolId: school._id,
+    plate: 'KDA 123A',
+    label: 'Bus 1',
+    model: 'Toyota Hiace',
+    color: 'White',
+    seats: 12,
   });
 
   const route = await Route.create({
@@ -115,9 +138,10 @@ async function seed() {
 
   await DriverProfile.create({
     userId: driverUser._id,
-    vehiclePlate: 'KDA 123A',
-    vehicleModel: 'Toyota Hiace',
-    vehicleColor: 'White',
+    vehiclePlate: bus.plate,
+    vehicleModel: bus.model,
+    vehicleColor: bus.color,
+    busId: bus._id,
     assignedRouteIds: [route._id],
   });
 
@@ -141,12 +165,14 @@ async function seed() {
 
   console.log('\nSeed complete.\n');
   console.log('Login accounts (password: password123):');
-  console.log(`  Admin:   ${admin.email}`);
-  console.log(`  Driver:  ${driverUser.email}`);
-  console.log(`  Teacher: ${teacher.email}`);
-  console.log(`  Parent:  ${parent1.email} (child: ${kid1.name})`);
-  console.log(`  Parent:  ${parent2.email} (child: ${kid2.name})`);
+  console.log(`  Super admin:  ${superAdmin.email}`);
+  console.log(`  School admin: ${schoolAdmin.email}`);
+  console.log(`  Driver:       ${driverUser.email}`);
+  console.log(`  Teacher:      ${teacher.email}`);
+  console.log(`  Parent:       ${parent1.email} (child: ${kid1.name})`);
+  console.log(`  Parent:       ${parent2.email} (child: ${kid2.name})`);
   console.log(`\nSchool: ${school.name}`);
+  console.log(`Bus:    ${bus.label} (${bus.plate}) — ${bus.seats} seats`);
   console.log(`Route:  ${route.name}`);
   console.log(`Stops:  ${schoolStop.name}, ${home1.name}, ${home2.name}`);
 

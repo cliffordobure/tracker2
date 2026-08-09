@@ -8,24 +8,38 @@ import RoutesPage from './pages/admin/Routes';
 import Parents from './pages/admin/Parents';
 import Drivers from './pages/admin/Drivers';
 import Kids from './pages/admin/Kids';
+import Buses from './pages/admin/Buses';
+import Dispatch from './pages/admin/Dispatch';
+import SchoolSettings from './pages/admin/SchoolSettings';
 import DriverHome from './pages/driver/DriverHome';
 import ParentHome from './pages/parent/ParentHome';
+import { homePathForRole } from './lib/roles';
 
-function Protected({ role, children }) {
+function Protected({ roles, children }) {
   const { user, loading } = useAuth();
   if (loading) return <div className="loading-screen">Loading…</div>;
   if (!user) return <Navigate to="/login" replace />;
-  if (role && user.role !== role) return <Navigate to={`/${user.role}`} replace />;
+  const allowed = Array.isArray(roles) ? roles : [roles];
+  if (roles && !allowed.includes(user.role)) {
+    return <Navigate to={homePathForRole(user.role)} replace />;
+  }
   return children;
 }
 
-const adminNav = [
-  { to: '/admin', label: 'Dashboard', end: true },
-  { to: '/admin/schools', label: 'Schools' },
-  { to: '/admin/routes', label: 'Routes' },
-  { to: '/admin/kids', label: 'Kids' },
-  { to: '/admin/parents', label: 'Parents' },
-  { to: '/admin/drivers', label: 'Drivers' },
+const superNav = [
+  { to: '/super-admin', label: 'Dashboard', end: true },
+  { to: '/super-admin/schools', label: 'Schools' },
+];
+
+const schoolNav = [
+  { to: '/school-admin', label: 'Dashboard', end: true },
+  { to: '/school-admin/school', label: 'School' },
+  { to: '/school-admin/buses', label: 'Buses' },
+  { to: '/school-admin/routes', label: 'Routes' },
+  { to: '/school-admin/students', label: 'Students' },
+  { to: '/school-admin/parents', label: 'Parents' },
+  { to: '/school-admin/drivers', label: 'Drivers' },
+  { to: '/school-admin/dispatch', label: 'Dispatch' },
 ];
 
 export default function App() {
@@ -34,26 +48,42 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/" element={<HomeRedirect />} />
 
+      <Route path="/admin/*" element={<LegacyAdminRedirect />} />
+
       <Route
-        path="/admin"
+        path="/super-admin"
         element={
-          <Protected role="admin">
-            <Layout navItems={adminNav} title="Admin" />
+          <Protected roles={['super_admin']}>
+            <Layout navItems={superNav} title="Super Admin" />
           </Protected>
         }
       >
         <Route index element={<AdminDashboard />} />
         <Route path="schools" element={<Schools />} />
+      </Route>
+
+      <Route
+        path="/school-admin"
+        element={
+          <Protected roles={['school_admin']}>
+            <Layout navItems={schoolNav} title="School Admin" />
+          </Protected>
+        }
+      >
+        <Route index element={<AdminDashboard />} />
+        <Route path="school" element={<SchoolSettings />} />
+        <Route path="buses" element={<Buses />} />
         <Route path="routes" element={<RoutesPage />} />
-        <Route path="kids" element={<Kids />} />
+        <Route path="students" element={<Kids />} />
         <Route path="parents" element={<Parents />} />
         <Route path="drivers" element={<Drivers />} />
+        <Route path="dispatch" element={<Dispatch />} />
       </Route>
 
       <Route
         path="/driver"
         element={
-          <Protected role="driver">
+          <Protected roles={['driver']}>
             <Layout navItems={[{ to: '/driver', label: 'My trips', end: true }]} title="Driver" />
           </Protected>
         }
@@ -64,7 +94,7 @@ export default function App() {
       <Route
         path="/parent"
         element={
-          <Protected role="parent">
+          <Protected roles={['parent']}>
             <Layout navItems={[{ to: '/parent', label: 'Family', end: true }]} title="Parent" />
           </Protected>
         }
@@ -81,5 +111,13 @@ function HomeRedirect() {
   const { user, loading } = useAuth();
   if (loading) return <div className="loading-screen">Loading…</div>;
   if (!user) return <Navigate to="/login" replace />;
-  return <Navigate to={`/${user.role}`} replace />;
+  return <Navigate to={homePathForRole(user.role)} replace />;
+}
+
+function LegacyAdminRedirect() {
+  const { user, loading } = useAuth();
+  if (loading) return <div className="loading-screen">Loading…</div>;
+  if (!user) return <Navigate to="/login" replace />;
+  if (user.role === 'school_admin') return <Navigate to="/school-admin" replace />;
+  return <Navigate to="/super-admin" replace />;
 }
