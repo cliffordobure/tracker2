@@ -1,0 +1,20 @@
+{
+  "name": "school-kids-tracker",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "apps/*",
+    "server",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev -w server\" \"npm run dev -w web\"",
+    "dev:server": "npm run dev -w server",
+    "dev:web": "npm run dev -w web",
+    "seed": "npm run seed -w server",
+    "install:all": "npm install"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.4"
+  }
+}
