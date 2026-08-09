@@ -74,6 +74,15 @@ async function seed() {
     location: { lat: -1.3965, lng: 36.7542 },
   });
 
+  const teacher = await User.create({
+    email: 'teacher@schooltracker.test',
+    passwordHash,
+    name: 'Grace Njeri',
+    role: 'teacher',
+    phone: '+254700000031',
+    schoolId: school._id,
+  });
+
   const route = await Route.create({
     schoolId: school._id,
     name: 'Route A — Pipeline',
@@ -132,10 +141,11 @@ async function seed() {
 
   console.log('\nSeed complete.\n');
   console.log('Login accounts (password: password123):');
-  console.log(`  Admin:  ${admin.email}`);
-  console.log(`  Driver: ${driverUser.email}`);
-  console.log(`  Parent: ${parent1.email} (child: ${kid1.name})`);
-  console.log(`  Parent: ${parent2.email} (child: ${kid2.name})`);
+  console.log(`  Admin:   ${admin.email}`);
+  console.log(`  Driver:  ${driverUser.email}`);
+  console.log(`  Teacher: ${teacher.email}`);
+  console.log(`  Parent:  ${parent1.email} (child: ${kid1.name})`);
+  console.log(`  Parent:  ${parent2.email} (child: ${kid2.name})`);
   console.log(`\nSchool: ${school.name}`);
   console.log(`Route:  ${route.name}`);
   console.log(`Stops:  ${schoolStop.name}, ${home1.name}, ${home2.name}`);

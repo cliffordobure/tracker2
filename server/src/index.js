@@ -9,6 +9,7 @@ import authRoutes from './routes/auth.js';
 import adminRoutes from './routes/admin.js';
 import driverRoutes from './routes/driver.js';
 import parentRoutes from './routes/parent.js';
+import teacherRoutes from './routes/teacher.js';
 import tripRoutes from './routes/trips.js';
 
 const app = express();
@@ -56,6 +57,7 @@ app.use('/auth', authRoutes);
 app.use('/admin', adminRoutes);
 app.use('/driver', driverRoutes);
 app.use('/parent', parentRoutes);
+app.use('/teacher', teacherRoutes);
 app.use('/trips', tripRoutes);
 
 app.use((err, _req, res, _next) => {

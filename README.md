@@ -67,9 +67,21 @@ If browser GPS is blocked, use **Simulate GPS** on the driver screen.
 
 ```
 apps/web          React Vite frontend (admin / driver / parent)
+apps/mobile       Flutter app (parent / teacher / driver) — Uber-style Mapbox UI
 server            Express API + Socket.IO + Mongo models
 packages/shared   Shared constants
 ```
+
+## Mobile app
+
+```bash
+cd apps/mobile
+flutter pub get
+flutter run
+```
+
+Uses hosted API `https://tracker2-j8vr.onrender.com` and Mapbox.  
+See [apps/mobile/README.md](apps/mobile/README.md). Redeploy backend to Render for teacher routes.
 
 ## API highlights
 

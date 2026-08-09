@@ -46,7 +46,7 @@ router.post('/register', authenticate, async (req, res) => {
     if (!email || !password || !name || !role) {
       return res.status(400).json({ error: 'email, password, name, and role are required' });
     }
-    if (!['admin', 'driver', 'parent'].includes(role)) {
+    if (!['admin', 'driver', 'parent', 'teacher'].includes(role)) {
       return res.status(400).json({ error: 'Invalid role' });
     }
 
