@@ -10,8 +10,6 @@ import {
   orderedStopsForDirection,
   stopsForTripKids,
 } from '../../lib/geo';
-import { advanceAlongRoute, nearestRouteIndex } from '../../lib/directions';
-
 const APPROACH_M = 180;
 const ARRIVE_M = 60;
 
@@ -263,34 +261,6 @@ export default function DriverHome() {
     }
   };
 
-  const simulateMove = async () => {
-    if (!trip) return;
-
-    let payload;
-    if (routeCoords.length >= 2) {
-      if (driverLocation) {
-        routeIndexRef.current = nearestRouteIndex(routeCoords, driverLocation);
-      }
-      const stepped = advanceAlongRoute(routeCoords, routeIndexRef.current, 160);
-      routeIndexRef.current = stepped.index;
-      payload = stepped.location;
-    } else {
-      const target = nextStop?.location;
-      const base = driverLocation || orderedStops[0]?.location || { lat: -1.3965, lng: 36.7542 };
-      payload = target
-        ? {
-            lat: base.lat + (target.lat - base.lat) * 0.2,
-            lng: base.lng + (target.lng - base.lng) * 0.2,
-          }
-        : base;
-    }
-
-    if (!payload) return;
-    setDriverLocation(payload);
-    maybeNotifyStops(payload);
-    await api(`/trips/${trip._id}/location`, { method: 'POST', body: payload });
-  };
-
   const handleRouteReady = useCallback((coordinates) => {
     setRouteCoords(coordinates || []);
     routeIndexRef.current = 0;
@@ -376,9 +346,6 @@ export default function DriverHome() {
                   </p>
                 </div>
                 <div className="row-actions">
-                  <button type="button" className="btn btn-ghost" onClick={simulateMove}>
-                    Simulate GPS
-                  </button>
                   <button type="button" className="btn btn-primary" onClick={completeTrip}>
                     Complete trip
                   </button>

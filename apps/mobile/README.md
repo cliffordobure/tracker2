@@ -27,7 +27,6 @@ flutter run --dart-define=API_BASE=http://192.168.x.x:4001 --dart-define=MAPBOX_
 1. Driver starts a trip (dispatched or morning/evening) → phone GPS posts every move (+ 3s heartbeat).
 2. Driver taps **Pick up** for a child → that parent can track.
 3. Parent app auto-joins the trip and moves the bus marker from real `location:update` events.
-4. **Demo drive 1 km** still posts the same location API (for demos without walking).
 
 ## Demo logins
 

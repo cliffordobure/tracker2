@@ -65,7 +65,7 @@ If an existing DB still has `role: 'admin'`, the API migrates those users to `su
 4. Driver starts a dispatched trip (or an ad-hoc morning/evening run).
 5. Parents get `trip_started` and can watch live; pickup/dropoff/complete notify parents.
 
-If browser GPS is blocked, use **Simulate GPS** on the driver screen.
+Allow location access in the browser so the driver can share live GPS.
 
 ## Project layout
 

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
@@ -18,8 +17,7 @@ class DriverHomeScreen extends StatefulWidget {
   State<DriverHomeScreen> createState() => _DriverHomeScreenState();
 }
 
-class _DriverHomeScreenState extends State<DriverHomeScreen>
-    with SingleTickerProviderStateMixin {
+class _DriverHomeScreenState extends State<DriverHomeScreen> {
   List<Map<String, dynamic>> routes = [];
   Map<String, dynamic>? trip;
   List<Map<String, dynamic>> kids = [];
@@ -30,15 +28,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   double? busHeading;
   int followNonce = 0;
   bool loading = true;
-  bool testDriving = false;
   bool sharingLocation = false;
   String? message;
   StreamSubscription<Position>? gpsSub;
-  AnimationController? _driveCtrl;
-  Timer? _serverPushTimer;
   Timer? _gpsHeartbeat;
-  List<LatLng> _drivePath = const [];
-  double _driveLength = 0;
   Position? _lastGps;
 
   @override
@@ -49,18 +42,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
 
   @override
   void dispose() {
-    _stopTestDrive(resetFlag: false);
     _gpsHeartbeat?.cancel();
     gpsSub?.cancel();
     super.dispose();
-  }
-
-  void _stopTestDrive({bool resetFlag = true}) {
-    _driveCtrl?.dispose();
-    _driveCtrl = null;
-    _serverPushTimer?.cancel();
-    _serverPushTimer = null;
-    if (resetFlag) testDriving = false;
   }
 
   Future<void> _load() async {
@@ -87,7 +71,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
     final allStops = List<Map<String, dynamic>>.from(detail['stops'] as List? ?? []);
     events = List<Map<String, dynamic>>.from(detail['events'] as List? ?? []);
     kids = List<Map<String, dynamic>>.from(trip!['kidIds'] as List? ?? []);
-    // Only school + this trip's student drop/pickup points (not every stop ever saved on the route)
     stops = stopsForTripKids(allStops, kids);
     final ordered = orderedStops(stops, trip!['direction'] as String?);
     routePoints = await fetchRoadRoute(stopLatLngs(ordered));
@@ -165,18 +148,18 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
     await gpsSub?.cancel();
     _gpsHeartbeat?.cancel();
 
-    // Seed with current fix
     try {
       final current = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
       );
       _lastGps = current;
-      if (mounted && !testDriving) {
+      if (mounted) {
         setState(() {
           bus = LatLng(current.latitude, current.longitude);
           if (current.heading >= 0) busHeading = current.heading;
           sharingLocation = true;
           message = 'Sharing live location with parents';
+          followNonce++;
         });
         await _pushLocation(
           current.latitude,
@@ -193,7 +176,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
         distanceFilter: 4,
       ),
     ).listen((pos) async {
-      if (!mounted || trip == null || testDriving) return;
+      if (!mounted || trip == null) return;
       _lastGps = pos;
       setState(() {
         bus = LatLng(pos.latitude, pos.longitude);
@@ -208,9 +191,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
       );
     });
 
-    // Heartbeat so parents keep getting updates even if the device is still
     _gpsHeartbeat = Timer.periodic(const Duration(seconds: 3), (_) async {
-      if (!mounted || trip == null || testDriving || _lastGps == null) return;
+      if (!mounted || trip == null || _lastGps == null) return;
       await _pushLocation(
         _lastGps!.latitude,
         _lastGps!.longitude,
@@ -225,111 +207,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
         message = 'Sharing live location with parents';
       });
     }
-  }
-
-  /// Demo: continuous ~1 km road drive that also posts real trip locations.
-  Future<void> _testDriveOneKm() async {
-    if (trip == null || testDriving) return;
-
-    final start = bus ??
-        (routePoints.isNotEmpty ? routePoints.first : null) ??
-        (stops.isNotEmpty ? latLngFrom(stops.first['location']) : null) ??
-        const LatLng(-1.3965, 36.7542);
-
-    setState(() {
-      testDriving = true;
-      bus = start;
-      followNonce++;
-      message = 'Loading road path…';
-    });
-
-    var road = routePoints;
-    if (road.length < 5) {
-      final ordered = orderedStops(stops, trip!['direction'] as String?);
-      road = await fetchRoadRoute(stopLatLngs(ordered));
-      if (mounted && road.length >= 2) {
-        setState(() => routePoints = road);
-      }
-    }
-
-    var path = walkAlongRoad(road, start, meters: 1000);
-    if (path.length < 4) {
-      final bearing = road.length >= 2
-          ? bearingDegrees(road.first, road[math.min(8, road.length - 1)])
-          : 45.0;
-      final dest = destinationPoint(start, bearing, 1000);
-      final driven = await fetchRoadRoute([start, dest]);
-      path = walkAlongRoad(driven, start, meters: 1000);
-      if (path.isEmpty) path = driven;
-    }
-
-    if (path.length < 2) {
-      if (!mounted) return;
-      setState(() {
-        testDriving = false;
-        message = 'Could not build a road path for test drive';
-      });
-      return;
-    }
-
-    path = densifyPath(path, stepMeters: 6);
-    _drivePath = path;
-    _driveLength = pathLengthMeters(path);
-    if (_driveLength < 20) {
-      setState(() {
-        testDriving = false;
-        message = 'Road path too short for test drive';
-      });
-      return;
-    }
-
-    final durationMs = ((_driveLength / 1000) * 130000).round().clamp(45000, 180000);
-
-    _stopTestDrive(resetFlag: false);
-    _driveCtrl = AnimationController(
-      vsync: this,
-      duration: Duration(milliseconds: durationMs),
-    );
-
-    void applyProgress() {
-      if (!mounted || _driveCtrl == null) return;
-      final dist = _driveLength * Curves.linear.transform(_driveCtrl!.value);
-      final pos = pointAtDistance(_drivePath, dist);
-      final heading = bearingAtDistance(_drivePath, dist);
-      setState(() {
-        bus = pos;
-        busHeading = heading;
-      });
-    }
-
-    _driveCtrl!.addListener(applyProgress);
-    _driveCtrl!.addStatusListener((status) {
-      if (status == AnimationStatus.completed && mounted) {
-        _serverPushTimer?.cancel();
-        setState(() {
-          testDriving = false;
-          message = 'Test drive finished — back to live GPS';
-        });
-        _driveCtrl?.dispose();
-        _driveCtrl = null;
-      }
-    });
-
-    _serverPushTimer = Timer.periodic(const Duration(milliseconds: 900), (_) async {
-      if (!mounted || trip == null || bus == null) return;
-      await _pushLocation(
-        bus!.latitude,
-        bus!.longitude,
-        heading: busHeading ?? 0,
-        speed: 8.0,
-      );
-    });
-
-    setState(() {
-      message = 'Test drive: publishing fake GPS to parents…';
-      followNonce++;
-    });
-    await _driveCtrl!.forward(from: 0);
   }
 
   bool _hasEvent(String kidId, String type) => events.any((e) {
@@ -353,7 +230,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
 
   Future<void> _complete() async {
     final auth = context.read<AuthState>();
-    _stopTestDrive();
     _gpsHeartbeat?.cancel();
     await auth.api.post('/trips/${trip!['_id']}/complete');
     await gpsSub?.cancel();
@@ -374,7 +250,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   Widget build(BuildContext context) {
     final auth = context.watch<AuthState>();
     final center = bus ?? const LatLng(-1.3965, 36.7542);
-    final liveMap = trip != null && (sharingLocation || testDriving);
+    final liveMap = trip != null && sharingLocation;
 
     return Scaffold(
       body: Stack(
@@ -403,9 +279,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                           width: 8,
                           height: 8,
                           decoration: BoxDecoration(
-                            color: sharingLocation || testDriving
-                                ? AppColors.accent
-                                : AppColors.muted,
+                            color: sharingLocation ? AppColors.accent : AppColors.muted,
                             shape: BoxShape.circle,
                           ),
                         ),
@@ -413,11 +287,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                         Text(
                           trip == null
                               ? 'Driver offline'
-                              : testDriving
-                                  ? 'Test drive'
-                                  : sharingLocation
-                                      ? 'Live GPS on'
-                                      : 'GPS off',
+                              : sharingLocation
+                                  ? 'Live GPS on'
+                                  : 'GPS off',
                           style: const TextStyle(fontWeight: FontWeight.w700),
                         ),
                       ],
@@ -432,43 +304,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
               ),
             ),
           ),
-          if (trip != null)
-            Positioned(
-              right: 16,
-              bottom: MediaQuery.sizeOf(context).height * 0.42,
-              child: SafeArea(
-                child: Material(
-                  color: AppColors.boltGreen,
-                  elevation: 8,
-                  shadowColor: Colors.black38,
-                  borderRadius: BorderRadius.circular(28),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(28),
-                    onTap: testDriving ? null : _testDriveOneKm,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            testDriving ? Icons.hourglass_top_rounded : Icons.play_arrow_rounded,
-                            color: AppColors.ink,
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            testDriving ? 'Driving…' : 'Demo drive 1 km',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.ink,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
           RideSheet(
             initialSize: trip == null ? 0.42 : 0.4,
             maxSize: 0.8,
@@ -590,23 +425,19 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                             StatusChip(text: message!),
                           ],
                           const SizedBox(height: 14),
-                          if (!sharingLocation && !testDriving)
+                          if (!sharingLocation)
                             BoltPrimaryButton(
                               label: 'Enable live GPS',
                               onPressed: _startGps,
                             )
                           else
-                            OutlinedButton(
-                              onPressed: testDriving ? null : _startGps,
-                              child: Text(
-                                testDriving
-                                    ? 'Demo drive running…'
-                                    : 'Live GPS sharing',
-                              ),
+                            const StatusChip(
+                              text: 'Live GPS sharing',
+                              color: AppColors.accentDark,
                             ),
                           const SizedBox(height: 8),
                           OutlinedButton(
-                            onPressed: testDriving ? null : _complete,
+                            onPressed: _complete,
                             child: const Text('Complete trip'),
                           ),
                           const SizedBox(height: 18),
