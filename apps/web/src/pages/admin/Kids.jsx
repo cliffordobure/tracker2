@@ -9,12 +9,15 @@ export default function Kids() {
   const [routes, setRoutes] = useState([]);
   const [parents, setParents] = useState([]);
   const [school, setSchool] = useState(null);
+  const [mode, setMode] = useState('create'); // create | edit
+  const [editingId, setEditingId] = useState(null);
   const [step, setStep] = useState(1);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
   const [name, setName] = useState('');
   const [grade, setGrade] = useState('');
+  const [active, setActive] = useState(true);
   const [routeMode, setRouteMode] = useState('existing');
   const [routeId, setRouteId] = useState('');
   const [routeName, setRouteName] = useState('');
@@ -38,8 +41,8 @@ export default function Kids() {
     if (s.schools[0]?.location) {
       setBoarding((b) => ({
         ...b,
-        lat: s.schools[0].location.lat,
-        lng: s.schools[0].location.lng,
+        lat: b.lat ?? s.schools[0].location.lat,
+        lng: b.lng ?? s.schools[0].location.lng,
       }));
     }
   };
@@ -48,10 +51,13 @@ export default function Kids() {
     load().catch((e) => setError(e.message));
   }, []);
 
-  const resetWizard = () => {
+  const resetForm = () => {
+    setMode('create');
+    setEditingId(null);
     setStep(1);
     setName('');
     setGrade('');
+    setActive(true);
     setRouteMode('existing');
     setRouteName('');
     setBoarding({
@@ -64,7 +70,30 @@ export default function Kids() {
     setParentIds([]);
   };
 
-  const submit = async () => {
+  const startEdit = (kid) => {
+    setError('');
+    setSuccess('');
+    setMode('edit');
+    setEditingId(kid._id);
+    setStep(1);
+    setName(kid.name || '');
+    setGrade(kid.grade || '');
+    setActive(kid.active !== false);
+    setRouteMode('existing');
+    setRouteId(kid.routeId?._id || kid.routeId || routes[0]?._id || '');
+    setRouteName('');
+    const loc = kid.homeStopId?.location;
+    setBoarding({
+      lat: loc?.lat ?? school?.location?.lat ?? -1.39,
+      lng: loc?.lng ?? school?.location?.lng ?? 36.74,
+      stopName: kid.homeStopId?.name || '',
+    });
+    setParentMode('existing');
+    setParent(emptyParent);
+    setParentIds((kid.parentIds || []).map((p) => p._id || p.id || p).filter(Boolean));
+  };
+
+  const submitCreate = async () => {
     setError('');
     setSuccess('');
     try {
@@ -85,7 +114,45 @@ export default function Kids() {
 
       await api('/admin/kids/onboard', { method: 'POST', body });
       setSuccess(`${name} onboarded successfully.`);
-      resetWizard();
+      resetForm();
+      await load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const submitEdit = async () => {
+    setError('');
+    setSuccess('');
+    try {
+      const body = {
+        name,
+        grade,
+        active,
+        routeId,
+        parentIds,
+        boarding: {
+          lat: boarding.lat,
+          lng: boarding.lng,
+          stopName: boarding.stopName || `${name} boarding`,
+        },
+      };
+      await api(`/admin/kids/${editingId}`, { method: 'PUT', body });
+      setSuccess(`${name} updated.`);
+      resetForm();
+      await load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const remove = async (kid) => {
+    if (!confirm(`Remove ${kid.name}?`)) return;
+    setError('');
+    try {
+      await api(`/admin/kids/${kid._id}`, { method: 'DELETE' });
+      if (editingId === kid._id) resetForm();
+      setSuccess(`${kid.name} removed.`);
       await load();
     } catch (err) {
       setError(err.message);
@@ -96,9 +163,12 @@ export default function Kids() {
     setParentIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
   };
 
+  const maxStep = mode === 'edit' ? 3 : 4;
+
   const canNext = () => {
     if (step === 1) return Boolean(name.trim());
     if (step === 2) {
+      if (mode === 'edit') return Boolean(routeId);
       return routeMode === 'existing' ? Boolean(routeId) : Boolean(routeName.trim());
     }
     if (step === 3) return boarding.lat != null && boarding.lng != null;
@@ -111,11 +181,16 @@ export default function Kids() {
     return false;
   };
 
+  const canSaveEdit = () =>
+    Boolean(name.trim() && routeId && boarding.lat != null && boarding.lng != null);
+
   return (
     <div className="split">
       <div className="stack">
         <h2>Students</h2>
-        <p className="lede">Onboard a student with route, boarding point on the map, and parent login.</p>
+        <p className="lede">
+          Onboard students or edit name, grade, route, boarding stop, and parents.
+        </p>
         {error && <div className="alert">{error}</div>}
         {success && <div className="alert alert-ok">{success}</div>}
         <div className="table-wrap">
@@ -126,6 +201,7 @@ export default function Kids() {
                 <th>Route</th>
                 <th>Boarding</th>
                 <th>Parents</th>
+                <th />
               </tr>
             </thead>
             <tbody>
@@ -138,6 +214,14 @@ export default function Kids() {
                   <td>{k.routeId?.name}</td>
                   <td>{k.homeStopId?.name}</td>
                   <td>{(k.parentIds || []).map((p) => p.name).join(', ')}</td>
+                  <td className="row-actions">
+                    <button type="button" className="btn btn-ghost" onClick={() => startEdit(k)}>
+                      Edit
+                    </button>
+                    <button type="button" className="btn btn-ghost" onClick={() => remove(k)}>
+                      Delete
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -146,13 +230,22 @@ export default function Kids() {
       </div>
 
       <div className="card-form wizard">
+        <div className="row-actions" style={{ justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+          <h3 style={{ margin: 0 }}>{mode === 'edit' ? 'Edit student' : 'Add student'}</h3>
+          {mode === 'edit' && (
+            <button type="button" className="btn btn-ghost" onClick={resetForm}>
+              Cancel edit
+            </button>
+          )}
+        </div>
+
         <div className="wizard-steps">
-          {[1, 2, 3, 4].map((n) => (
+          {Array.from({ length: maxStep }, (_, i) => i + 1).map((n) => (
             <button
               key={n}
               type="button"
               className={`wizard-step ${step === n ? 'active' : ''} ${step > n ? 'done' : ''}`}
-              onClick={() => n < step && setStep(n)}
+              onClick={() => n <= step && setStep(n)}
             >
               {n}
             </button>
@@ -170,29 +263,41 @@ export default function Kids() {
               Grade
               <input value={grade} onChange={(e) => setGrade(e.target.value)} />
             </label>
+            {mode === 'edit' && (
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={active}
+                  onChange={(e) => setActive(e.target.checked)}
+                />
+                Active on routes
+              </label>
+            )}
           </>
         )}
 
         {step === 2 && (
           <>
             <h3>Route</h3>
-            <div className="segmented">
-              <button
-                type="button"
-                className={routeMode === 'existing' ? 'active' : ''}
-                onClick={() => setRouteMode('existing')}
-              >
-                Existing route
-              </button>
-              <button
-                type="button"
-                className={routeMode === 'new' ? 'active' : ''}
-                onClick={() => setRouteMode('new')}
-              >
-                Create route
-              </button>
-            </div>
-            {routeMode === 'existing' ? (
+            {mode === 'create' && (
+              <div className="segmented">
+                <button
+                  type="button"
+                  className={routeMode === 'existing' ? 'active' : ''}
+                  onClick={() => setRouteMode('existing')}
+                >
+                  Existing route
+                </button>
+                <button
+                  type="button"
+                  className={routeMode === 'new' ? 'active' : ''}
+                  onClick={() => setRouteMode('new')}
+                >
+                  Create route
+                </button>
+              </div>
+            )}
+            {mode === 'edit' || routeMode === 'existing' ? (
               <label>
                 Select route
                 <select value={routeId} onChange={(e) => setRouteId(e.target.value)}>
@@ -219,8 +324,8 @@ export default function Kids() {
 
         {step === 3 && (
           <>
-            <h3>Boarding point</h3>
-            <p className="hint">Click the map to set where this student boards the bus.</p>
+            <h3>Boarding / drop-off point</h3>
+            <p className="hint">Click the map to set or move this student&apos;s stop.</p>
             <label>
               Stop name
               <input
@@ -245,10 +350,28 @@ export default function Kids() {
               ]}
               className="map-canvas map-sm"
             />
+            {mode === 'edit' && (
+              <>
+                <h3 style={{ marginTop: '1rem' }}>Parents</h3>
+                <fieldset className="checkbox-set">
+                  <legend>Linked parents</legend>
+                  {parents.map((p) => (
+                    <label key={p.id} className="check">
+                      <input
+                        type="checkbox"
+                        checked={parentIds.includes(p.id)}
+                        onChange={() => toggleParent(p.id)}
+                      />
+                      {p.name} <span className="muted">({p.email})</span>
+                    </label>
+                  ))}
+                </fieldset>
+              </>
+            )}
           </>
         )}
 
-        {step === 4 && (
+        {step === 4 && mode === 'create' && (
           <>
             <h3>Parent</h3>
             <div className="segmented">
@@ -326,7 +449,7 @@ export default function Kids() {
               Back
             </button>
           )}
-          {step < 4 ? (
+          {step < maxStep ? (
             <button
               type="button"
               className="btn btn-primary"
@@ -335,8 +458,17 @@ export default function Kids() {
             >
               Next
             </button>
+          ) : mode === 'edit' ? (
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={!canSaveEdit()}
+              onClick={submitEdit}
+            >
+              Save student
+            </button>
           ) : (
-            <button type="button" className="btn btn-primary" disabled={!canNext()} onClick={submit}>
+            <button type="button" className="btn btn-primary" disabled={!canNext()} onClick={submitCreate}>
               Create student
             </button>
           )}

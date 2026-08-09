@@ -594,8 +594,60 @@ router.put('/kids/:id', async (req, res) => {
     if (!assertSchoolAccess(req, existing.schoolId)) {
       return res.status(403).json({ error: 'Cannot edit kid from another school' });
     }
-    const updates = { ...req.body };
+
+    const { boarding, routeName, ...rest } = req.body;
+    const updates = { ...rest };
     delete updates.schoolId;
+    delete updates.boarding;
+    delete updates.routeName;
+    delete updates.parent;
+
+    let routeId = updates.routeId || existing.routeId;
+    if (routeName && !updates.routeId) {
+      const createdRoute = await Route.create({
+        schoolId: existing.schoolId,
+        name: routeName,
+        description: '',
+      });
+      routeId = createdRoute._id;
+      updates.routeId = routeId;
+    }
+
+    if (routeId) {
+      const route = await Route.findById(routeId);
+      if (!route) return res.status(404).json({ error: 'Route not found' });
+      if (route.schoolId.toString() !== existing.schoolId.toString()) {
+        return res.status(403).json({ error: 'Route belongs to another school' });
+      }
+      updates.routeId = routeId;
+    }
+
+    if (boarding?.lat != null && boarding?.lng != null && routeId) {
+      const lat = Number(boarding.lat);
+      const lng = Number(boarding.lng);
+      const stopName = boarding.stopName || `${existing.name} boarding`;
+      const routeChanged =
+        existing.routeId?.toString() !== routeId.toString();
+
+      if (existing.homeStopId && !routeChanged) {
+        await Stop.findByIdAndUpdate(existing.homeStopId, {
+          name: stopName,
+          location: { lat, lng },
+          type: 'home',
+        });
+      } else {
+        const maxOrder = await Stop.findOne({ routeId }).sort({ order: -1 });
+        const stop = await Stop.create({
+          routeId,
+          name: stopName,
+          type: 'home',
+          order: (maxOrder?.order ?? 0) + 1,
+          location: { lat, lng },
+        });
+        updates.homeStopId = stop._id;
+      }
+    }
+
     const kid = await Kid.findByIdAndUpdate(req.params.id, updates, { new: true })
       .populate('schoolId', 'name')
       .populate('routeId', 'name')
