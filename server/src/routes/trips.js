@@ -149,7 +149,29 @@ router.post('/:id/location', authenticate, requireRole('driver'), async (req, re
     await LocationPing.create({ tripId: trip._id, ...ping });
 
     const payload = { tripId: trip._id.toString(), ...ping };
-    getIO()?.to(`trip:${trip._id}`).emit('location:update', payload);
+    const io = getIO();
+    io?.to(`trip:${trip._id}`).emit('location:update', payload);
+
+    // Parents whose kids are currently on the bus get live updates on their user room
+    // (works even if the client missed trip:join).
+    const [picked, dropped] = await Promise.all([
+      TripEvent.find({ tripId: trip._id, type: 'picked_up' }).select('kidId'),
+      TripEvent.find({ tripId: trip._id, type: 'dropped_off' }).select('kidId'),
+    ]);
+    const droppedSet = new Set(dropped.map((e) => e.kidId.toString()));
+    const onboardIds = picked
+      .map((e) => e.kidId)
+      .filter((id) => !droppedSet.has(id.toString()));
+    if (onboardIds.length) {
+      const onboardKids = await Kid.find({ _id: { $in: onboardIds } }).select('parentIds');
+      const parentIds = new Set();
+      for (const kid of onboardKids) {
+        for (const parentId of kid.parentIds || []) parentIds.add(parentId.toString());
+      }
+      for (const parentId of parentIds) {
+        io?.to(`user:${parentId}`).emit('location:update', payload);
+      }
+    }
 
     res.json({ ok: true, location: ping });
   } catch (err) {

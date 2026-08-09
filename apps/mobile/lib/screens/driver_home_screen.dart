@@ -28,16 +28,18 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   List<LatLng> routePoints = [];
   LatLng? bus;
   double? busHeading;
-  int routeIndex = 0;
   int followNonce = 0;
   bool loading = true;
   bool testDriving = false;
+  bool sharingLocation = false;
   String? message;
   StreamSubscription<Position>? gpsSub;
   AnimationController? _driveCtrl;
   Timer? _serverPushTimer;
+  Timer? _gpsHeartbeat;
   List<LatLng> _drivePath = const [];
   double _driveLength = 0;
+  Position? _lastGps;
 
   @override
   void initState() {
@@ -48,6 +50,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   @override
   void dispose() {
     _stopTestDrive(resetFlag: false);
+    _gpsHeartbeat?.cancel();
     gpsSub?.cancel();
     super.dispose();
   }
@@ -88,7 +91,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
     routePoints = await fetchRoadRoute(stopLatLngs(ordered));
     bus = latLngFrom(trip!['latestLocation']) ??
         (routePoints.isNotEmpty ? routePoints.first : null);
-    routeIndex = 0;
     await _startGps();
     setState(() {});
   }
@@ -101,41 +103,129 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
         'direction': direction,
       });
       await _openTrip(Map<String, dynamic>.from(created['trip'] as Map));
-      setState(() => message = 'Trip started');
+      setState(() => message = 'Trip started — sharing live GPS');
     } catch (e) {
       setState(() => message = e.toString().replaceFirst('Exception: ', ''));
     }
   }
 
-  Future<void> _startGps() async {
+  Future<void> _startScheduled(String tripId) async {
     final auth = context.read<AuthState>();
-    final permission = await Geolocator.requestPermission();
-    if (permission == LocationPermission.denied ||
-        permission == LocationPermission.deniedForever) {
+    try {
+      final started = await auth.api.post('/trips/$tripId/start', {});
+      await _openTrip(Map<String, dynamic>.from(started['trip'] as Map));
+      setState(() => message = 'Dispatched trip started — sharing live GPS');
+    } catch (e) {
+      setState(() => message = e.toString().replaceFirst('Exception: ', ''));
+    }
+  }
+
+  Future<void> _pushLocation(double lat, double lng, {double? heading, double? speed}) async {
+    if (trip == null) return;
+    final auth = context.read<AuthState>();
+    try {
+      await auth.api.post('/trips/${trip!['_id']}/location', {
+        'lat': lat,
+        'lng': lng,
+        if (heading != null) 'heading': heading,
+        if (speed != null) 'speed': speed,
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _startGps() async {
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      if (mounted) {
+        setState(() {
+          sharingLocation = false;
+          message = 'Turn on location services to share live GPS';
+        });
+      }
       return;
     }
+
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      if (mounted) {
+        setState(() {
+          sharingLocation = false;
+          message = 'Location permission needed for parents to track you';
+        });
+      }
+      return;
+    }
+
     await gpsSub?.cancel();
+    _gpsHeartbeat?.cancel();
+
+    // Seed with current fix
+    try {
+      final current = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+      _lastGps = current;
+      if (mounted && !testDriving) {
+        setState(() {
+          bus = LatLng(current.latitude, current.longitude);
+          if (current.heading >= 0) busHeading = current.heading;
+          sharingLocation = true;
+          message = 'Sharing live location with parents';
+        });
+        await _pushLocation(
+          current.latitude,
+          current.longitude,
+          heading: current.heading,
+          speed: current.speed,
+        );
+      }
+    } catch (_) {}
+
     gpsSub = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.high,
-        distanceFilter: 5,
+        distanceFilter: 4,
       ),
     ).listen((pos) async {
-      // Don't fight the test-drive animation with real GPS
       if (!mounted || trip == null || testDriving) return;
-      setState(() => bus = LatLng(pos.latitude, pos.longitude));
-      try {
-        await auth.api.post('/trips/${trip!['_id']}/location', {
-          'lat': pos.latitude,
-          'lng': pos.longitude,
-          'heading': pos.heading,
-          'speed': pos.speed,
-        });
-      } catch (_) {}
+      _lastGps = pos;
+      setState(() {
+        bus = LatLng(pos.latitude, pos.longitude);
+        if (pos.heading >= 0) busHeading = pos.heading;
+        sharingLocation = true;
+      });
+      await _pushLocation(
+        pos.latitude,
+        pos.longitude,
+        heading: pos.heading,
+        speed: pos.speed,
+      );
     });
+
+    // Heartbeat so parents keep getting updates even if the device is still
+    _gpsHeartbeat = Timer.periodic(const Duration(seconds: 3), (_) async {
+      if (!mounted || trip == null || testDriving || _lastGps == null) return;
+      await _pushLocation(
+        _lastGps!.latitude,
+        _lastGps!.longitude,
+        heading: _lastGps!.heading,
+        speed: _lastGps!.speed,
+      );
+    });
+
+    if (mounted) {
+      setState(() {
+        sharingLocation = true;
+        message = 'Sharing live location with parents';
+      });
+    }
   }
 
-  /// Continuous ~1 km road drive (frame-by-frame along the polyline).
+  /// Demo: continuous ~1 km road drive that also posts real trip locations.
   Future<void> _testDriveOneKm() async {
     if (trip == null || testDriving) return;
 
@@ -180,7 +270,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
       return;
     }
 
-    // Dense geometry for smooth corner following
     path = densifyPath(path, stepMeters: 6);
     _drivePath = path;
     _driveLength = pathLengthMeters(path);
@@ -192,7 +281,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
       return;
     }
 
-    // ~28 km/h average → slow enough to watch, still continuous
     final durationMs = ((_driveLength / 1000) * 130000).round().clamp(45000, 180000);
 
     _stopTestDrive(resetFlag: false);
@@ -200,8 +288,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
       vsync: this,
       duration: Duration(milliseconds: durationMs),
     );
-
-    final auth = context.read<AuthState>();
 
     void applyProgress() {
       if (!mounted || _driveCtrl == null) return;
@@ -220,28 +306,25 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
         _serverPushTimer?.cancel();
         setState(() {
           testDriving = false;
-          message = 'Test drive finished (1 km on road)';
+          message = 'Test drive finished — back to live GPS';
         });
         _driveCtrl?.dispose();
         _driveCtrl = null;
       }
     });
 
-    // Push location to API periodically (not every frame)
     _serverPushTimer = Timer.periodic(const Duration(milliseconds: 900), (_) async {
       if (!mounted || trip == null || bus == null) return;
-      try {
-        await auth.api.post('/trips/${trip!['_id']}/location', {
-          'lat': bus!.latitude,
-          'lng': bus!.longitude,
-          'heading': busHeading ?? 0,
-          'speed': 8.0,
-        });
-      } catch (_) {}
+      await _pushLocation(
+        bus!.latitude,
+        bus!.longitude,
+        heading: busHeading ?? 0,
+        speed: 8.0,
+      );
     });
 
     setState(() {
-      message = 'Test drive: continuous 1 km on road…';
+      message = 'Test drive: publishing fake GPS to parents…';
       followNonce++;
     });
     await _driveCtrl!.forward(from: 0);
@@ -256,7 +339,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
     final auth = context.read<AuthState>();
     final res = await auth.api.post('/trips/${trip!['_id']}/kids/$kidId/pickup');
     events.add(Map<String, dynamic>.from(res['event'] as Map));
-    setState(() => message = 'Picked up');
+    setState(() => message = 'Picked up — parent can now track live');
   }
 
   Future<void> _dropoff(String kidId) async {
@@ -269,6 +352,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   Future<void> _complete() async {
     final auth = context.read<AuthState>();
     _stopTestDrive();
+    _gpsHeartbeat?.cancel();
     await auth.api.post('/trips/${trip!['_id']}/complete');
     await gpsSub?.cancel();
     setState(() {
@@ -278,6 +362,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
       events = [];
       routePoints = [];
       bus = null;
+      sharingLocation = false;
       message = 'Trip completed';
     });
     await _load();
@@ -287,6 +372,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
   Widget build(BuildContext context) {
     final auth = context.watch<AuthState>();
     final center = bus ?? const LatLng(-1.3965, 36.7542);
+    final liveMap = trip != null && (sharingLocation || testDriving);
 
     return Scaffold(
       body: Stack(
@@ -298,7 +384,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
             routePoints: routePoints,
             stops: stops,
             followNonce: followNonce,
-            continuous: testDriving,
+            continuous: liveMap,
           ),
           SafeArea(
             child: Padding(
@@ -315,13 +401,21 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                           width: 8,
                           height: 8,
                           decoration: BoxDecoration(
-                            color: trip != null ? AppColors.accent : AppColors.muted,
+                            color: sharingLocation || testDriving
+                                ? AppColors.accent
+                                : AppColors.muted,
                             shape: BoxShape.circle,
                           ),
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          trip == null ? 'Driver offline' : 'Online · en route',
+                          trip == null
+                              ? 'Driver offline'
+                              : testDriving
+                                  ? 'Test drive'
+                                  : sharingLocation
+                                      ? 'Live GPS on'
+                                      : 'GPS off',
                           style: const TextStyle(fontWeight: FontWeight.w700),
                         ),
                       ],
@@ -360,7 +454,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                           ),
                           const SizedBox(width: 6),
                           Text(
-                            testDriving ? 'Driving…' : 'Test drive 1 km',
+                            testDriving ? 'Driving…' : 'Demo drive 1 km',
                             style: const TextStyle(
                               fontWeight: FontWeight.w800,
                               color: AppColors.ink,
@@ -384,11 +478,12 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                         children: [
                           const Text(
                             'Ready when you are',
-                            style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -0.5),
+                            style: TextStyle(
+                                fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -0.5),
                           ),
                           const SizedBox(height: 6),
                           const Text(
-                            'Start a morning or evening trip — parents track you live.',
+                            'Start a trip — your phone GPS updates parents once kids are onboard.',
                             style: TextStyle(color: AppColors.muted),
                           ),
                           if (message != null) ...[
@@ -397,6 +492,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                           ],
                           const SizedBox(height: 18),
                           ...routes.map((r) {
+                            final scheduled = List<Map<String, dynamic>>.from(
+                              r['scheduledTrips'] as List? ?? [],
+                            );
                             return Container(
                               margin: const EdgeInsets.only(bottom: 12),
                               padding: const EdgeInsets.all(16),
@@ -409,26 +507,50 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                                 children: [
                                   Text(
                                     r['name'] ?? 'Route',
-                                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w800, fontSize: 17),
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
                                     '${(r['kids'] as List?)?.length ?? 0} kids on this route',
                                     style: const TextStyle(color: AppColors.muted),
                                   ),
+                                  if (scheduled.isNotEmpty) ...[
+                                    const SizedBox(height: 12),
+                                    const Text(
+                                      'Dispatched today',
+                                      style: TextStyle(fontWeight: FontWeight.w700),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    ...scheduled.map((st) {
+                                      final seq = st['sequence'] ?? 1;
+                                      final kidCount =
+                                          (st['kidIds'] as List?)?.length ?? 0;
+                                      return Padding(
+                                        padding: const EdgeInsets.only(bottom: 8),
+                                        child: BoltPrimaryButton(
+                                          label: 'Start trip $seq ($kidCount kids)',
+                                          onPressed: () =>
+                                              _startScheduled(st['_id'].toString()),
+                                        ),
+                                      );
+                                    }),
+                                  ],
                                   const SizedBox(height: 14),
                                   Row(
                                     children: [
                                       Expanded(
                                         child: BoltPrimaryButton(
                                           label: 'Morning',
-                                          onPressed: () => _startTrip(r['_id'], 'to_school'),
+                                          onPressed: () =>
+                                              _startTrip(r['_id'], 'to_school'),
                                         ),
                                       ),
                                       const SizedBox(width: 8),
                                       Expanded(
                                         child: OutlinedButton(
-                                          onPressed: () => _startTrip(r['_id'], 'to_home'),
+                                          onPressed: () =>
+                                              _startTrip(r['_id'], 'to_home'),
                                           child: const Text('Evening'),
                                         ),
                                       ),
@@ -447,12 +569,17 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                             children: [
                               Expanded(
                                 child: Text(
-                                  trip!['routeId'] is Map ? trip!['routeId']['name'] : 'Active trip',
-                                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
+                                  trip!['routeId'] is Map
+                                      ? trip!['routeId']['name']
+                                      : 'Active trip',
+                                  style: const TextStyle(
+                                      fontSize: 24, fontWeight: FontWeight.w800),
                                 ),
                               ),
                               StatusChip(
-                                text: trip!['direction'] == 'to_school' ? 'To school' : 'To home',
+                                text: trip!['direction'] == 'to_school'
+                                    ? 'To school'
+                                    : 'To home',
                               ),
                             ],
                           ),
@@ -461,17 +588,28 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                             StatusChip(text: message!),
                           ],
                           const SizedBox(height: 14),
-                          BoltPrimaryButton(
-                            label: testDriving ? 'Test drive running…' : 'Test drive 1 km',
-                            onPressed: testDriving ? null : _testDriveOneKm,
-                          ),
+                          if (!sharingLocation && !testDriving)
+                            BoltPrimaryButton(
+                              label: 'Enable live GPS',
+                              onPressed: _startGps,
+                            )
+                          else
+                            OutlinedButton(
+                              onPressed: testDriving ? null : _startGps,
+                              child: Text(
+                                testDriving
+                                    ? 'Demo drive running…'
+                                    : 'Live GPS sharing',
+                              ),
+                            ),
                           const SizedBox(height: 8),
                           OutlinedButton(
                             onPressed: testDriving ? null : _complete,
                             child: const Text('Complete trip'),
                           ),
                           const SizedBox(height: 18),
-                          const Text('Passengers', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                          const Text('Passengers',
+                              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
                           const SizedBox(height: 10),
                           ...kids.map((kid) {
                             final id = kid['_id'] as String? ?? kid.toString();
@@ -491,14 +629,16 @@ class _DriverHomeScreenState extends State<DriverHomeScreen>
                                     child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        Text(name, style: const TextStyle(fontWeight: FontWeight.w700)),
+                                        Text(name,
+                                            style: const TextStyle(fontWeight: FontWeight.w700)),
                                         Text(
                                           dropped
                                               ? 'Dropped off'
                                               : picked
-                                                  ? 'On the bus'
+                                                  ? 'On the bus · parent tracking'
                                                   : 'Waiting at stop',
-                                          style: const TextStyle(color: AppColors.muted, fontSize: 12),
+                                          style: const TextStyle(
+                                              color: AppColors.muted, fontSize: 12),
                                         ),
                                       ],
                                     ),

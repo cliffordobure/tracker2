@@ -2,9 +2,9 @@
 
 One Uber/Bolt-style app for **parents**, **teachers**, and **drivers**.
 
-- Maps: Mapbox (`navigation-day-v1` style)
-- API: `https://tracker2-j8vr.onrender.com`
-- Live updates: Socket.IO
+- Maps: Mapbox streets
+- Live updates: Socket.IO + `POST /trips/:id/location`
+- Parent tracking starts after the driver marks **Pick up** (kid on the bus)
 
 ## Run
 
@@ -12,33 +12,38 @@ One Uber/Bolt-style app for **parents**, **teachers**, and **drivers**.
 cd apps/mobile
 flutter pub get
 
-# Pass Mapbox token via dart-define (do NOT commit the token)
+# Hosted API (default) + Mapbox
 flutter run --dart-define=MAPBOX_TOKEN=pk.your_mapbox_public_token
+
+# Local API (Android emulator → host machine)
+flutter run --dart-define=API_BASE=http://10.0.2.2:4001 --dart-define=MAPBOX_TOKEN=pk.your_mapbox_public_token
+
+# Local API (physical phone on same Wi‑Fi — use your PC LAN IP)
+flutter run --dart-define=API_BASE=http://192.168.x.x:4001 --dart-define=MAPBOX_TOKEN=pk.your_mapbox_public_token
 ```
+
+## Live tracking flow
+
+1. Driver starts a trip (dispatched or morning/evening) → phone GPS posts every move (+ 3s heartbeat).
+2. Driver taps **Pick up** for a child → that parent can track.
+3. Parent app auto-joins the trip and moves the bus marker from real `location:update` events.
+4. **Demo drive 1 km** still posts the same location API (for demos without walking).
 
 ## Demo logins
 
 Password for all: `password123`
 
-| Role    | Email                         |
-|---------|-------------------------------|
-| Parent  | parent1@schooltracker.test    |
-| Teacher | teacher@schooltracker.test    |
-| Driver  | driver@schooltracker.test     |
-
-## Role screens
-
-- **Parent** — live bus map, road route, pickup/drop notifications
-- **Teacher** — school-wide active buses + students list
-- **Driver** — start morning/evening trip, GPS share, pick up / drop off, simulate along road
+| Role         | Email                            |
+|--------------|----------------------------------|
+| Parent       | parent1@schooltracker.test       |
+| Teacher      | teacher@schooltracker.test       |
+| Driver       | driver@schooltracker.test        |
+| School admin | schooladmin@schooltracker.test   |
 
 ## Important: redeploy backend
 
-Teacher routes (`/teacher/*`) were added after the first Render deploy.  
-Redeploy the `server` folder to Render so teacher login works on the hosted API.
+Redeploy `server` to Render so hosted mobile builds get:
+- role split / dispatch / buses
+- location fan-out to parents of kids currently on the bus
 
-Parent and driver flows already match the existing hosted endpoints.
-
-## Config
-
-Edit `lib/config.dart` for API URL / Mapbox token.
+Until then, point the app at your local API with `API_BASE`.

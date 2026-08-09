@@ -1,6 +1,12 @@
 class AppConfig {
-  /// Hosted SchoolKids Tracker API
-  static const apiBase = 'https://tracker2-j8vr.onrender.com';
+  /// Override at run time, e.g.:
+  /// flutter run --dart-define=API_BASE=http://10.0.2.2:4001 --dart-define=MAPBOX_TOKEN=pk...
+  /// Android emulator → host machine: http://10.0.2.2:4001
+  /// Physical device → your PC LAN IP, e.g. http://192.168.1.20:4001
+  static const apiBase = String.fromEnvironment(
+    'API_BASE',
+    defaultValue: 'https://tracker2-j8vr.onrender.com',
+  );
 
   /// Pass at run/build time, e.g.:
   /// flutter run --dart-define=MAPBOX_TOKEN=pk.your_token

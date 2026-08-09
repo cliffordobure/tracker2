@@ -27,7 +27,17 @@ export default function ParentHome() {
     setNotifications(n.notifications);
     if (a.trips[0]) {
       setSelected(a.trips[0]);
-      setDriverLocation(a.trips[0].trip.latestLocation || null);
+      const events = a.trips[0].events || [];
+      const myKids = a.trips[0].myKids || [];
+      const onBus = myKids.some((kid) => {
+        const id = kid._id;
+        const picked = events.some((e) => (e.kidId?._id || e.kidId) === id && e.type === 'picked_up');
+        const dropped = events.some(
+          (e) => (e.kidId?._id || e.kidId) === id && e.type === 'dropped_off'
+        );
+        return picked && !dropped;
+      });
+      setDriverLocation(onBus ? a.trips[0].trip.latestLocation || null : null);
     } else {
       setSelected(null);
       setDriverLocation(null);
@@ -46,6 +56,17 @@ export default function ParentHome() {
 
     const onLocation = (payload) => {
       if (!selected?.trip?._id || payload.tripId !== selected.trip._id) return;
+      const events = selected.events || [];
+      const myKids = selected.myKids || [];
+      const onBus = myKids.some((kid) => {
+        const id = kid._id;
+        const picked = events.some((e) => (e.kidId?._id || e.kidId) === id && e.type === 'picked_up');
+        const dropped = events.some(
+          (e) => (e.kidId?._id || e.kidId) === id && e.type === 'dropped_off'
+        );
+        return picked && !dropped;
+      });
+      if (!onBus) return;
       setDriverLocation(payload);
     };
 

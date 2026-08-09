@@ -18,16 +18,123 @@ class ParentHomeScreen extends StatefulWidget {
 class _ParentHomeScreenState extends State<ParentHomeScreen> {
   List<Map<String, dynamic>> kids = [];
   Map<String, dynamic>? active;
+  List<Map<String, dynamic>> events = [];
   List<LatLng> routePoints = [];
   LatLng? bus;
+  double? busHeading;
   String? status;
   bool loading = true;
   int followNonce = 0;
+  String? _boundTripId;
+  bool _listenersBound = false;
+  AuthState? _auth;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _auth = context.read<AuthState>();
+      _bindSocketListeners();
+      _load();
+    });
+  }
+
+  @override
+  void dispose() {
+    final auth = _auth;
+    if (auth != null) {
+      _unbindSocketListeners(auth);
+      if (_boundTripId != null) auth.sockets.leaveTrip(_boundTripId!);
+    }
+    super.dispose();
+  }
+
+  void _bindSocketListeners() {
+    if (_listenersBound || _auth == null) return;
+    final sockets = _auth!.sockets;
+    sockets.on('trip:started', _onTripLifecycle);
+    sockets.on('trip:completed', _onTripLifecycle);
+    sockets.on('kid:picked_up', _onKidPickedUp);
+    sockets.on('kid:dropped_off', _onKidDroppedOff);
+    sockets.on('location:update', _onLocationUpdate);
+    sockets.on('notification:new', _onNotification);
+    _listenersBound = true;
+  }
+
+  void _unbindSocketListeners(AuthState auth) {
+    if (!_listenersBound) return;
+    auth.sockets.off('trip:started', _onTripLifecycle);
+    auth.sockets.off('trip:completed', _onTripLifecycle);
+    auth.sockets.off('kid:picked_up', _onKidPickedUp);
+    auth.sockets.off('kid:dropped_off', _onKidDroppedOff);
+    auth.sockets.off('location:update', _onLocationUpdate);
+    auth.sockets.off('notification:new', _onNotification);
+    _listenersBound = false;
+  }
+
+  void _onTripLifecycle(dynamic _) {
+    if (!mounted) return;
     _load();
+  }
+
+  void _onKidPickedUp(dynamic data) {
+    if (!mounted) return;
+    setState(() => status = 'On the bus — live tracking');
+    _load();
+  }
+
+  void _onKidDroppedOff(dynamic _) {
+    if (!mounted) return;
+    setState(() {
+      status = 'Dropped off';
+      bus = null;
+      busHeading = null;
+    });
+    _load();
+  }
+
+  void _onLocationUpdate(dynamic data) {
+    if (!mounted || data is! Map) return;
+    final tripId = _boundTripId;
+    if (tripId == null || data['tripId'] != tripId) return;
+    if (!_anyKidOnBus) return;
+
+    final lat = (data['lat'] as num?)?.toDouble();
+    final lng = (data['lng'] as num?)?.toDouble();
+    if (lat == null || lng == null) return;
+
+    setState(() {
+      bus = LatLng(lat, lng);
+      final heading = (data['heading'] as num?)?.toDouble();
+      if (heading != null && heading >= 0) busHeading = heading;
+      status = 'Live · tracking driver';
+    });
+  }
+
+  void _onNotification(dynamic data) {
+    if (!mounted || data is! Map) return;
+    final title = data['title'] as String?;
+    if (title != null) setState(() => status = title);
+  }
+
+  bool get _anyKidOnBus {
+    if (active == null) return false;
+    final myKids = List<Map<String, dynamic>>.from(active!['myKids'] as List? ?? []);
+    for (final kid in myKids) {
+      final id = kid['_id']?.toString();
+      if (id == null) continue;
+      final picked = events.any((e) {
+        final kidId = e['kidId'] is Map ? e['kidId']['_id'] : e['kidId'];
+        return kidId?.toString() == id && e['type'] == 'picked_up';
+      });
+      final dropped = events.any((e) {
+        final kidId = e['kidId'] is Map ? e['kidId']['_id'] : e['kidId'];
+        return kidId?.toString() == id && e['type'] == 'dropped_off';
+      });
+      if (picked && !dropped) return true;
+    }
+    return false;
   }
 
   Future<void> _load() async {
@@ -40,46 +147,66 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
       final trips = List<Map<String, dynamic>>.from(activeRes['trips'] as List? ?? []);
       active = trips.isNotEmpty ? trips.first : null;
 
+      if (_boundTripId != null) {
+        auth.sockets.leaveTrip(_boundTripId!);
+        _boundTripId = null;
+      }
+
       if (active != null) {
         final trip = Map<String, dynamic>.from(active!['trip'] as Map);
         final stops = List<Map<String, dynamic>>.from(active!['stops'] as List? ?? []);
+        events = List<Map<String, dynamic>>.from(active!['events'] as List? ?? []);
         final ordered = orderedStops(stops, trip['direction'] as String?);
         routePoints = await fetchRoadRoute(stopLatLngs(ordered));
-        bus = latLngFrom(trip['latestLocation']) ??
-            (routePoints.isNotEmpty ? routePoints.first : null);
 
-        final tripId = trip['_id'] as String;
+        final tripId = trip['_id'].toString();
+        _boundTripId = tripId;
         auth.sockets.joinTrip(tripId);
-        auth.sockets.socket?.off('location:update');
-        auth.sockets.socket?.on('location:update', (data) {
-          if (data is Map && data['tripId'] == tripId && mounted) {
-            setState(() {
-              bus = LatLng(
-                (data['lat'] as num).toDouble(),
-                (data['lng'] as num).toDouble(),
-              );
-            });
+
+        if (_anyKidOnBus) {
+          bus = latLngFrom(trip['latestLocation']) ??
+              (routePoints.isNotEmpty ? routePoints.first : null);
+          final loc = trip['latestLocation'];
+          if (loc is Map && loc['heading'] != null) {
+            busHeading = (loc['heading'] as num).toDouble();
           }
-        });
-        auth.sockets.socket?.on('kid:picked_up', (_) {
-          if (!mounted) return;
-          setState(() => status = 'Picked up');
-          _load();
-        });
-        auth.sockets.socket?.on('kid:dropped_off', (_) {
-          if (!mounted) return;
-          setState(() => status = 'Dropped off');
-          _load();
-        });
+          status = 'Live · tracking driver';
+        } else {
+          bus = null;
+          busHeading = null;
+          status = 'Trip started — waiting for pickup';
+        }
       } else {
         routePoints = [];
         bus = null;
+        busHeading = null;
+        events = [];
+        if (status == 'Live · tracking driver' || status == 'On the bus — live tracking') {
+          status = null;
+        }
       }
     } catch (e) {
       status = e.toString().replaceFirst('Exception: ', '');
     } finally {
       if (mounted) setState(() => loading = false);
     }
+  }
+
+  String _kidChip(Map<String, dynamic> kid) {
+    if (active == null) return 'Idle';
+    final id = kid['_id']?.toString();
+    final picked = events.any((e) {
+      final kidId = e['kidId'] is Map ? e['kidId']['_id'] : e['kidId'];
+      return kidId?.toString() == id && e['type'] == 'picked_up';
+    });
+    final dropped = events.any((e) {
+      final kidId = e['kidId'] is Map ? e['kidId']['_id'] : e['kidId'];
+      return kidId?.toString() == id && e['type'] == 'dropped_off';
+    });
+    if (dropped) return 'Dropped off';
+    if (picked) return 'On the bus';
+    if (active != null) return 'Waiting';
+    return 'Idle';
   }
 
   @override
@@ -90,7 +217,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
     final stops = active == null
         ? <Map<String, dynamic>>[]
         : List<Map<String, dynamic>>.from(active!['stops'] as List? ?? []);
-    final live = trip != null;
+    final live = trip != null && _anyKidOnBus;
 
     return Scaffold(
       body: Stack(
@@ -98,9 +225,11 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
           RideMap(
             center: center,
             busLocation: bus,
+            busHeading: busHeading,
             routePoints: routePoints,
             stops: stops,
             followNonce: followNonce,
+            continuous: live,
           ),
           SafeArea(
             child: Padding(
@@ -126,9 +255,11 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                             child: Text(
                               live
                                   ? (trip['direction'] == 'to_school'
-                                      ? 'On the way to school'
-                                      : 'On the way home')
-                                  : 'Where is the bus?',
+                                      ? 'Tracking to school'
+                                      : 'Tracking home')
+                                  : trip != null
+                                      ? 'Waiting for pickup'
+                                      : 'Where is the bus?',
                               style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -163,7 +294,11 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  live ? 'Your ride is live' : 'No active ride',
+                                  live
+                                      ? 'Live tracking'
+                                      : trip != null
+                                          ? 'Trip in progress'
+                                          : 'No active ride',
                                   style: const TextStyle(
                                     fontSize: 26,
                                     fontWeight: FontWeight.w800,
@@ -173,8 +308,10 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                                 const SizedBox(height: 6),
                                 Text(
                                   live
-                                      ? '${trip['routeId'] is Map ? trip['routeId']['name'] : 'School route'} · tracking bus'
-                                      : 'You’ll see the bus move here when the driver starts.',
+                                      ? 'Your child is on the bus — watching the driver move in real time.'
+                                      : trip != null
+                                          ? 'You’ll see the bus here once the driver marks pickup.'
+                                          : 'You’ll be notified when the driver starts the trip.',
                                   style: const TextStyle(color: AppColors.muted, height: 1.35),
                                 ),
                               ],
@@ -200,7 +337,8 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                                   color: AppColors.boltGreen,
                                   borderRadius: BorderRadius.circular(14),
                                 ),
-                                child: const Icon(Icons.directions_car_filled_rounded, color: AppColors.ink),
+                                child: const Icon(Icons.directions_car_filled_rounded,
+                                    color: AppColors.ink),
                               ),
                               const SizedBox(width: 12),
                               Expanded(
@@ -211,11 +349,14 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                                       trip['driverId'] is Map
                                           ? trip['driverId']['name'] ?? 'Driver'
                                           : 'School bus',
-                                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w800, fontSize: 16),
                                     ),
-                                    const Text(
-                                      'Moving along the route',
-                                      style: TextStyle(color: AppColors.muted, fontSize: 13),
+                                    Text(
+                                      trip['routeId'] is Map
+                                          ? trip['routeId']['name'] ?? 'School route'
+                                          : 'School route',
+                                      style: const TextStyle(color: AppColors.muted, fontSize: 13),
                                     ),
                                   ],
                                 ),
@@ -225,49 +366,55 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                           ),
                         ),
                       const SizedBox(height: 16),
-                      const Text('Your kids', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                      const Text('Your kids',
+                          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
                       const SizedBox(height: 10),
                       ...kids.map(
-                        (k) => Container(
-                          margin: const EdgeInsets.only(bottom: 10),
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            border: Border.all(color: const Color(0xFFE5E7EB)),
-                            borderRadius: BorderRadius.circular(18),
-                          ),
-                          child: Row(
-                            children: [
-                              CircleAvatar(
-                                backgroundColor: AppColors.accent.withValues(alpha: 0.2),
-                                child: Text(
-                                  ((k['name'] as String?)?.isNotEmpty == true
-                                          ? (k['name'] as String)[0]
-                                          : '?')
-                                      .toUpperCase(),
-                                  style: const TextStyle(fontWeight: FontWeight.w800),
+                        (k) {
+                          final chip = _kidChip(k);
+                          final onBus = chip == 'On the bus';
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 10),
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              border: Border.all(color: const Color(0xFFE5E7EB)),
+                              borderRadius: BorderRadius.circular(18),
+                            ),
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                  backgroundColor: AppColors.accent.withValues(alpha: 0.2),
+                                  child: Text(
+                                    ((k['name'] as String?)?.isNotEmpty == true
+                                            ? (k['name'] as String)[0]
+                                            : '?')
+                                        .toUpperCase(),
+                                    style: const TextStyle(fontWeight: FontWeight.w800),
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(k['name'] ?? 'Child',
-                                        style: const TextStyle(fontWeight: FontWeight.w700)),
-                                    Text(
-                                      k['routeId'] is Map ? k['routeId']['name'] ?? '' : '',
-                                      style: const TextStyle(color: AppColors.muted, fontSize: 13),
-                                    ),
-                                  ],
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(k['name'] ?? 'Child',
+                                          style: const TextStyle(fontWeight: FontWeight.w700)),
+                                      Text(
+                                        k['routeId'] is Map ? k['routeId']['name'] ?? '' : '',
+                                        style: const TextStyle(
+                                            color: AppColors.muted, fontSize: 13),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                              StatusChip(
-                                text: live ? 'On trip' : 'Idle',
-                                color: live ? AppColors.accentDark : AppColors.muted,
-                              ),
-                            ],
-                          ),
-                        ),
+                                StatusChip(
+                                  text: chip,
+                                  color: onBus ? AppColors.accentDark : AppColors.muted,
+                                ),
+                              ],
+                            ),
+                          );
+                        },
                       ),
                       const SizedBox(height: 8),
                       BoltPrimaryButton(label: 'Refresh', onPressed: _load),
