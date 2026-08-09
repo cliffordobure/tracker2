@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { DriverProfile, Route, Stop, Kid, Trip, Notification } from '../models/index.js';
+import { DriverProfile, Route, Stop, Kid, Trip, Notification, DeviceToken } from '../models/index.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 
 const router = Router();
@@ -131,6 +131,49 @@ router.get('/trips/active', async (req, res) => {
       .populate('busId', 'plate label seats')
       .populate('kidIds');
     res.json({ trip });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/device-tokens', async (req, res) => {
+  try {
+    const { platform, token, keys, userAgent } = req.body || {};
+    if (!platform || !token) {
+      return res.status(400).json({ error: 'platform and token are required' });
+    }
+    if (!['fcm', 'web_push'].includes(platform)) {
+      return res.status(400).json({ error: 'platform must be fcm or web_push' });
+    }
+    if (platform === 'web_push' && (!keys?.p256dh || !keys?.auth)) {
+      return res.status(400).json({ error: 'web_push requires keys.p256dh and keys.auth' });
+    }
+
+    const doc = await DeviceToken.findOneAndUpdate(
+      { userId: req.user.id, platform, token },
+      {
+        userId: req.user.id,
+        platform,
+        token,
+        keys: keys || undefined,
+        userAgent: userAgent || req.get('user-agent') || '',
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+    res.json({ ok: true, id: doc._id.toString() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/device-tokens', async (req, res) => {
+  try {
+    const { platform, token } = req.body || {};
+    const filter = { userId: req.user.id };
+    if (platform) filter.platform = platform;
+    if (token) filter.token = token;
+    const result = await DeviceToken.deleteMany(filter);
+    res.json({ ok: true, deleted: result.deletedCount });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

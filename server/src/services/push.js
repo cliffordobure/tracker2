@@ -66,12 +66,37 @@ async function sendFcm(messaging, tokenDoc, payload) {
   for (const [k, v] of Object.entries(payload.data || {})) {
     if (v != null) data[k] = String(v);
   }
+  // Ensure data payload carries title/body for foreground local display
+  if (payload.title) data.title = String(payload.title);
+  if (payload.body) data.body = String(payload.body);
+
+  const channelId =
+    payload.data?.type === 'late_pickup_request'
+      ? 'schoolkids_driver_alerts'
+      : 'schoolkids_alerts';
+
   await messaging.send({
     token: tokenDoc.token,
     notification: { title: payload.title, body: payload.body },
     data,
-    android: { priority: 'high' },
-    apns: { payload: { aps: { sound: 'default' } } },
+    android: {
+      priority: 'high',
+      notification: {
+        channelId,
+        priority: 'high',
+        defaultSound: true,
+        defaultVibrateTimings: true,
+      },
+    },
+    apns: {
+      payload: {
+        aps: {
+          sound: 'default',
+          badge: 1,
+          contentAvailable: true,
+        },
+      },
+    },
   });
 }
 
