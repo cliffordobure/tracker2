@@ -67,9 +67,10 @@ export default function SchoolAdminLayout() {
   }, [open]);
 
   const title = pageTitles[location.pathname] || 'School Admin';
+  const isLiveMap = location.pathname === '/school-admin/live-tracking';
 
   return (
-    <div className="sa-shell">
+    <div className={`sa-shell${isLiveMap ? ' sa-shell--live-map' : ''}`}>
       <div className="sa-bg" aria-hidden="true" />
 
       {open && (
@@ -143,7 +144,7 @@ export default function SchoolAdminLayout() {
           </div>
         </header>
 
-        <div className="sa-content">
+        <div className={`sa-content${isLiveMap ? ' sa-content--map' : ''}`}>
           <Outlet />
         </div>
       </div>

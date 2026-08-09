@@ -1,63 +1,59 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../lib/api';
 import { connectSocket } from '../../lib/socket';
 import MapView from '../../components/MapView';
 import { useAuth } from '../../context/AuthContext';
 import { stopsForTripKids } from '../../lib/geo';
+import { anyKidOnBus, isKidOnBus } from '../../lib/mapMarkers';
 import { notificationTypeLabel, registerParentWebPush } from '../../lib/webPush';
 
+function locFrom(trip) {
+  const loc = trip?.latestLocation || trip?.startLocation;
+  if (loc?.lat == null || loc?.lng == null) return null;
+  return loc;
+}
+
 export default function ParentHome() {
-  const { showToast } = useAuth();
+  const { user, logout, showToast } = useAuth();
   const [kids, setKids] = useState([]);
   const [active, setActive] = useState([]);
-  const [history, setHistory] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [selected, setSelected] = useState(null);
   const [driverLocation, setDriverLocation] = useState(null);
   const [error, setError] = useState('');
-  const [pushStatus, setPushStatus] = useState('');
+  const [sheetTab, setSheetTab] = useState('ride');
+  const selectedRef = useRef(null);
 
-  const load = async () => {
-    const [k, a, h, n] = await Promise.all([
+  useEffect(() => {
+    selectedRef.current = selected;
+  }, [selected]);
+
+  const applyTrip = useCallback((tripWrap) => {
+    setSelected(tripWrap || null);
+    if (!tripWrap) {
+      setDriverLocation(null);
+      return;
+    }
+    const onBus = anyKidOnBus(tripWrap.events, tripWrap.myKids);
+    setDriverLocation(onBus ? locFrom(tripWrap.trip) : null);
+  }, []);
+
+  const load = useCallback(async () => {
+    const [k, a, n] = await Promise.all([
       api('/parent/kids'),
       api('/parent/trips/active'),
-      api('/parent/trips'),
       api('/parent/notifications'),
     ]);
     setKids(k.kids);
     setActive(a.trips);
-    setHistory(h.trips);
     setNotifications(n.notifications);
-    if (a.trips[0]) {
-      setSelected(a.trips[0]);
-      const events = a.trips[0].events || [];
-      const myKids = a.trips[0].myKids || [];
-      const onBus = myKids.some((kid) => {
-        const id = kid._id;
-        const picked = events.some((e) => (e.kidId?._id || e.kidId) === id && e.type === 'picked_up');
-        const dropped = events.some(
-          (e) => (e.kidId?._id || e.kidId) === id && e.type === 'dropped_off'
-        );
-        return picked && !dropped;
-      });
-      setDriverLocation(onBus ? a.trips[0].trip.latestLocation || null : null);
-    } else {
-      setSelected(null);
-      setDriverLocation(null);
-    }
-  };
+    applyTrip(a.trips[0] || null);
+  }, [applyTrip]);
 
   useEffect(() => {
     load().catch((e) => setError(e.message));
-    registerParentWebPush()
-      .then((r) => {
-        if (r.ok) setPushStatus('Browser push enabled');
-        else if (r.reason === 'no_vapid') setPushStatus('Push not configured on server');
-        else if (r.reason === 'denied') setPushStatus('Push permission denied');
-        else if (r.reason === 'unsupported') setPushStatus('Push not supported in this browser');
-      })
-      .catch(() => setPushStatus('Push registration failed'));
-  }, []);
+    registerParentWebPush().catch(() => {});
+  }, [load]);
 
   useEffect(() => {
     const socket = connectSocket();
@@ -66,28 +62,43 @@ export default function ParentHome() {
     const refresh = () => load().catch(() => {});
 
     const onLocation = (payload) => {
-      if (!selected?.trip?._id || payload.tripId !== selected.trip._id) return;
-      const events = selected.events || [];
-      const myKids = selected.myKids || [];
-      const onBus = myKids.some((kid) => {
-        const id = kid._id;
-        const picked = events.some((e) => (e.kidId?._id || e.kidId) === id && e.type === 'picked_up');
-        const dropped = events.some(
-          (e) => (e.kidId?._id || e.kidId) === id && e.type === 'dropped_off'
-        );
-        return picked && !dropped;
+      const cur = selectedRef.current;
+      if (!cur?.trip?._id) return;
+      if (String(payload.tripId) !== String(cur.trip._id)) return;
+      if (!anyKidOnBus(cur.events, cur.myKids)) return;
+      setDriverLocation({
+        lat: payload.lat,
+        lng: payload.lng,
+        heading: payload.heading,
+        speed: payload.speed,
+        at: payload.at,
       });
-      if (!onBus) return;
-      setDriverLocation(payload);
+    };
+
+    const onPickedUp = (p) => {
+      showToast('Your child was picked up — live tracking on');
+      const cur = selectedRef.current;
+      if (cur && p?.kidId) {
+        const kidId = String(p.kidId?._id || p.kidId);
+        const has = (cur.events || []).some(
+          (e) => String(e.kidId?._id || e.kidId) === kidId && e.type === 'picked_up'
+        );
+        if (!has) {
+          const next = {
+            ...cur,
+            events: [...(cur.events || []), { kidId, type: 'picked_up' }],
+          };
+          selectedRef.current = next;
+          setSelected(next);
+          setDriverLocation(locFrom(cur.trip));
+        }
+      }
+      refresh();
     };
 
     socket.on('location:update', onLocation);
     socket.on('trip:started', refresh);
-    socket.on('kid:picked_up', (p) => {
-      showToast('Your child was picked up');
-      refresh();
-      if (selected?.trip?._id) socket.emit('trip:join', selected.trip._id);
-    });
+    socket.on('kid:picked_up', onPickedUp);
     socket.on('kid:dropped_off', () => {
       showToast('Your child was dropped off');
       refresh();
@@ -103,18 +114,19 @@ export default function ParentHome() {
     return () => {
       socket.off('location:update', onLocation);
       socket.off('trip:started', refresh);
-      socket.off('kid:picked_up');
+      socket.off('kid:picked_up', onPickedUp);
       socket.off('kid:dropped_off');
       socket.off('trip:completed');
       socket.off('notification:new');
     };
-  }, [selected?.trip?._id, showToast]);
+  }, [load, showToast]);
 
   useEffect(() => {
     if (!selected?.trip?._id) return undefined;
     const socket = connectSocket();
-    socket?.emit('trip:join', selected.trip._id);
-    return () => socket?.emit('trip:leave', selected.trip._id);
+    const tripId = String(selected.trip._id);
+    socket?.emit('trip:join', tripId);
+    return () => socket?.emit('trip:leave', tripId);
   }, [selected?.trip?._id]);
 
   const markRead = async () => {
@@ -122,144 +134,180 @@ export default function ParentHome() {
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
   };
 
-  return (
-    <div className="stack">
-      {error && <div className="alert">{error}</div>}
+  const onBus = selected ? anyKidOnBus(selected.events, selected.myKids) : false;
+  const statusLabel = !selected
+    ? 'No active trip'
+    : onBus
+      ? 'Live · tracking driver'
+      : 'Trip started — waiting for pickup';
 
-      <div className="stat-grid">
-        <div className="stat">
-          <span>Children</span>
-          <strong>{kids.length}</strong>
-        </div>
-        <div className="stat">
-          <span>Active trips</span>
-          <strong>{active.length}</strong>
-        </div>
-        <div className="stat">
-          <span>Unread alerts</span>
-          <strong>{notifications.filter((n) => !n.read).length}</strong>
+  const mapCenter =
+    driverLocation ||
+    selected?.stops?.[0]?.location ||
+    selected?.trip?.schoolId?.location || { lat: -1.3965, lng: 36.7542 };
+
+  return (
+    <div className="parent-ride">
+      {error && <div className="alert parent-ride-alert">{error}</div>}
+
+      <div className="parent-ride-map">
+        <MapView
+          key={selected?.trip?._id || 'idle'}
+          center={mapCenter}
+          zoom={onBus ? 15.5 : 14}
+          driverLocation={driverLocation}
+          stops={
+            selected
+              ? stopsForTripKids(selected.stops, selected.trip.kidIds || selected.myKids || [])
+              : []
+          }
+          direction={selected?.trip?.direction}
+          showRoute={!!selected}
+          followDriver={onBus}
+          className="map-canvas parent-ride-canvas"
+        />
+
+        <div className="parent-ride-chrome">
+          <div className="parent-ride-status">
+            <span className={`parent-ride-dot ${onBus ? 'is-live' : ''}`} />
+            <div>
+              <strong>{statusLabel}</strong>
+              {selected && (
+                <small>
+                  {selected.trip.routeId?.name}
+                  {selected.trip.driverId?.name ? ` · ${selected.trip.driverId.name}` : ''}
+                </small>
+              )}
+            </div>
+          </div>
+          <button type="button" className="btn btn-ghost parent-ride-logout" onClick={logout}>
+            Sign out
+          </button>
         </div>
       </div>
 
-      <div className="split">
-        <div className="stack">
-          <h2>Live tracking</h2>
-          {!selected && <p className="muted">No active trip right now. You will be notified when a trip starts.</p>}
-          {selected && (
-            <>
-              <div className="panel">
-                <div className="panel-head">
-                  <div>
-                    <h3>{selected.trip.routeId?.name}</h3>
-                    <p className="muted">
-                      Driver {selected.trip.driverId?.name}
-                      {selected.driverProfile?.vehiclePlate
-                        ? ` · ${selected.driverProfile.vehiclePlate}`
-                        : ''}
-                      {' · '}
-                      {selected.trip.direction === 'to_school' ? 'To school' : 'To home'}
-                    </p>
-                  </div>
+      <div className="parent-ride-sheet">
+        <div className="parent-ride-handle" aria-hidden="true" />
+        <div className="parent-ride-tabs">
+          <button
+            type="button"
+            className={sheetTab === 'ride' ? 'active' : ''}
+            onClick={() => setSheetTab('ride')}
+          >
+            Ride
+          </button>
+          <button
+            type="button"
+            className={sheetTab === 'alerts' ? 'active' : ''}
+            onClick={() => setSheetTab('alerts')}
+          >
+            Alerts
+            {notifications.some((n) => !n.read) ? (
+              <span className="parent-ride-badge">
+                {notifications.filter((n) => !n.read).length}
+              </span>
+            ) : null}
+          </button>
+          <button
+            type="button"
+            className={sheetTab === 'kids' ? 'active' : ''}
+            onClick={() => setSheetTab('kids')}
+          >
+            Kids
+          </button>
+        </div>
+
+        {sheetTab === 'ride' && (
+          <div className="parent-ride-body">
+            {!selected && (
+              <p className="muted">No active trip. You will see the bus here after pickup.</p>
+            )}
+            {selected && (
+              <>
+                <div className="parent-ride-meta">
+                  <h2>{selected.trip.routeId?.name}</h2>
+                  <p className="muted">
+                    Driver {selected.trip.driverId?.name}
+                    {selected.driverProfile?.vehiclePlate
+                      ? ` · ${selected.driverProfile.vehiclePlate}`
+                      : ''}
+                    {' · '}
+                    {selected.trip.direction === 'to_school' ? 'To school' : 'To home'}
+                  </p>
+                  <p className="muted">
+                    {active.length} active trip{active.length === 1 ? '' : 's'} · signed in as{' '}
+                    {user?.email}
+                  </p>
                 </div>
-              </div>
-              <MapView
-                key={selected.trip._id}
-                center={
-                  driverLocation ||
-                  selected.stops[0]?.location ||
-                  selected.trip.schoolId?.location || { lat: -1.3965, lng: 36.7542 }
-                }
-                zoom={15}
-                driverLocation={driverLocation}
-                stops={stopsForTripKids(
-                  selected.stops,
-                  selected.trip.kidIds || selected.myKids || []
-                )}
-                direction={selected.trip.direction}
-                showRoute
-                followDriver
-                className="map-canvas map-lg"
-              />
-              <ul className="kid-list">
-                {selected.myKids.map((kid) => {
-                  const picked = selected.events.some(
-                    (e) => (e.kidId?._id || e.kidId) === kid._id && e.type === 'picked_up'
-                  );
-                  const dropped = selected.events.some(
-                    (e) => (e.kidId?._id || e.kidId) === kid._id && e.type === 'dropped_off'
-                  );
-                  return (
-                    <li key={kid._id} className="kid-row">
-                      <div>
-                        <strong>{kid.name}</strong>
-                        <div className="muted">
-                          {dropped ? 'Dropped off' : picked ? 'On the bus' : 'Waiting for pickup'}
+                <ul className="kid-list">
+                  {selected.myKids.map((kid) => {
+                    const picked = isKidOnBus(selected.events, kid._id);
+                    const dropped = (selected.events || []).some(
+                      (e) =>
+                        String(e.kidId?._id || e.kidId) === String(kid._id) &&
+                        e.type === 'dropped_off'
+                    );
+                    return (
+                      <li key={kid._id} className="kid-row">
+                        <div>
+                          <strong>{kid.name}</strong>
+                          <div className="muted">
+                            {dropped
+                              ? 'Dropped off'
+                              : picked
+                                ? 'On the bus · tracking'
+                                : 'Waiting for pickup'}
+                          </div>
                         </div>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </>
-          )}
-
-          <h2>Your children</h2>
-          <ul className="list">
-            {kids.map((k) => (
-              <li key={k._id} className="panel tight">
-                <strong>{k.name}</strong>
-                <div className="muted">
-                  {k.schoolId?.name} · {k.routeId?.name} · stop {k.homeStopId?.name}
-                </div>
-              </li>
-            ))}
-          </ul>
-
-          <h2>Recent trips</h2>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>When</th>
-                  <th>Route</th>
-                  <th>Direction</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {history.map((t) => (
-                  <tr key={t._id}>
-                    <td>{new Date(t.startedAt).toLocaleString()}</td>
-                    <td>{t.routeId?.name}</td>
-                    <td>{t.direction === 'to_school' ? 'To school' : 'To home'}</td>
-                    <td>{t.status}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                        <span className={`pill ${picked && !dropped ? 'pill-live' : ''}`}>
+                          {dropped ? 'Done' : picked ? 'Live' : 'Wait'}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            )}
           </div>
-        </div>
+        )}
 
-        <div className="stack">
-          <div className="panel-head">
-            <h2>Notifications</h2>
-            <button type="button" className="btn btn-ghost" onClick={markRead}>
-              Mark all read
-            </button>
+        {sheetTab === 'alerts' && (
+          <div className="parent-ride-body">
+            <div className="panel-head">
+              <h2>Notifications</h2>
+              <button type="button" className="btn btn-ghost" onClick={markRead}>
+                Mark all read
+              </button>
+            </div>
+            <ul className="notif-list">
+              {notifications.map((n) => (
+                <li key={n.id || n._id} className={n.read ? 'read' : 'unread'}>
+                  <span className="pill">{notificationTypeLabel(n.type)}</span>
+                  <strong>{n.title}</strong>
+                  <p>{n.body}</p>
+                  <small>{new Date(n.createdAt).toLocaleString()}</small>
+                </li>
+              ))}
+              {!notifications.length && <li className="muted">No notifications yet.</li>}
+            </ul>
           </div>
-          {pushStatus && <p className="hint muted">{pushStatus}</p>}
-          <ul className="notif-list">
-            {notifications.map((n) => (
-              <li key={n.id || n._id} className={n.read ? 'read' : 'unread'}>
-                <span className="pill">{notificationTypeLabel(n.type)}</span>
-                <strong>{n.title}</strong>
-                <p>{n.body}</p>
-                <small>{new Date(n.createdAt).toLocaleString()}</small>
-              </li>
-            ))}
-            {!notifications.length && <li className="muted">No notifications yet.</li>}
-          </ul>
-        </div>
+        )}
+
+        {sheetTab === 'kids' && (
+          <div className="parent-ride-body">
+            <ul className="list">
+              {kids.map((k) => (
+                <li key={k._id} className="panel tight">
+                  <strong>{k.name}</strong>
+                  <div className="muted">
+                    {k.schoolId?.name} · {k.routeId?.name} · {k.homeStopId?.name}
+                  </div>
+                </li>
+              ))}
+              {!kids.length && <li className="muted">No children linked.</li>}
+            </ul>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -3,6 +3,7 @@ import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { orderedStopsForDirection } from '../lib/geo';
 import { fetchRoadRoute, nearestRouteIndex } from '../lib/directions';
+import { createBoltCarElement, setBoltCarHeading } from '../lib/mapMarkers';
 
 const TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
 const ROUTE_SOURCE = 'trip-route';
@@ -14,26 +15,6 @@ const BUS_ZOOM = 15.2;
 const ROUTE_BLUE = '#1d4ed8';
 const ROUTE_BLUE_SOFT = '#93c5fd';
 const PROGRESS_BLUE = '#1e3a8a';
-
-function createBusElement() {
-  const el = document.createElement('div');
-  el.className = 'marker-bus';
-  el.innerHTML = `
-    <div class="marker-bus-bubble" title="Bus">
-      <svg viewBox="0 0 64 64" aria-hidden="true">
-        <rect x="10" y="14" width="44" height="30" rx="8" fill="#1d4ed8"/>
-        <rect x="14" y="18" width="16" height="12" rx="2" fill="#dbeafe"/>
-        <rect x="34" y="18" width="16" height="12" rx="2" fill="#dbeafe"/>
-        <rect x="12" y="36" width="40" height="6" fill="#1e3a8a"/>
-        <circle cx="20" cy="46" r="5" fill="#111827"/>
-        <circle cx="44" cy="46" r="5" fill="#111827"/>
-        <circle cx="20" cy="46" r="2" fill="#f8fafc"/>
-        <circle cx="44" cy="46" r="2" fill="#f8fafc"/>
-      </svg>
-    </div>
-  `;
-  return el;
-}
 
 function createStopElement(stop, { isNext, index }) {
   const el = document.createElement('div');
@@ -264,25 +245,35 @@ export default function MapView({
     };
   }, [stops, direction, showRoute]);
 
-  // Bus marker + progress along the road route (not a straight GPS trail)
+  // Live driver marker (Bolt car) + progress along the road route
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !driverLocation) return;
+    if (!map) return;
+
+    if (!driverLocation?.lat || !driverLocation?.lng) {
+      if (driverMarkerRef.current) {
+        driverMarkerRef.current.remove();
+        driverMarkerRef.current = null;
+      }
+      return;
+    }
 
     const lngLat = [driverLocation.lng, driverLocation.lat];
+    const heading = driverLocation.heading;
 
     const placeBus = () => {
       ensureLayers(map);
 
       if (!driverMarkerRef.current) {
         driverMarkerRef.current = new mapboxgl.Marker({
-          element: createBusElement(),
+          element: createBoltCarElement({ heading }),
           anchor: 'center',
         })
           .setLngLat(lngLat)
           .addTo(map);
       } else {
         driverMarkerRef.current.setLngLat(lngLat);
+        setBoltCarHeading(driverMarkerRef.current.getElement(), heading);
       }
 
       const route = routeCoordsRef.current;
