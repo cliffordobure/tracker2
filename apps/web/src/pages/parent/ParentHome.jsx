@@ -178,7 +178,7 @@ export default function ParentHome() {
       {error && <div className="alert parent-ride-alert">{error}</div>}
 
       <div className="parent-ride-map">
-        <MapView
+              <MapView
           key={selected?.trip?._id || 'idle'}
           center={mapCenter}
           zoom={onBus ? 15.5 : 14}
@@ -190,6 +190,9 @@ export default function ParentHome() {
           }
           direction={selected?.trip?.direction}
           showRoute={!!selected}
+          liveNavigate={onBus}
+          events={selected?.events || []}
+          kids={selected?.trip?.kidIds || selected?.myKids || []}
           followDriver={onBus}
           className="map-canvas parent-ride-canvas"
         />

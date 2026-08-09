@@ -1,7 +1,11 @@
 import { useEffect, useRef } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import { orderedStopsForDirection } from '../lib/geo';
+import {
+  distanceToRouteMeters,
+  orderedStopsForDirection,
+  remainingServiceStops,
+} from '../lib/geo';
 import { fetchRoadRoute, nearestRouteIndex } from '../lib/directions';
 import { createBoltCarElement, setBoltCarHeading } from '../lib/mapMarkers';
 
@@ -15,6 +19,10 @@ const BUS_ZOOM = 15.2;
 const ROUTE_BLUE = '#1d4ed8';
 const ROUTE_BLUE_SOFT = '#93c5fd';
 const PROGRESS_BLUE = '#1e3a8a';
+/** Reroute when driver is farther than this from the drawn path. */
+const OFF_ROUTE_M = 80;
+/** Don't hammer Mapbox Directions more often than this. */
+const REROUTE_MIN_MS = 7000;
 
 function createStopElement(stop, { isNext, index }) {
   const el = document.createElement('div');
@@ -111,6 +119,10 @@ export default function MapView({
   direction,
   nextStopId,
   showRoute = false,
+  /** When true + driverLocation: blue line from bus through remaining pick/drop stops; reroutes if off-path. */
+  liveNavigate = false,
+  events = [],
+  kids = [],
   followDriver = true,
   interactive = true,
   onMapClick,
@@ -127,6 +139,10 @@ export default function MapView({
   const hasZoomedToBusRef = useRef(false);
   const followRef = useRef(followDriver);
   const onRouteReadyRef = useRef(onRouteReady);
+  const lastRerouteAtRef = useRef(0);
+  const remainKeyRef = useRef('');
+  const liveFetchingRef = useRef(false);
+  const liveNavRef = useRef(liveNavigate);
 
   useEffect(() => {
     followRef.current = followDriver;
@@ -135,6 +151,10 @@ export default function MapView({
   useEffect(() => {
     onRouteReadyRef.current = onRouteReady;
   }, [onRouteReady]);
+
+  useEffect(() => {
+    liveNavRef.current = liveNavigate;
+  }, [liveNavigate]);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -202,16 +222,18 @@ export default function MapView({
     else map.once('load', applyStops);
   }, [stops, direction, nextStopId, showRoute]);
 
-  // Road-following planned route via Mapbox Directions
+  // Planned stop-to-stop route (before live bus nav takes over)
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !showRoute || !stops.length) return;
+    if (liveNavigate && driverLocation?.lat != null) return;
 
     const ordered = orderedStopsForDirection(stops, direction);
-    const key = `${direction || 'none'}:${ordered.map((s) => s._id).join(',')}`;
+    const key = `plan:${direction || 'none'}:${ordered.map((s) => s._id).join(',')}`;
     if (routeKeyRef.current === key) return;
     routeKeyRef.current = key;
     hasZoomedToBusRef.current = false;
+    remainKeyRef.current = '';
 
     let cancelled = false;
 
@@ -243,9 +265,97 @@ export default function MapView({
     return () => {
       cancelled = true;
     };
-  }, [stops, direction, showRoute]);
+  }, [stops, direction, showRoute, liveNavigate, driverLocation?.lat, driverLocation?.lng]);
 
-  // Live driver marker (Bolt car) + progress along the road route
+  // Live Mapbox path: driver → remaining pick/drop stops (reroutes when off-path)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !liveNavigate || !showRoute) return;
+    if (!driverLocation?.lat || !driverLocation?.lng) return;
+
+    const remaining = remainingServiceStops({
+      stops,
+      direction,
+      kids,
+      events,
+    });
+    const remainKey = remaining.map((s) => s._id).join(',');
+    const offRoute =
+      routeCoordsRef.current.length > 0 &&
+      distanceToRouteMeters(routeCoordsRef.current, driverLocation) > OFF_ROUTE_M;
+    const stopsChanged = remainKey !== remainKeyRef.current;
+    const now = Date.now();
+    const cooledDown = now - lastRerouteAtRef.current >= REROUTE_MIN_MS;
+    const needFetch =
+      !routeCoordsRef.current.length ||
+      stopsChanged ||
+      (offRoute && cooledDown) ||
+      !String(routeKeyRef.current).startsWith('live:');
+
+    if (!needFetch || liveFetchingRef.current) return;
+
+    let cancelled = false;
+    liveFetchingRef.current = true;
+
+    const drawLive = async () => {
+      try {
+        if (!remaining.length) {
+          remainKeyRef.current = remainKey;
+          routeKeyRef.current = 'live:done';
+          routeCoordsRef.current = [];
+          const clear = () => {
+            ensureLayers(map);
+            setLine(map, ROUTE_SOURCE, []);
+            setLine(map, PROGRESS_SOURCE, []);
+          };
+          if (map.isStyleLoaded()) clear();
+          else map.once('load', clear);
+          return;
+        }
+
+        const waypoints = [
+          { lat: driverLocation.lat, lng: driverLocation.lng },
+          ...remaining.map((s) => s.location).filter((l) => l?.lat != null),
+        ];
+        const coordinates = await fetchRoadRoute(waypoints);
+        if (cancelled || !mapRef.current) return;
+        if (!coordinates?.length) return;
+
+        remainKeyRef.current = remainKey;
+        routeKeyRef.current = `live:${remainKey}`;
+        lastRerouteAtRef.current = Date.now();
+        routeCoordsRef.current = coordinates;
+        onRouteReadyRef.current?.(coordinates);
+
+        const apply = () => {
+          ensureLayers(map);
+          setLine(map, ROUTE_SOURCE, coordinates);
+          // Live path is already "remaining" — no separate progress strip
+          setLine(map, PROGRESS_SOURCE, []);
+        };
+        if (map.isStyleLoaded()) apply();
+        else map.once('load', apply);
+      } finally {
+        liveFetchingRef.current = false;
+      }
+    };
+
+    drawLive();
+    return () => {
+      cancelled = true;
+      liveFetchingRef.current = false;
+    };
+  }, [
+    liveNavigate,
+    showRoute,
+    driverLocation,
+    stops,
+    direction,
+    kids,
+    events,
+  ]);
+
+  // Live driver marker (Bolt car) + optional progress on planned route
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -277,9 +387,19 @@ export default function MapView({
       }
 
       const route = routeCoordsRef.current;
-      if (route.length) {
+      if (route.length && !liveNavRef.current) {
         const idx = nearestRouteIndex(route, driverLocation);
         setLine(map, PROGRESS_SOURCE, route.slice(0, Math.max(idx + 1, 2)));
+      }
+
+      // Off-route while live: trigger a fresh fetch by clearing key after cooldown
+      if (
+        liveNavRef.current &&
+        route.length &&
+        distanceToRouteMeters(route, driverLocation) > OFF_ROUTE_M &&
+        Date.now() - lastRerouteAtRef.current >= REROUTE_MIN_MS
+      ) {
+        routeKeyRef.current = 'live:stale';
       }
 
       if (!hasZoomedToBusRef.current) {

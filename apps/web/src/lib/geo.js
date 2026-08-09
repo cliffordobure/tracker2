@@ -53,3 +53,67 @@ export function stopsForTripKids(stops, kids = []) {
 export function nextPendingStop(orderedStops, visitedStopIds = new Set()) {
   return orderedStops.find((s) => !visitedStopIds.has(s._id));
 }
+
+function kidHomeStopId(kid) {
+  return String(kid?.homeStopId?._id || kid?.homeStopId || '');
+}
+
+function kidEventMatch(events, kidId, type) {
+  const id = String(kidId?._id || kidId || '');
+  return (events || []).some(
+    (e) => String(e?.kidId?._id || e?.kidId || '') === id && e.type === type
+  );
+}
+
+/**
+ * Stops the driver still needs to visit (pickup/drop order), so the parent
+ * map can draw a live Mapbox path from the bus through remaining stops.
+ */
+export function remainingServiceStops({ stops, direction, kids = [], events = [] }) {
+  const ordered = orderedStopsForDirection(stops, direction);
+  const kidList = kids || [];
+  if (!ordered.length) return [];
+
+  const isPicked = (kid) => kidEventMatch(events, kid._id || kid.id, 'picked_up');
+  const isDropped = (kid) => kidEventMatch(events, kid._id || kid.id, 'dropped_off');
+
+  if (direction === 'to_home') {
+    const remaining = [];
+    for (const stop of ordered) {
+      if (stop.type === 'school') {
+        // Still need school pickup if any kid is not picked up yet
+        if (kidList.some((k) => !isPicked(k) && !isDropped(k))) remaining.push(stop);
+        continue;
+      }
+      const atStop = kidList.filter((k) => kidHomeStopId(k) === String(stop._id));
+      if (!atStop.length) continue;
+      // Drop still needed if any child for this home is not dropped off
+      if (atStop.some((k) => !isDropped(k))) remaining.push(stop);
+    }
+    return remaining;
+  }
+
+  // to_school: pick homes, then school
+  const remaining = [];
+  for (const stop of ordered) {
+    if (stop.type === 'school') {
+      if (kidList.some((k) => !isDropped(k))) remaining.push(stop);
+      continue;
+    }
+    const atStop = kidList.filter((k) => kidHomeStopId(k) === String(stop._id));
+    if (!atStop.length) continue;
+    if (atStop.some((k) => !isPicked(k) && !isDropped(k))) remaining.push(stop);
+  }
+  return remaining;
+}
+
+/** Approx distance from a point to the nearest vertex on a [lng,lat][] polyline. */
+export function distanceToRouteMeters(coordinates, location) {
+  if (!coordinates?.length || !location) return Infinity;
+  let best = Infinity;
+  for (const [lng, lat] of coordinates) {
+    const d = haversineMeters(location, { lat, lng });
+    if (d < best) best = d;
+  }
+  return best;
+}

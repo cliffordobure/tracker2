@@ -47,7 +47,8 @@ router.get('/trips/active', async (req, res) => {
           trip.kidIds.some((tk) => tk._id?.toString() === k._id.toString() || tk.toString() === k._id.toString())
         );
         const [events, allStops, profile] = await Promise.all([
-          TripEvent.find({ tripId: trip._id, kidId: { $in: myKids.map((k) => k._id) } }),
+          // All trip events so parent live-nav can drop completed pickups for peer kids too
+          TripEvent.find({ tripId: trip._id }),
           Stop.find({ routeId: trip.routeId._id || trip.routeId }).sort({ order: 1 }),
           DriverProfile.findOne({ userId: trip.driverId._id || trip.driverId }),
         ]);
