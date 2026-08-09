@@ -6,6 +6,7 @@ server/.env
 apps/web/.env
 server/firebase-service-account.json
 **/firebase-service-account.json
+apps/mobile/
 .DS_Store
 *.log
 .vite/

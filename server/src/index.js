@@ -24,7 +24,10 @@ function isOriginAllowed(origin) {
   if (!origin) return true;
   if (allowedOrigins.includes(origin)) return true;
   // Vite often picks 5173/5174/5175 when ports are busy
-  return /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
+  if (/^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) return true;
+  // Hosted web app + Vercel preview deployments
+  if (/^https:\/\/([\w-]+\.)?vercel\.app$/.test(origin)) return true;
+  return false;
 }
 
 const corsOptions = {

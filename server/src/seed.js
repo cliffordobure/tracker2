@@ -15,8 +15,13 @@ import {
   LocationPing,
   Notification,
   DeviceToken,
+  SchoolHoliday,
+  ScheduleException,
 } from './models/index.js';
-import { generateInstancesForSchedule } from './services/tripScheduleService.js';
+import {
+  generateInstancesForSchedule,
+  startOfDay,
+} from './services/tripScheduleService.js';
 
 const mongoUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/school_kids_tracker';
 
@@ -38,6 +43,8 @@ async function seed() {
     LocationPing.deleteMany({}),
     Notification.deleteMany({}),
     DeviceToken.deleteMany({}),
+    SchoolHoliday.deleteMany({}),
+    ScheduleException.deleteMany({}),
   ]);
 
   const passwordHash = await bcrypt.hash('password123', 10);
@@ -189,9 +196,38 @@ async function seed() {
     active: true,
   });
 
+  // Sample holiday ~3 weekdays ahead (or next Monday if weekend)
+  const holidayDate = new Date(startDate);
+  holidayDate.setDate(holidayDate.getDate() + 3);
+  while (holidayDate.getDay() === 0 || holidayDate.getDay() === 6) {
+    holidayDate.setDate(holidayDate.getDate() + 1);
+  }
+  await SchoolHoliday.create({
+    schoolId: school._id,
+    date: startOfDay(holidayDate),
+    name: 'Staff development day',
+    active: true,
+  });
+
   const generation = await generateInstancesForSchedule(morningSchedule._id, {
     notify: false,
   });
+
+  // SKIP exception on first generated weekday instance (if any)
+  const firstWeekday = await Trip.findOne({
+    scheduleId: morningSchedule._id,
+    status: 'scheduled',
+  }).sort({ serviceDate: 1 });
+  if (firstWeekday) {
+    await ScheduleException.create({
+      scheduleId: morningSchedule._id,
+      schoolId: school._id,
+      serviceDate: startOfDay(firstWeekday.serviceDate),
+      type: 'SKIP',
+    });
+    firstWeekday.status = 'cancelled';
+    await firstWeekday.save();
+  }
 
   // Ensure a runnable instance exists on weekends too (WEEKDAYS skips Sat/Sun).
   const todaySchedule = await TripSchedule.create({
@@ -228,6 +264,10 @@ async function seed() {
   console.log(
     `Schedule: ${morningSchedule.name} → ${generation.created.length} instances (skipped ${generation.skipped.length}, conflicts ${generation.conflicts.length})`
   );
+  console.log(`Holiday: Staff development day on ${holidayDate.toLocaleDateString()}`);
+  if (firstWeekday) {
+    console.log(`SKIP exception on ${new Date(firstWeekday.serviceDate).toLocaleDateString()}`);
+  }
   console.log(
     `Today demo: ${todaySchedule.name} → ${todayGen.created.length} instances (conflicts ${todayGen.conflicts.length})`
   );

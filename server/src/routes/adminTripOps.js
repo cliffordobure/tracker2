@@ -7,11 +7,17 @@ import {
   Bus,
   User,
   Kid,
+  SchoolHoliday,
+  ScheduleException,
 } from '../models/index.js';
 import {
   generateInstancesForSchedule,
+  applyScheduleEdit,
   startOfDay,
   endOfDay,
+  dateKey,
+  scheduledForFrom,
+  findPeriodConflict,
 } from '../services/tripScheduleService.js';
 import { notifyTripCancelled } from '../services/notifications.js';
 import { getIO } from '../socket.js';
@@ -170,35 +176,195 @@ router.put('/trip-schedules/:id', async (req, res) => {
       return res.status(403).json({ error: 'Cannot edit schedule from another school' });
     }
 
-    const allowed = [
-      'name',
-      'scheduleType',
-      'customDays',
-      'period',
-      'direction',
-      'routeId',
-      'busId',
-      'driverId',
-      'scheduledTime',
-      'startDate',
-      'endDate',
-      'kidIds',
-      'active',
-    ];
-    for (const key of allowed) {
-      if (req.body[key] !== undefined) {
-        if (key === 'startDate' || key === 'endDate') {
-          existing[key] = req.body[key] ? startOfDay(req.body[key]) : null;
-        } else {
-          existing[key] = req.body[key];
-        }
-      }
-    }
-    await existing.save();
-    const schedule = await populateSchedule(TripSchedule.findById(existing._id));
-    res.json({ schedule });
+    const result = await applyScheduleEdit(existing._id, req.body);
+    const schedule = await populateSchedule(TripSchedule.findById(result.schedule._id));
+    res.json({
+      schedule,
+      exception: result.exception,
+      updatedCount: result.updated.length,
+      conflicts: result.conflicts,
+      generation: result.generation
+        ? {
+            created: result.generation.created.length,
+            skipped: result.generation.skipped.length,
+            conflicts: result.generation.conflicts,
+          }
+        : null,
+    });
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+// ——— Exceptions ———
+router.get('/trip-schedules/:id/exceptions', async (req, res) => {
+  try {
+    const schedule = await TripSchedule.findById(req.params.id);
+    if (!schedule) return res.status(404).json({ error: 'Schedule not found' });
+    if (!assertSchoolAccess(req, schedule.schoolId)) {
+      return res.status(403).json({ error: 'Cannot view exceptions from another school' });
+    }
+    const exceptions = await ScheduleException.find({ scheduleId: schedule._id })
+      .populate('busId', 'plate label')
+      .populate('driverId', 'name')
+      .sort({ serviceDate: 1 });
+    res.json({ exceptions });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/trip-schedules/:id/exceptions', async (req, res) => {
+  try {
+    const schedule = await TripSchedule.findById(req.params.id);
+    if (!schedule) return res.status(404).json({ error: 'Schedule not found' });
+    if (!assertSchoolAccess(req, schedule.schoolId)) {
+      return res.status(403).json({ error: 'Cannot edit exceptions from another school' });
+    }
+
+    const { serviceDate, type, busId, driverId, kidIds, scheduledTime } = req.body;
+    if (!serviceDate || !type) {
+      return res.status(400).json({ error: 'serviceDate and type are required' });
+    }
+    if (!['SKIP', 'OVERRIDE'].includes(type)) {
+      return res.status(400).json({ error: 'type must be SKIP or OVERRIDE' });
+    }
+
+    const day = startOfDay(serviceDate);
+    const exception = await ScheduleException.findOneAndUpdate(
+      { scheduleId: schedule._id, serviceDate: day },
+      {
+        scheduleId: schedule._id,
+        schoolId: schedule.schoolId,
+        serviceDate: day,
+        type,
+        busId: type === 'OVERRIDE' ? busId || null : null,
+        driverId: type === 'OVERRIDE' ? driverId || null : null,
+        kidIds: type === 'OVERRIDE' ? kidIds || [] : [],
+        scheduledTime: type === 'OVERRIDE' ? scheduledTime || null : null,
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    let trip = await Trip.findOne({
+      scheduleId: schedule._id,
+      period: schedule.period,
+      serviceDate: { $gte: day, $lte: endOfDay(day) },
+    });
+
+    if (type === 'SKIP') {
+      if (trip && trip.status === 'scheduled') {
+        trip.status = 'cancelled';
+        await trip.save();
+        await notifyTripCancelled(getIO(), trip);
+      }
+    } else if (type === 'OVERRIDE' && trip && trip.status === 'scheduled') {
+      const nextBus = busId || schedule.busId;
+      const nextDriver = driverId || schedule.driverId;
+      const conflict = await findPeriodConflict({
+        schoolId: schedule.schoolId,
+        busId: nextBus,
+        driverId: nextDriver,
+        serviceDate: day,
+        period: schedule.period,
+        excludeTripId: trip._id,
+      });
+      if (conflict) {
+        return res.status(409).json({
+          error: 'Override conflicts with another trip that day/period',
+          exception,
+          conflictTripCode: conflict.tripCode,
+        });
+      }
+      trip.busId = nextBus;
+      trip.driverId = nextDriver;
+      if (Array.isArray(kidIds) && kidIds.length) trip.kidIds = kidIds;
+      trip.scheduledFor = scheduledForFrom(day, scheduledTime || schedule.scheduledTime);
+      await trip.save();
+    }
+
+    res.status(201).json({ exception, trip });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete('/trip-schedules/:id/exceptions/:exceptionId', async (req, res) => {
+  try {
+    const schedule = await TripSchedule.findById(req.params.id);
+    if (!schedule) return res.status(404).json({ error: 'Schedule not found' });
+    if (!assertSchoolAccess(req, schedule.schoolId)) {
+      return res.status(403).json({ error: 'Cannot delete exceptions from another school' });
+    }
+    const exception = await ScheduleException.findOneAndDelete({
+      _id: req.params.exceptionId,
+      scheduleId: schedule._id,
+    });
+    if (!exception) return res.status(404).json({ error: 'Exception not found' });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ——— Holidays ———
+router.get('/holidays', async (req, res) => {
+  try {
+    const filter = { active: true };
+    const schoolId = resolveSchoolId(req);
+    if (schoolId) filter.schoolId = schoolId;
+    const holidays = await SchoolHoliday.find(filter).sort({ date: 1 });
+    res.json({ holidays });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/holidays', async (req, res) => {
+  try {
+    let schoolId = resolveSchoolId(req);
+    if (req.user.role === 'super_admin') schoolId = req.body.schoolId || schoolId;
+    if (!schoolId) return res.status(400).json({ error: 'schoolId is required' });
+    const { date, name } = req.body;
+    if (!date || !name) return res.status(400).json({ error: 'date and name are required' });
+
+    const day = startOfDay(date);
+    const holiday = await SchoolHoliday.findOneAndUpdate(
+      { schoolId, date: day },
+      { schoolId, date: day, name, active: true },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    // Cancel scheduled instances on this holiday for the school
+    const trips = await Trip.find({
+      schoolId,
+      status: 'scheduled',
+      serviceDate: { $gte: day, $lte: endOfDay(day) },
+    });
+    for (const trip of trips) {
+      trip.status = 'cancelled';
+      await trip.save();
+      await notifyTripCancelled(getIO(), trip);
+    }
+
+    res.status(201).json({ holiday, cancelledTrips: trips.length });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete('/holidays/:id', async (req, res) => {
+  try {
+    const holiday = await SchoolHoliday.findById(req.params.id);
+    if (!holiday) return res.status(404).json({ error: 'Holiday not found' });
+    if (!assertSchoolAccess(req, holiday.schoolId)) {
+      return res.status(403).json({ error: 'Cannot delete holiday from another school' });
+    }
+    holiday.active = false;
+    await holiday.save();
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -264,7 +430,20 @@ router.get('/trip-instances', async (req, res) => {
       };
     }
     const trips = await populateTrip(Trip.find(filter).sort({ serviceDate: 1, period: 1, createdAt: 1 }));
-    res.json({ trips });
+    const scheduleIds = [...new Set(trips.map((t) => t.scheduleId?._id || t.scheduleId).filter(Boolean))];
+    const exceptions = scheduleIds.length
+      ? await ScheduleException.find({ scheduleId: { $in: scheduleIds } }).lean()
+      : [];
+    const exMap = new Map(
+      exceptions.map((e) => [`${e.scheduleId.toString()}:${dateKey(e.serviceDate)}`, e])
+    );
+    const enriched = trips.map((t) => {
+      const sid = (t.scheduleId?._id || t.scheduleId)?.toString();
+      const key = sid && t.serviceDate ? `${sid}:${dateKey(t.serviceDate)}` : null;
+      const exception = key ? exMap.get(key) || null : null;
+      return { ...t.toObject(), exception };
+    });
+    res.json({ trips: enriched });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -278,9 +457,83 @@ router.get('/trip-instances/:id', async (req, res) => {
       return res.status(403).json({ error: 'Cannot view trip from another school' });
     }
     const events = await TripEvent.find({ tripId: trip._id }).sort({ at: 1 });
-    res.json({ trip, events });
+    let exception = null;
+    if (trip.scheduleId && trip.serviceDate) {
+      exception = await ScheduleException.findOne({
+        scheduleId: trip.scheduleId._id || trip.scheduleId,
+        serviceDate: { $gte: startOfDay(trip.serviceDate), $lte: endOfDay(trip.serviceDate) },
+      });
+    }
+    res.json({ trip, events, exception });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+/** Edit a scheduled instance → OVERRIDE exception + update trip. */
+router.put('/trip-instances/:id', async (req, res) => {
+  try {
+    const trip = await Trip.findById(req.params.id);
+    if (!trip) return res.status(404).json({ error: 'Trip instance not found' });
+    if (!assertSchoolAccess(req, trip.schoolId)) {
+      return res.status(403).json({ error: 'Cannot edit trip from another school' });
+    }
+    if (trip.status !== 'scheduled') {
+      return res.status(400).json({ error: 'Only scheduled trips can be edited' });
+    }
+    if (!trip.scheduleId || !trip.serviceDate) {
+      return res.status(400).json({ error: 'Trip is not linked to a schedule/service date' });
+    }
+
+    const schedule = await TripSchedule.findById(trip.scheduleId);
+    if (!schedule) return res.status(404).json({ error: 'Schedule not found' });
+
+    const busId = req.body.busId ?? trip.busId;
+    const driverId = req.body.driverId ?? trip.driverId;
+    const kidIds = req.body.kidIds ?? trip.kidIds;
+    const scheduledTime = req.body.scheduledTime ?? schedule.scheduledTime;
+
+    const conflict = await findPeriodConflict({
+      schoolId: trip.schoolId,
+      busId,
+      driverId,
+      serviceDate: trip.serviceDate,
+      period: trip.period || schedule.period,
+      excludeTripId: trip._id,
+    });
+    if (conflict) {
+      return res.status(409).json({
+        error: 'Conflict with another trip that day/period',
+        conflictTripCode: conflict.tripCode,
+      });
+    }
+
+    const day = startOfDay(trip.serviceDate);
+    const exception = await ScheduleException.findOneAndUpdate(
+      { scheduleId: schedule._id, serviceDate: day },
+      {
+        scheduleId: schedule._id,
+        schoolId: schedule.schoolId,
+        serviceDate: day,
+        type: 'OVERRIDE',
+        busId,
+        driverId,
+        kidIds,
+        scheduledTime,
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    trip.busId = busId;
+    trip.driverId = driverId;
+    trip.kidIds = kidIds;
+    trip.scheduledFor = scheduledForFrom(day, scheduledTime);
+    await trip.save();
+
+    const populated = await populateTrip(Trip.findById(trip._id));
+    res.json({ trip: populated, exception });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 
@@ -299,6 +552,22 @@ router.post('/trip-instances/:id/cancel', async (req, res) => {
     }
     trip.status = 'cancelled';
     await trip.save();
+    if (trip.scheduleId && trip.serviceDate) {
+      await ScheduleException.findOneAndUpdate(
+        { scheduleId: trip.scheduleId, serviceDate: startOfDay(trip.serviceDate) },
+        {
+          scheduleId: trip.scheduleId,
+          schoolId: trip.schoolId,
+          serviceDate: startOfDay(trip.serviceDate),
+          type: 'SKIP',
+          busId: null,
+          driverId: null,
+          kidIds: [],
+          scheduledTime: null,
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+    }
     await notifyTripCancelled(getIO(), trip);
     const populated = await populateTrip(Trip.findById(trip._id));
     res.json({ trip: populated });

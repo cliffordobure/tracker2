@@ -1,6 +1,12 @@
-import { Trip, TripSchedule } from '../models/index.js';
+import {
+  Trip,
+  TripSchedule,
+  SchoolHoliday,
+  ScheduleException,
+} from '../models/index.js';
 import { notifyTripAssigned } from './notifications.js';
 import { getIO } from '../socket.js';
+import { EDIT_SCOPES } from '@school-tracker/shared';
 
 function parseDateInput(dateInput) {
   if (dateInput instanceof Date) return new Date(dateInput);
@@ -23,13 +29,21 @@ export function endOfDay(dateInput) {
   return d;
 }
 
-function dateKey(d) {
+export function dateKey(d) {
   const x = startOfDay(d);
   return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
 }
 
+/** Combine serviceDate + HH:mm into a local Date for scheduledFor. */
+export function scheduledForFrom(serviceDate, scheduledTime = '06:30') {
+  const d = startOfDay(serviceDate);
+  const [hh, mm] = String(scheduledTime || '06:30').split(':').map(Number);
+  d.setHours(Number.isFinite(hh) ? hh : 6, Number.isFinite(mm) ? mm : 30, 0, 0);
+  return d;
+}
+
 function matchesScheduleDay(schedule, date) {
-  const day = date.getDay(); // 0=Sun
+  const day = date.getDay();
   switch (schedule.scheduleType) {
     case 'ONE_TIME':
       return dateKey(date) === dateKey(schedule.startDate);
@@ -85,7 +99,6 @@ export async function nextTripCode() {
   return `TRIP-${n}`;
 }
 
-/** P0 conflict: same bus or driver already has scheduled/active instance for serviceDate+period. */
 export async function findPeriodConflict({
   schoolId,
   busId,
@@ -110,6 +123,54 @@ export async function findPeriodConflict({
     .populate('routeId', 'name');
 }
 
+async function loadHolidayKeys(schoolId, from, to) {
+  const holidays = await SchoolHoliday.find({
+    schoolId,
+    active: true,
+    date: { $gte: startOfDay(from), $lte: endOfDay(to) },
+  }).lean();
+  return new Set(holidays.map((h) => dateKey(h.date)));
+}
+
+async function loadExceptionsByDate(scheduleId, from, to) {
+  const rows = await ScheduleException.find({
+    scheduleId,
+    serviceDate: { $gte: startOfDay(from), $lte: endOfDay(to) },
+  }).lean();
+  return new Map(rows.map((e) => [dateKey(e.serviceDate), e]));
+}
+
+function instancePayload(schedule, serviceDate, exception) {
+  const time =
+    exception?.type === 'OVERRIDE' && exception.scheduledTime
+      ? exception.scheduledTime
+      : schedule.scheduledTime;
+  const busId =
+    exception?.type === 'OVERRIDE' && exception.busId ? exception.busId : schedule.busId;
+  const driverId =
+    exception?.type === 'OVERRIDE' && exception.driverId
+      ? exception.driverId
+      : schedule.driverId;
+  const kidIds =
+    exception?.type === 'OVERRIDE' && Array.isArray(exception.kidIds) && exception.kidIds.length
+      ? exception.kidIds
+      : schedule.kidIds || [];
+
+  return {
+    scheduleId: schedule._id,
+    schoolId: schedule.schoolId,
+    routeId: schedule.routeId,
+    busId,
+    driverId,
+    direction: schedule.direction,
+    period: schedule.period,
+    serviceDate: startOfDay(serviceDate),
+    scheduledFor: scheduledForFrom(serviceDate, time),
+    kidIds,
+    sequence: 1,
+  };
+}
+
 export async function generateInstancesForSchedule(
   scheduleId,
   { from, to, notify = true } = {}
@@ -119,28 +180,55 @@ export async function generateInstancesForSchedule(
   if (!schedule.active) throw new Error('Schedule is inactive');
 
   const dates = datesForSchedule(schedule, from, to);
+  if (!dates.length) {
+    return { created: [], skipped: [], conflicts: [], schedule };
+  }
+
+  const windowFrom = dates[0];
+  const windowTo = dates[dates.length - 1];
+  const holidayKeys = await loadHolidayKeys(schedule.schoolId, windowFrom, windowTo);
+  const exceptions = await loadExceptionsByDate(schedule._id, windowFrom, windowTo);
+
   const created = [];
   const skipped = [];
   const conflicts = [];
 
   for (const serviceDate of dates) {
+    const key = dateKey(serviceDate);
+    if (holidayKeys.has(key)) {
+      skipped.push({ serviceDate, reason: 'holiday' });
+      continue;
+    }
+
+    const exception = exceptions.get(key);
+    if (exception?.type === 'SKIP') {
+      skipped.push({ serviceDate, reason: 'skip_exception' });
+      continue;
+    }
+
+    // Do not recreate cancelled (or any existing) instance for this day
     const existing = await Trip.findOne({
       scheduleId: schedule._id,
       period: schedule.period,
       serviceDate: { $gte: startOfDay(serviceDate), $lte: endOfDay(serviceDate) },
-      status: { $ne: 'cancelled' },
     });
     if (existing) {
-      skipped.push({ serviceDate, tripId: existing._id, tripCode: existing.tripCode });
+      skipped.push({
+        serviceDate,
+        tripId: existing._id,
+        tripCode: existing.tripCode,
+        reason: existing.status === 'cancelled' ? 'cancelled' : 'exists',
+      });
       continue;
     }
 
+    const payload = instancePayload(schedule, serviceDate, exception);
     const conflict = await findPeriodConflict({
-      schoolId: schedule.schoolId,
-      busId: schedule.busId,
-      driverId: schedule.driverId,
+      schoolId: payload.schoolId,
+      busId: payload.busId,
+      driverId: payload.driverId,
       serviceDate,
-      period: schedule.period,
+      period: payload.period,
     });
     if (conflict) {
       conflicts.push({
@@ -153,21 +241,7 @@ export async function generateInstancesForSchedule(
     }
 
     const tripCode = await nextTripCode();
-    const trip = await Trip.create({
-      scheduleId: schedule._id,
-      schoolId: schedule.schoolId,
-      routeId: schedule.routeId,
-      busId: schedule.busId,
-      driverId: schedule.driverId,
-      direction: schedule.direction,
-      period: schedule.period,
-      serviceDate: startOfDay(serviceDate),
-      scheduledFor: startOfDay(serviceDate),
-      tripCode,
-      status: 'scheduled',
-      kidIds: schedule.kidIds || [],
-      sequence: 1,
-    });
+    const trip = await Trip.create({ ...payload, tripCode, status: 'scheduled' });
     created.push(trip);
 
     if (notify && isTodayOrTomorrow(serviceDate)) {
@@ -189,3 +263,176 @@ function isTodayOrTomorrow(serviceDate) {
   tomorrow.setDate(tomorrow.getDate() + 1);
   return day === today || day === tomorrow.getTime();
 }
+
+const PROPAGATE_FIELDS = [
+  'busId',
+  'driverId',
+  'routeId',
+  'direction',
+  'period',
+  'kidIds',
+  'scheduledTime',
+];
+
+/**
+ * Apply schedule edit with scope.
+ * THIS_OCCURRENCE → OVERRIDE exception + update that day's scheduled trip (no template change for ops fields).
+ * THIS_AND_FUTURE / ENTIRE_SERIES → update template + scheduled trips in range.
+ */
+export async function applyScheduleEdit(scheduleId, body = {}) {
+  const schedule = await TripSchedule.findById(scheduleId);
+  if (!schedule) throw new Error('Schedule not found');
+
+  const scope = body.scope || EDIT_SCOPES.ENTIRE_SERIES;
+  const serviceDate = body.serviceDate ? startOfDay(body.serviceDate) : null;
+  const fromDate = body.fromDate ? startOfDay(body.fromDate) : serviceDate;
+  const regenerate = body.regenerate !== false;
+
+  const templateFields = [
+    'name',
+    'scheduleType',
+    'customDays',
+    'period',
+    'direction',
+    'routeId',
+    'busId',
+    'driverId',
+    'scheduledTime',
+    'startDate',
+    'endDate',
+    'kidIds',
+    'active',
+  ];
+
+  const updated = [];
+  const conflicts = [];
+  let exception = null;
+
+  if (scope === EDIT_SCOPES.THIS_OCCURRENCE) {
+    if (!serviceDate) throw new Error('serviceDate is required for THIS_OCCURRENCE');
+
+    exception = await ScheduleException.findOneAndUpdate(
+      { scheduleId: schedule._id, serviceDate },
+      {
+        scheduleId: schedule._id,
+        schoolId: schedule.schoolId,
+        serviceDate,
+        type: 'OVERRIDE',
+        busId: body.busId ?? schedule.busId,
+        driverId: body.driverId ?? schedule.driverId,
+        kidIds: body.kidIds ?? schedule.kidIds,
+        scheduledTime: body.scheduledTime ?? schedule.scheduledTime,
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    const trip = await Trip.findOne({
+      scheduleId: schedule._id,
+      period: schedule.period,
+      serviceDate: { $gte: startOfDay(serviceDate), $lte: endOfDay(serviceDate) },
+      status: 'scheduled',
+    });
+
+    if (trip) {
+      const nextBus = exception.busId || schedule.busId;
+      const nextDriver = exception.driverId || schedule.driverId;
+      const conflict = await findPeriodConflict({
+        schoolId: schedule.schoolId,
+        busId: nextBus,
+        driverId: nextDriver,
+        serviceDate,
+        period: schedule.period,
+        excludeTripId: trip._id,
+      });
+      if (conflict) {
+        conflicts.push({
+          serviceDate,
+          conflictTripCode: conflict.tripCode,
+          bus: conflict.busId,
+          driver: conflict.driverId,
+        });
+      } else {
+        trip.busId = nextBus;
+        trip.driverId = nextDriver;
+        if (exception.kidIds?.length) trip.kidIds = exception.kidIds;
+        trip.scheduledFor = scheduledForFrom(
+          serviceDate,
+          exception.scheduledTime || schedule.scheduledTime
+        );
+        await trip.save();
+        updated.push(trip);
+      }
+    }
+
+    return { schedule, exception, updated, conflicts, generation: null };
+  }
+
+  // FUTURE / ENTIRE — update template
+  for (const key of templateFields) {
+    if (body[key] !== undefined) {
+      if (key === 'startDate' || key === 'endDate') {
+        schedule[key] = body[key] ? startOfDay(body[key]) : null;
+      } else {
+        schedule[key] = body[key];
+      }
+    }
+  }
+  await schedule.save();
+
+  const tripFilter = {
+    scheduleId: schedule._id,
+    status: 'scheduled',
+  };
+  if (scope === EDIT_SCOPES.THIS_AND_FUTURE) {
+    if (!fromDate) throw new Error('fromDate or serviceDate is required for THIS_AND_FUTURE');
+    tripFilter.serviceDate = { $gte: fromDate };
+  }
+
+  const trips = await Trip.find(tripFilter);
+  for (const trip of trips) {
+    const nextBus = schedule.busId;
+    const nextDriver = schedule.driverId;
+    const conflict = await findPeriodConflict({
+      schoolId: schedule.schoolId,
+      busId: nextBus,
+      driverId: nextDriver,
+      serviceDate: trip.serviceDate,
+      period: schedule.period,
+      excludeTripId: trip._id,
+    });
+    if (conflict) {
+      conflicts.push({
+        serviceDate: trip.serviceDate,
+        tripId: trip._id,
+        conflictTripCode: conflict.tripCode,
+        bus: conflict.busId,
+        driver: conflict.driverId,
+      });
+      continue;
+    }
+
+    trip.busId = nextBus;
+    trip.driverId = nextDriver;
+    trip.routeId = schedule.routeId;
+    trip.direction = schedule.direction;
+    trip.period = schedule.period;
+    trip.kidIds = schedule.kidIds || [];
+    trip.scheduledFor = scheduledForFrom(trip.serviceDate, schedule.scheduledTime);
+    await trip.save();
+    updated.push(trip);
+  }
+
+  let generation = null;
+  if (regenerate && schedule.active) {
+    const genFrom =
+      scope === EDIT_SCOPES.THIS_AND_FUTURE && fromDate ? fromDate : schedule.startDate || new Date();
+    generation = await generateInstancesForSchedule(schedule._id, {
+      from: genFrom,
+      notify: true,
+    });
+  }
+
+  return { schedule, exception: null, updated, conflicts, generation };
+}
+
+export { PROPAGATE_FIELDS, EDIT_SCOPES };

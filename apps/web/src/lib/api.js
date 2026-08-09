@@ -1,4 +1,8 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+const API_URL =
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.PROD
+    ? 'https://tracker2-j8vr.onrender.com'
+    : 'http://localhost:4001');
 
 function getToken() {
   return localStorage.getItem('token');

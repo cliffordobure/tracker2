@@ -9,10 +9,15 @@ function todayInput() {
 export default function TripInstances() {
   const [trips, setTrips] = useState([]);
   const [routes, setRoutes] = useState([]);
+  const [buses, setBuses] = useState([]);
+  const [drivers, setDrivers] = useState([]);
   const [date, setDate] = useState(todayInput());
   const [status, setStatus] = useState('');
   const [routeId, setRouteId] = useState('');
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
+  const [editing, setEditing] = useState(null);
+  const [editForm, setEditForm] = useState({ busId: '', driverId: '', scheduledTime: '06:30' });
 
   const load = async () => {
     const params = new URLSearchParams();
@@ -24,8 +29,12 @@ export default function TripInstances() {
   };
 
   useEffect(() => {
-    api('/admin/routes')
-      .then((d) => setRoutes(d.routes))
+    Promise.all([api('/admin/routes'), api('/admin/buses'), api('/admin/drivers')])
+      .then(([r, b, d]) => {
+        setRoutes(r.routes);
+        setBuses((b.buses || []).filter((x) => x.active !== false));
+        setDrivers((d.drivers || []).filter((x) => x.active !== false));
+      })
       .catch(() => {});
   }, []);
 
@@ -35,10 +44,37 @@ export default function TripInstances() {
   }, [date, status, routeId]);
 
   const cancel = async (id) => {
-    if (!confirm('Cancel this trip instance?')) return;
+    if (!confirm('Cancel this trip instance? It will be skipped on regenerate.')) return;
     setError('');
     try {
       await api(`/admin/trip-instances/${id}/cancel`, { method: 'POST', body: {} });
+      setInfo('Trip cancelled (SKIP exception saved).');
+      await load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const openEdit = (t) => {
+    setEditing(t);
+    setEditForm({
+      busId: t.busId?._id || t.busId || '',
+      driverId: t.driverId?._id || t.driverId || '',
+      scheduledTime: t.scheduleId?.scheduledTime || '06:30',
+    });
+  };
+
+  const saveEdit = async (e) => {
+    e.preventDefault();
+    if (!editing) return;
+    setError('');
+    try {
+      await api(`/admin/trip-instances/${editing._id}`, {
+        method: 'PUT',
+        body: editForm,
+      });
+      setInfo('Instance updated (OVERRIDE exception).');
+      setEditing(null);
       await load();
     } catch (err) {
       setError(err.message);
@@ -48,8 +84,11 @@ export default function TripInstances() {
   return (
     <div className="stack">
       <h2>Trip instances</h2>
-      <p className="lede">Generated trips for a service day. Cancel scheduled trips before they start.</p>
+      <p className="lede">
+        Filter by day. Edit scheduled trips (override) or cancel (skip on regenerate).
+      </p>
       {error && <div className="alert">{error}</div>}
+      {info && <div className="alert alert-success">{info}</div>}
 
       <div className="row-actions" style={{ flexWrap: 'wrap', gap: '0.75rem' }}>
         <label>
@@ -79,6 +118,57 @@ export default function TripInstances() {
         </label>
       </div>
 
+      {editing && (
+        <form className="card-form" onSubmit={saveEdit}>
+          <h3>Edit {editing.tripCode}</h3>
+          <p className="muted">Creates an OVERRIDE for this service date only.</p>
+          <label>
+            Bus
+            <select
+              required
+              value={editForm.busId}
+              onChange={(e) => setEditForm({ ...editForm, busId: e.target.value })}
+            >
+              {buses.map((b) => (
+                <option key={b._id} value={b._id}>
+                  {b.label || b.plate}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Driver
+            <select
+              required
+              value={editForm.driverId}
+              onChange={(e) => setEditForm({ ...editForm, driverId: e.target.value })}
+            >
+              {drivers.map((d) => (
+                <option key={d.id || d._id} value={d.id || d._id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Time
+            <input
+              type="time"
+              value={editForm.scheduledTime}
+              onChange={(e) => setEditForm({ ...editForm, scheduledTime: e.target.value })}
+            />
+          </label>
+          <div className="row-actions">
+            <button type="submit" className="btn btn-primary">
+              Save override
+            </button>
+            <button type="button" className="btn btn-ghost" onClick={() => setEditing(null)}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
       <div className="table-wrap">
         <table>
           <thead>
@@ -105,6 +195,11 @@ export default function TripInstances() {
                         ? new Date(t.scheduledFor).toLocaleDateString()
                         : '—'}
                   </div>
+                  {t.exception && (
+                    <div>
+                      <span className="pill">{t.exception.type}</span>
+                    </div>
+                  )}
                 </td>
                 <td>
                   {t.period || '—'}
@@ -121,9 +216,14 @@ export default function TripInstances() {
                 </td>
                 <td className="row-actions">
                   {t.status === 'scheduled' && (
-                    <button type="button" className="btn btn-ghost" onClick={() => cancel(t._id)}>
-                      Cancel
-                    </button>
+                    <>
+                      <button type="button" className="btn btn-ghost" onClick={() => openEdit(t)}>
+                        Edit
+                      </button>
+                      <button type="button" className="btn btn-ghost" onClick={() => cancel(t._id)}>
+                        Cancel
+                      </button>
+                    </>
                   )}
                 </td>
               </tr>

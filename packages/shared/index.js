@@ -49,3 +49,14 @@ export const NOTIFICATION_TYPES = {
   TRIP_CANCELLED: 'trip_cancelled',
   TRIP_ASSIGNED: 'trip_assigned',
 };
+
+export const EDIT_SCOPES = {
+  THIS_OCCURRENCE: 'THIS_OCCURRENCE',
+  THIS_AND_FUTURE: 'THIS_AND_FUTURE',
+  ENTIRE_SERIES: 'ENTIRE_SERIES',
+};
+
+export const EXCEPTION_TYPES = {
+  SKIP: 'SKIP',
+  OVERRIDE: 'OVERRIDE',
+};
