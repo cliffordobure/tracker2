@@ -18,6 +18,19 @@ export const TRIP_STATUS = {
   CANCELLED: 'cancelled',
 };
 
+export const SCHEDULE_TYPES = {
+  ONE_TIME: 'ONE_TIME',
+  EVERY_DAY: 'EVERY_DAY',
+  WEEKDAYS: 'WEEKDAYS',
+  CUSTOM_DAYS: 'CUSTOM_DAYS',
+};
+
+export const TRIP_PERIODS = {
+  MORNING: 'morning',
+  AFTERNOON: 'afternoon',
+  EVENING: 'evening',
+};
+
 export const STOP_TYPES = {
   HOME: 'home',
   SCHOOL: 'school',
@@ -33,4 +46,6 @@ export const NOTIFICATION_TYPES = {
   KID_PICKED_UP: 'kid_picked_up',
   KID_DROPPED_OFF: 'kid_dropped_off',
   TRIP_COMPLETED: 'trip_completed',
+  TRIP_CANCELLED: 'trip_cancelled',
+  TRIP_ASSIGNED: 'trip_assigned',
 };

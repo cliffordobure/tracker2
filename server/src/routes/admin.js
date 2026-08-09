@@ -11,9 +11,11 @@ import {
   Trip,
 } from '../models/index.js';
 import { authenticate, requireSchoolStaff, requireSuperAdmin } from '../middleware/auth.js';
+import adminTripOps from './adminTripOps.js';
 
 const router = Router();
 router.use(authenticate, requireSchoolStaff);
+router.use(adminTripOps);
 
 /** school_admin → their school; super_admin → query/body schoolId or null (all). */
 function resolveSchoolId(req, { required = false } = {}) {
@@ -37,7 +39,12 @@ function assertSchoolAccess(req, schoolId) {
 }
 
 function dayBounds(dateInput) {
-  const d = dateInput ? new Date(dateInput) : new Date();
+  let d;
+  if (!dateInput) d = new Date();
+  else if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+    const [y, m, day] = dateInput.split('-').map(Number);
+    d = new Date(y, m - 1, day);
+  } else d = new Date(dateInput);
   const start = new Date(d);
   start.setHours(0, 0, 0, 0);
   const end = new Date(d);

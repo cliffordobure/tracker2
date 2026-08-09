@@ -13,9 +13,17 @@ import {
 const APPROACH_M = 180;
 const ARRIVE_M = 60;
 
+function periodLabel(period, direction) {
+  if (period === 'morning') return 'morning';
+  if (period === 'afternoon') return 'afternoon';
+  if (period === 'evening') return 'evening';
+  return direction === 'to_school' ? 'morning' : 'evening';
+}
+
 export default function DriverHome() {
   const { showToast } = useAuth();
   const [routes, setRoutes] = useState([]);
+  const [todayTrips, setTodayTrips] = useState([]);
   const [trip, setTrip] = useState(null);
   const [events, setEvents] = useState([]);
   const [stops, setStops] = useState([]);
@@ -78,9 +86,15 @@ export default function DriverHome() {
   );
 
   const loadRoutes = useCallback(async () => {
-    const data = await api('/driver/routes');
-    setRoutes(data.routes);
-    const active = data.routes.find((r) => r.activeTrip)?.activeTrip;
+    const [routesData, todayData] = await Promise.all([
+      api('/driver/routes'),
+      api('/driver/trips/today'),
+    ]);
+    setRoutes(routesData.routes);
+    setTodayTrips(todayData.trips || []);
+    const active =
+      (todayData.trips || []).find((t) => t.status === 'active') ||
+      routesData.routes.find((r) => r.activeTrip)?.activeTrip;
     if (active) {
       const detail = await api(`/trips/${active._id}`);
       setTrip(detail.trip);
@@ -212,8 +226,15 @@ export default function DriverHome() {
   const startScheduled = async (scheduledTrip) => {
     setError('');
     try {
-      const { trip: t } = await api(`/trips/${scheduledTrip._id}/start`, { method: 'POST' });
+      const body = driverLocation
+        ? { lat: driverLocation.lat, lng: driverLocation.lng }
+        : {};
+      const { trip: t } = await api(`/trips/${scheduledTrip._id}/start`, {
+        method: 'POST',
+        body,
+      });
       await activateTrip(t, t.direction);
+      await loadRoutes();
     } catch (err) {
       setError(err.message);
     }
@@ -244,7 +265,10 @@ export default function DriverHome() {
 
   const completeTrip = async () => {
     try {
-      await api(`/trips/${trip._id}/complete`, { method: 'POST' });
+      const body = driverLocation
+        ? { lat: driverLocation.lat, lng: driverLocation.lng }
+        : {};
+      await api(`/trips/${trip._id}/complete`, { method: 'POST', body });
       if (watchRef.current) navigator.geolocation.clearWatch(watchRef.current);
       setTrip(null);
       setEvents([]);
@@ -274,22 +298,60 @@ export default function DriverHome() {
 
       {!trip && (
         <div className="stack">
-          <p className="lede">
-            Start a dispatched trip for today, or begin an ad-hoc morning/evening run.
-          </p>
+          <p className="lede">Today&apos;s trip instances assigned to you. Start by period, then share GPS.</p>
+
+          {todayTrips.filter((t) => t.status === 'scheduled').length > 0 && (
+            <div className="panel">
+              <div className="panel-head">
+                <div>
+                  <h2>Today&apos;s trips</h2>
+                  <p className="muted">Scheduled instances for this service day</p>
+                </div>
+              </div>
+              <div className="stack" style={{ marginTop: '0.75rem' }}>
+                {todayTrips
+                  .filter((t) => t.status === 'scheduled')
+                  .map((st) => {
+                    const label = periodLabel(st.period, st.direction);
+                    return (
+                      <div
+                        key={st._id}
+                        className="row-actions"
+                        style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}
+                      >
+                        <span>
+                          <strong>{st.tripCode || `Trip ${st.sequence}`}</strong>
+                          {st.busId ? ` · ${st.busId.label || st.busId.plate}` : ''} ·{' '}
+                          {st.routeId?.name || 'Route'} · {(st.kidIds || []).length} students ·{' '}
+                          {label}
+                        </span>
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          onClick={() => startScheduled(st)}
+                        >
+                          Start {label} trip
+                        </button>
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+          )}
+
           {routes.map((route) => (
             <div key={route._id} className="panel">
               <div className="panel-head">
                 <div>
                   <h2>{route.name}</h2>
                   <p className="muted">
-                    {route.schoolId?.name} · {route.kids?.length || 0} kids
+                    {route.schoolId?.name} · {route.kids?.length || 0} kids · ad-hoc fallback
                   </p>
                 </div>
                 <div className="row-actions">
                   <button
                     type="button"
-                    className="btn btn-primary"
+                    className="btn btn-secondary"
                     onClick={() => startTrip(route._id, 'to_school')}
                   >
                     Start morning
@@ -303,32 +365,10 @@ export default function DriverHome() {
                   </button>
                 </div>
               </div>
-              {(route.scheduledTrips || []).length > 0 && (
-                <div className="stack" style={{ marginTop: '0.75rem' }}>
-                  <p className="hint">Dispatched for today</p>
-                  {route.scheduledTrips.map((st) => (
-                    <div key={st._id} className="row-actions" style={{ justifyContent: 'space-between' }}>
-                      <span>
-                        Trip {st.sequence}
-                        {st.busId ? ` · ${st.busId.label || st.busId.plate}` : ''} ·{' '}
-                        {(st.kidIds || []).length} students ·{' '}
-                        {st.direction === 'to_school' ? 'to school' : 'to home'}
-                      </span>
-                      <button
-                        type="button"
-                        className="btn btn-primary"
-                        onClick={() => startScheduled(st)}
-                      >
-                        Start trip {st.sequence}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           ))}
-          {!routes.length && (
-            <p>No routes or dispatched trips yet. Ask your school admin to dispatch you.</p>
+          {!todayTrips.length && !routes.length && (
+            <p>No trips for today. Ask your school admin to create a trip schedule.</p>
           )}
         </div>
       )}
@@ -341,13 +381,14 @@ export default function DriverHome() {
                 <div>
                   <h2>{trip.routeId?.name || 'Active trip'}</h2>
                   <p className="muted">
-                    {trip.direction === 'to_school' ? 'Morning → school' : 'Evening → home'} ·{' '}
-                    {trip.status}
+                    {trip.tripCode ? `${trip.tripCode} · ` : ''}
+                    {periodLabel(trip.period, trip.direction)} ·{' '}
+                    {trip.direction === 'to_school' ? 'to school' : 'to home'} · {trip.status}
                   </p>
                 </div>
                 <div className="row-actions">
                   <button type="button" className="btn btn-primary" onClick={completeTrip}>
-                    Complete trip
+                    Complete {periodLabel(trip.period, trip.direction)} trip
                   </button>
                 </div>
               </div>

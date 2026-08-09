@@ -9,11 +9,14 @@ import {
   Kid,
   Bus,
   DriverProfile,
+  TripSchedule,
   Trip,
   TripEvent,
   LocationPing,
   Notification,
+  DeviceToken,
 } from './models/index.js';
+import { generateInstancesForSchedule } from './services/tripScheduleService.js';
 
 const mongoUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/school_kids_tracker';
 
@@ -29,10 +32,12 @@ async function seed() {
     Kid.deleteMany({}),
     Bus.deleteMany({}),
     DriverProfile.deleteMany({}),
+    TripSchedule.deleteMany({}),
     Trip.deleteMany({}),
     TripEvent.deleteMany({}),
     LocationPing.deleteMany({}),
     Notification.deleteMany({}),
+    DeviceToken.deleteMany({}),
   ]);
 
   const passwordHash = await bcrypt.hash('password123', 10);
@@ -163,6 +168,51 @@ async function seed() {
     grade: 'Grade 3',
   });
 
+  const startDate = new Date();
+  startDate.setHours(0, 0, 0, 0);
+  const endDate = new Date(startDate);
+  endDate.setDate(endDate.getDate() + 14);
+
+  const morningSchedule = await TripSchedule.create({
+    schoolId: school._id,
+    name: 'Weekday morning — Route A',
+    scheduleType: 'WEEKDAYS',
+    period: 'morning',
+    direction: 'to_school',
+    routeId: route._id,
+    busId: bus._id,
+    driverId: driverUser._id,
+    scheduledTime: '06:30',
+    startDate,
+    endDate,
+    kidIds: [kid1._id, kid2._id],
+    active: true,
+  });
+
+  const generation = await generateInstancesForSchedule(morningSchedule._id, {
+    notify: false,
+  });
+
+  // Ensure a runnable instance exists on weekends too (WEEKDAYS skips Sat/Sun).
+  const todaySchedule = await TripSchedule.create({
+    schoolId: school._id,
+    name: 'Today demo — Route A',
+    scheduleType: 'ONE_TIME',
+    period: 'morning',
+    direction: 'to_school',
+    routeId: route._id,
+    busId: bus._id,
+    driverId: driverUser._id,
+    scheduledTime: '07:00',
+    startDate,
+    endDate: startDate,
+    kidIds: [kid1._id, kid2._id],
+    active: true,
+  });
+  const todayGen = await generateInstancesForSchedule(todaySchedule._id, {
+    notify: false,
+  });
+
   console.log('\nSeed complete.\n');
   console.log('Login accounts (password: password123):');
   console.log(`  Super admin:  ${superAdmin.email}`);
@@ -175,6 +225,12 @@ async function seed() {
   console.log(`Bus:    ${bus.label} (${bus.plate}) — ${bus.seats} seats`);
   console.log(`Route:  ${route.name}`);
   console.log(`Stops:  ${schoolStop.name}, ${home1.name}, ${home2.name}`);
+  console.log(
+    `Schedule: ${morningSchedule.name} → ${generation.created.length} instances (skipped ${generation.skipped.length}, conflicts ${generation.conflicts.length})`
+  );
+  console.log(
+    `Today demo: ${todaySchedule.name} → ${todayGen.created.length} instances (conflicts ${todayGen.conflicts.length})`
+  );
 
   await mongoose.disconnect();
 }

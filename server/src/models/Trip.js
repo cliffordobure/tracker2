@@ -1,11 +1,27 @@
 import mongoose from 'mongoose';
 
+const locationPoint = {
+  lat: Number,
+  lng: Number,
+  heading: Number,
+  speed: Number,
+  at: Date,
+};
+
 const tripSchema = new mongoose.Schema(
   {
     routeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Route', required: true },
     driverId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     schoolId: { type: mongoose.Schema.Types.ObjectId, ref: 'School', required: true },
     busId: { type: mongoose.Schema.Types.ObjectId, ref: 'Bus', default: null },
+    scheduleId: { type: mongoose.Schema.Types.ObjectId, ref: 'TripSchedule', default: null },
+    period: {
+      type: String,
+      enum: ['morning', 'afternoon', 'evening'],
+      default: null,
+    },
+    serviceDate: { type: Date, default: null },
+    tripCode: { type: String, default: '' },
     direction: { type: String, enum: ['to_school', 'to_home'], required: true },
     status: {
       type: String,
@@ -17,15 +33,15 @@ const tripSchema = new mongoose.Schema(
     kidIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Kid' }],
     startedAt: { type: Date },
     endedAt: { type: Date },
-    latestLocation: {
-      lat: Number,
-      lng: Number,
-      heading: Number,
-      speed: Number,
-      at: Date,
-    },
+    startLocation: locationPoint,
+    endLocation: locationPoint,
+    latestLocation: locationPoint,
   },
   { timestamps: true }
 );
+
+tripSchema.index({ scheduleId: 1, serviceDate: 1, period: 1 });
+tripSchema.index({ driverId: 1, serviceDate: 1, status: 1 });
+tripSchema.index({ schoolId: 1, status: 1 });
 
 export const Trip = mongoose.model('Trip', tripSchema);

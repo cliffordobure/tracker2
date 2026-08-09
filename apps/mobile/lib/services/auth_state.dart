@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'api_client.dart';
+import 'push_service.dart';
 import 'socket_service.dart';
 
 class AuthState extends ChangeNotifier {
@@ -32,6 +33,9 @@ class AuthState extends ChangeNotifier {
       final data = await api.get('/auth/me');
       user = Map<String, dynamic>.from(data['user'] as Map);
       sockets.connect(token);
+      if (user?['role'] == 'parent') {
+        await PushService.instance.registerParentToken(api);
+      }
     } catch (_) {
       await prefs.remove('token');
       api.token = null;
@@ -55,6 +59,9 @@ class AuthState extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('token', token);
       sockets.connect(token);
+      if (user?['role'] == 'parent') {
+        await PushService.instance.registerParentToken(api);
+      }
       notifyListeners();
     } catch (e) {
       error = e.toString().replaceFirst('Exception: ', '');
@@ -64,6 +71,9 @@ class AuthState extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    if (user?['role'] == 'parent') {
+      await PushService.instance.unregister(api);
+    }
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('token');
     api.token = null;

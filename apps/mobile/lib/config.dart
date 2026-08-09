@@ -18,7 +18,7 @@ class AppConfig {
   static bool get hasMapboxToken => mapboxToken.isNotEmpty;
 
   static String mapTileUrl(int z, int x, int y) =>
-      'https://api.mapbox.com/styles/v1/$mapStyleId/tiles/512/$z/$x/$y@2x'
+      'https://api.mapbox.com/styles/v1/$mapStyleId/tiles/256/$z/$x/$y'
       '?access_token=$mapboxToken';
 
   static String directionsUrl(List<String> lngLatPairs) =>

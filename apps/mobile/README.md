@@ -6,6 +6,25 @@ One Uber/Bolt-style app for **parents**, **teachers**, and **drivers**.
 - Live updates: Socket.IO + `POST /trips/:id/location`
 - Parent tracking starts after the driver marks **Pick up** (kid on the bus)
 
+## Mapbox token
+
+The token is **not** stored in `lib/config.dart`. Pass it when you run or build:
+
+```bash
+--dart-define=MAPBOX_TOKEN=pk.your_mapbox_public_token
+```
+
+Or create a local (gitignored) file `apps/mobile/dart_defines.json`:
+
+```json
+{
+  "MAPBOX_TOKEN": "pk.your_mapbox_public_token",
+  "API_BASE": "https://tracker2-j8vr.onrender.com"
+}
+```
+
+Copy from `dart_defines.json.example`.
+
 ## Run
 
 ```bash
@@ -15,12 +34,38 @@ flutter pub get
 # Hosted API (default) + Mapbox
 flutter run --dart-define=MAPBOX_TOKEN=pk.your_mapbox_public_token
 
-# Local API (Android emulator → host machine)
-flutter run --dart-define=API_BASE=http://10.0.2.2:4001 --dart-define=MAPBOX_TOKEN=pk.your_mapbox_public_token
-
-# Local API (physical phone on same Wi‑Fi — use your PC LAN IP)
-flutter run --dart-define=API_BASE=http://192.168.x.x:4001 --dart-define=MAPBOX_TOKEN=pk.your_mapbox_public_token
+# Or with dart_defines.json
+flutter run --dart-define-from-file=dart_defines.json
 ```
+
+## Build APK (test on another phone)
+
+```bash
+cd apps/mobile
+
+# Option A — pass token inline
+flutter build apk --release --dart-define=MAPBOX_TOKEN=pk.your_mapbox_public_token
+
+# Option B — use dart_defines.json
+flutter build apk --release --dart-define-from-file=dart_defines.json
+```
+
+APK path:
+
+`apps/mobile/build/app/outputs/flutter-apk/app-release.apk`
+
+Install on the phone (enable “Install unknown apps”), then log in as driver / parent against Render.
+
+## Parent notifications (FCM)
+
+In-app inbox works without Firebase. For background push:
+
+1. Create a Firebase project and Android app with package `com.schoolkids.school_kids_tracker`.
+2. Download `google-services.json` into `apps/mobile/android/app/` (see `google-services.json.example`).
+3. Put the Firebase **service account JSON** on the API as `FIREBASE_SERVICE_ACCOUNT_JSON` (string) or `GOOGLE_APPLICATION_CREDENTIALS` (file path).
+4. Rebuild the app. On parent login the app registers an FCM token via `POST /parent/device-tokens`.
+
+iOS: add `GoogleService-Info.plist` and enable Push Notifications / Background Modes in Xcode when you ship iOS.
 
 ## Live tracking flow
 

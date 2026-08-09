@@ -6,9 +6,10 @@ import 'screens/login_screen.dart';
 import 'screens/parent_home_screen.dart';
 import 'screens/teacher_home_screen.dart';
 import 'services/auth_state.dart';
+import 'services/push_service.dart';
 import 'theme/app_theme.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
@@ -16,6 +17,7 @@ void main() {
       statusBarIconBrightness: Brightness.dark,
     ),
   );
+  await PushService.instance.init();
   runApp(const SchoolKidsApp());
 }
 

@@ -5,6 +5,11 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Apply only when Firebase config is present so builds work without push setup.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 android {
     namespace = "com.schoolkids.school_kids_tracker"
     compileSdk = flutter.compileSdkVersion

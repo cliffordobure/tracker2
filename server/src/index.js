@@ -9,8 +9,8 @@ import authRoutes from './routes/auth.js';
 import adminRoutes from './routes/admin.js';
 import driverRoutes from './routes/driver.js';
 import parentRoutes from './routes/parent.js';
-import teacherRoutes from './routes/teacher.js';
-import tripRoutes from './routes/trips.js';
+import teacherRoutes from './routes/teacher.js';  
+import tripRoutes from './routes/trips.js'; 
 
 const app = express();
 const server = http.createServer(app);

@@ -1,6 +1,15 @@
 import { Router } from 'express';
-import { Kid, Trip, TripEvent, Notification, Stop, DriverProfile } from '../models/index.js';
+import {
+  Kid,
+  Trip,
+  TripEvent,
+  Notification,
+  Stop,
+  DriverProfile,
+  DeviceToken,
+} from '../models/index.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
+import { getVapidPublicKey } from '../services/push.js';
 
 const router = Router();
 router.use(authenticate, requireRole('parent'));
@@ -103,6 +112,53 @@ router.post('/notifications/read', async (req, res) => {
       await Notification.updateMany({ userId: req.user.id, read: false }, { $set: { read: true } });
     }
     res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/push-config', async (_req, res) => {
+  res.json({ vapidPublicKey: getVapidPublicKey() });
+});
+
+router.post('/device-tokens', async (req, res) => {
+  try {
+    const { platform, token, keys, userAgent } = req.body;
+    if (!platform || !token) {
+      return res.status(400).json({ error: 'platform and token are required' });
+    }
+    if (!['fcm', 'web_push'].includes(platform)) {
+      return res.status(400).json({ error: 'platform must be fcm or web_push' });
+    }
+    if (platform === 'web_push' && (!keys?.p256dh || !keys?.auth)) {
+      return res.status(400).json({ error: 'web_push requires keys.p256dh and keys.auth' });
+    }
+
+    const doc = await DeviceToken.findOneAndUpdate(
+      { userId: req.user.id, platform, token },
+      {
+        userId: req.user.id,
+        platform,
+        token,
+        keys: keys || undefined,
+        userAgent: userAgent || req.get('user-agent') || '',
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+    res.json({ ok: true, id: doc._id.toString() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/device-tokens', async (req, res) => {
+  try {
+    const { platform, token } = req.body || {};
+    const filter = { userId: req.user.id };
+    if (platform) filter.platform = platform;
+    if (token) filter.token = token;
+    const result = await DeviceToken.deleteMany(filter);
+    res.json({ ok: true, deleted: result.deletedCount });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

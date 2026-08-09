@@ -5,7 +5,14 @@ const notificationSchema = new mongoose.Schema(
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     type: {
       type: String,
-      enum: ['trip_started', 'kid_picked_up', 'kid_dropped_off', 'trip_completed'],
+      enum: [
+        'trip_started',
+        'kid_picked_up',
+        'kid_dropped_off',
+        'trip_completed',
+        'trip_cancelled',
+        'trip_assigned',
+      ],
       required: true,
     },
     title: { type: String, required: true },

@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { connectSocket, disconnectSocket } from '../lib/socket';
+import { unregisterParentWebPush } from '../lib/webPush';
 
 const AuthContext = createContext(null);
 
@@ -51,11 +52,14 @@ export function AuthProvider({ children }) {
     [showToast]
   );
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    if (user?.role === 'parent') {
+      await unregisterParentWebPush();
+    }
     localStorage.removeItem('token');
     disconnectSocket();
     setUser(null);
-  }, []);
+  }, [user?.role]);
 
   const value = useMemo(
     () => ({ user, loading, login, logout, showToast, toast }),

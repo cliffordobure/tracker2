@@ -1,0 +1,4 @@
+{
+  "MAPBOX_TOKEN": "pk.your_mapbox_public_token",
+  "API_BASE": "https://tracker2-j8vr.onrender.com"
+}

@@ -19,6 +19,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
   List<Map<String, dynamic>> kids = [];
   Map<String, dynamic>? active;
   List<Map<String, dynamic>> events = [];
+  List<Map<String, dynamic>> notifications = [];
   List<LatLng> routePoints = [];
   LatLng? bus;
   double? busHeading;
@@ -28,6 +29,9 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
   String? _boundTripId;
   bool _listenersBound = false;
   AuthState? _auth;
+
+  int get _unreadCount =>
+      notifications.where((n) => n['read'] != true).length;
 
   @override
   void initState() {
@@ -115,7 +119,11 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
   void _onNotification(dynamic data) {
     if (!mounted || data is! Map) return;
     final title = data['title'] as String?;
-    if (title != null) setState(() => status = title);
+    final map = Map<String, dynamic>.from(data);
+    setState(() {
+      if (title != null) status = title;
+      notifications = [map, ...notifications];
+    });
   }
 
   bool get _anyKidOnBus {
@@ -143,7 +151,10 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
     try {
       final kidsRes = await auth.api.get('/parent/kids');
       final activeRes = await auth.api.get('/parent/trips/active');
+      final notifRes = await auth.api.get('/parent/notifications');
       kids = List<Map<String, dynamic>>.from(kidsRes['kids'] as List? ?? []);
+      notifications =
+          List<Map<String, dynamic>>.from(notifRes['notifications'] as List? ?? []);
       final trips = List<Map<String, dynamic>>.from(activeRes['trips'] as List? ?? []);
       active = trips.isNotEmpty ? trips.first : null;
 
@@ -197,6 +208,35 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
     }
   }
 
+  Future<void> _markAllRead() async {
+    final auth = context.read<AuthState>();
+    await auth.api.post('/parent/notifications/read', {});
+    setState(() {
+      notifications = notifications
+          .map((n) => {...n, 'read': true})
+          .toList();
+    });
+  }
+
+  String _typeLabel(String? type) {
+    switch (type) {
+      case 'trip_started':
+        return 'Started';
+      case 'kid_picked_up':
+        return 'Pickup';
+      case 'kid_dropped_off':
+        return 'Drop-off';
+      case 'trip_completed':
+        return 'Completed';
+      case 'trip_cancelled':
+        return 'Cancelled';
+      case 'trip_assigned':
+        return 'Assigned';
+      default:
+        return type ?? 'Alert';
+    }
+  }
+
   String _kidChip(Map<String, dynamic> kid) {
     if (active == null) return 'Idle';
     final id = kid['_id']?.toString();
@@ -241,7 +281,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
               child: Row(
                 children: [
-                  RoundMapButton(icon: Icons.menu_rounded, onTap: auth.logout),
+                  RoundMapButton(icon: Icons.logout_rounded, onTap: auth.logout),
                   const SizedBox(width: 10),
                   Expanded(
                     child: FloatingPill(
@@ -423,6 +463,81 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                       ),
                       const SizedBox(height: 8),
                       BoltPrimaryButton(label: 'Refresh', onPressed: _load),
+                      const SizedBox(height: 20),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              _unreadCount > 0
+                                  ? 'Notifications ($_unreadCount unread)'
+                                  : 'Notifications',
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w800, fontSize: 16),
+                            ),
+                          ),
+                          if (_unreadCount > 0)
+                            TextButton(
+                              onPressed: _markAllRead,
+                              child: const Text('Mark all read'),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      if (notifications.isEmpty)
+                        const Text(
+                          'No notifications yet.',
+                          style: TextStyle(color: AppColors.muted),
+                        )
+                      else
+                        ...notifications.take(20).map((n) {
+                          final unread = n['read'] != true;
+                          final created = n['createdAt']?.toString();
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 10),
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: unread
+                                  ? AppColors.softBg
+                                  : Colors.white,
+                              border: Border.all(color: const Color(0xFFE5E7EB)),
+                              borderRadius: BorderRadius.circular(18),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    StatusChip(
+                                      text: _typeLabel(n['type']?.toString()),
+                                      color: unread
+                                          ? AppColors.accentDark
+                                          : AppColors.muted,
+                                    ),
+                                    const Spacer(),
+                                    if (created != null)
+                                      Text(
+                                        created.length > 16
+                                            ? created.substring(0, 16)
+                                            : created,
+                                        style: const TextStyle(
+                                            color: AppColors.muted, fontSize: 11),
+                                      ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  n['title']?.toString() ?? 'Alert',
+                                  style: const TextStyle(fontWeight: FontWeight.w700),
+                                ),
+                                Text(
+                                  n['body']?.toString() ?? '',
+                                  style: const TextStyle(
+                                      color: AppColors.muted, height: 1.3),
+                                ),
+                              ],
+                            ),
+                          );
+                        }),
                     ],
                   ),
           ),

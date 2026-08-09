@@ -4,9 +4,9 @@ Web platform for school transport tracking:
 
 - **Admin** — schools, routes/stops, kids, parents, drivers
 - **Driver** — start morning/evening trips, live GPS, pick up / drop off kids
-- **Parent** — live Mapbox tracking + in-app notifications
+- **Parent** — live Mapbox tracking + in-app notifications (+ optional Web Push / FCM)
 
-Flutter mobile apps are planned for Phase 2 against the same API.
+Flutter mobile app lives in `apps/mobile` against the same API.
 
 ## Stack
 
@@ -27,10 +27,11 @@ Flutter mobile apps are planned for Phase 2 against the same API.
 npm install
 
 # copy env files if needed
-cp .env.example server/.env
+cp server/.env.example server/.env
 # create apps/web/.env with:
 # VITE_API_URL=http://localhost:4001
 # VITE_MAPBOX_TOKEN=pk.your_token
+# VITE_VAPID_PUBLIC_KEY=   # same as server VAPID_PUBLIC_KEY (optional)
 
 # seed demo data
 npm run seed
@@ -61,11 +62,22 @@ If an existing DB still has `role: 'admin'`, the API migrates those users to `su
 
 1. Super admin creates schools and school admin accounts.
 2. School admin sets school location, buses (with seats), routes, and onboards students (map boarding + parent password).
-3. School admin **Dispatch**: pick date / route / bus / driver — over-capacity routes split into sequenced trips.
-4. Driver starts a dispatched trip (or an ad-hoc morning/evening run).
-5. Parents get `trip_started` and can watch live; pickup/dropoff/complete notify parents.
+3. School admin creates **Trip schedules** → instances; drivers run today’s trips.
+4. Driver starts a trip → parents get `trip_started` and can watch live after pickup.
+5. Pickup / drop-off / complete / cancel / assign notify parents (in-app + push when configured).
 
 Allow location access in the browser so the driver can share live GPS.
+
+### Parent notifications & push
+
+In-app notifications always work (Mongo + Socket.IO). Background push is optional:
+
+| Channel | Config |
+|---------|--------|
+| Web Push | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` on server; optional `VITE_VAPID_PUBLIC_KEY` on web. Generate with `npx web-push generate-vapid-keys`. |
+| FCM (Flutter) | `FIREBASE_SERVICE_ACCOUNT_JSON` or `GOOGLE_APPLICATION_CREDENTIALS` on server; place `google-services.json` in `apps/mobile/android/app/` (see mobile README). |
+
+Without these env vars, APIs and in-app alerts still succeed; push is skipped.
 
 ## Project layout
 

@@ -4,6 +4,7 @@ import { connectSocket } from '../../lib/socket';
 import MapView from '../../components/MapView';
 import { useAuth } from '../../context/AuthContext';
 import { stopsForTripKids } from '../../lib/geo';
+import { notificationTypeLabel, registerParentWebPush } from '../../lib/webPush';
 
 export default function ParentHome() {
   const { showToast } = useAuth();
@@ -14,6 +15,7 @@ export default function ParentHome() {
   const [selected, setSelected] = useState(null);
   const [driverLocation, setDriverLocation] = useState(null);
   const [error, setError] = useState('');
+  const [pushStatus, setPushStatus] = useState('');
 
   const load = async () => {
     const [k, a, h, n] = await Promise.all([
@@ -47,6 +49,14 @@ export default function ParentHome() {
 
   useEffect(() => {
     load().catch((e) => setError(e.message));
+    registerParentWebPush()
+      .then((r) => {
+        if (r.ok) setPushStatus('Browser push enabled');
+        else if (r.reason === 'no_vapid') setPushStatus('Push not configured on server');
+        else if (r.reason === 'denied') setPushStatus('Push permission denied');
+        else if (r.reason === 'unsupported') setPushStatus('Push not supported in this browser');
+      })
+      .catch(() => setPushStatus('Push registration failed'));
   }, []);
 
   useEffect(() => {
@@ -237,9 +247,11 @@ export default function ParentHome() {
               Mark all read
             </button>
           </div>
+          {pushStatus && <p className="hint muted">{pushStatus}</p>}
           <ul className="notif-list">
             {notifications.map((n) => (
               <li key={n.id || n._id} className={n.read ? 'read' : 'unread'}>
+                <span className="pill">{notificationTypeLabel(n.type)}</span>
                 <strong>{n.title}</strong>
                 <p>{n.body}</p>
                 <small>{new Date(n.createdAt).toLocaleString()}</small>

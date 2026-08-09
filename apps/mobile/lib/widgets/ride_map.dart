@@ -189,14 +189,21 @@ class _RideMapState extends State<RideMap> with TickerProviderStateMixin {
         ),
       ),
       children: [
-        TileLayer(
-          urlTemplate:
-              'https://api.mapbox.com/styles/v1/${AppConfig.mapStyleId}/tiles/512/{z}/{x}/{y}@2x?access_token=${AppConfig.mapboxToken}',
-          userAgentPackageName: 'com.schoolkids.school_kids_tracker',
-          maxZoom: 20,
-          tileDimension: 512,
-          zoomOffset: -1,
-        ),
+        // Standard 256 Mapbox raster tiles (512/@2x often 401s on some tokens/devices → gray map)
+        if (AppConfig.hasMapboxToken)
+          TileLayer(
+            urlTemplate:
+                'https://api.mapbox.com/styles/v1/${AppConfig.mapStyleId}/tiles/256/{z}/{x}/{y}?access_token=${AppConfig.mapboxToken}',
+            userAgentPackageName: 'com.schoolkids.school_kids_tracker',
+            maxZoom: 22,
+            tileDimension: 256,
+          )
+        else
+          TileLayer(
+            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+            userAgentPackageName: 'com.schoolkids.school_kids_tracker',
+            maxZoom: 19,
+          ),
         if (widget.routePoints.length >= 2)
           PolylineLayer(
             polylines: [

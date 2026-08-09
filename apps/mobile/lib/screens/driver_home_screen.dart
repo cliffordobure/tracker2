@@ -17,8 +17,17 @@ class DriverHomeScreen extends StatefulWidget {
   State<DriverHomeScreen> createState() => _DriverHomeScreenState();
 }
 
+String _periodLabel(Map<String, dynamic> t) {
+  final period = t['period'] as String?;
+  if (period == 'morning' || period == 'afternoon' || period == 'evening') {
+    return period!;
+  }
+  return t['direction'] == 'to_school' ? 'morning' : 'evening';
+}
+
 class _DriverHomeScreenState extends State<DriverHomeScreen> {
   List<Map<String, dynamic>> routes = [];
+  List<Map<String, dynamic>> todayTrips = [];
   Map<String, dynamic>? trip;
   List<Map<String, dynamic>> kids = [];
   List<Map<String, dynamic>> stops = [];
@@ -53,8 +62,19 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     try {
       final data = await auth.api.get('/driver/routes');
       routes = List<Map<String, dynamic>>.from(data['routes'] as List? ?? []);
+      final today = await auth.api.get('/driver/trips/today');
+      todayTrips = List<Map<String, dynamic>>.from(today['trips'] as List? ?? []);
+      Map<String, dynamic>? activeFromToday;
+      for (final t in todayTrips) {
+        if (t['status'] == 'active') {
+          activeFromToday = t;
+          break;
+        }
+      }
       final active = await auth.api.get('/driver/trips/active');
-      if (active['trip'] != null) {
+      if (activeFromToday != null) {
+        await _openTrip(Map<String, dynamic>.from(activeFromToday));
+      } else if (active['trip'] != null) {
         await _openTrip(Map<String, dynamic>.from(active['trip'] as Map));
       }
     } catch (e) {
@@ -97,9 +117,16 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   Future<void> _startScheduled(String tripId) async {
     final auth = context.read<AuthState>();
     try {
-      final started = await auth.api.post('/trips/$tripId/start', {});
+      final body = <String, dynamic>{};
+      if (_lastGps != null) {
+        body['lat'] = _lastGps!.latitude;
+        body['lng'] = _lastGps!.longitude;
+        body['heading'] = _lastGps!.heading;
+        body['speed'] = _lastGps!.speed;
+      }
+      final started = await auth.api.post('/trips/$tripId/start', body);
       await _openTrip(Map<String, dynamic>.from(started['trip'] as Map));
-      setState(() => message = 'Dispatched trip started — sharing live GPS');
+      setState(() => message = 'Trip started — sharing live GPS');
     } catch (e) {
       setState(() => message = e.toString().replaceFirst('Exception: ', ''));
     }
@@ -231,19 +258,31 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   Future<void> _complete() async {
     final auth = context.read<AuthState>();
     _gpsHeartbeat?.cancel();
-    await auth.api.post('/trips/${trip!['_id']}/complete');
-    await gpsSub?.cancel();
-    setState(() {
-      trip = null;
-      kids = [];
-      stops = [];
-      events = [];
-      routePoints = [];
-      bus = null;
-      sharingLocation = false;
-      message = 'Trip completed';
-    });
-    await _load();
+    try {
+      final body = <String, dynamic>{};
+      if (_lastGps != null) {
+        body['lat'] = _lastGps!.latitude;
+        body['lng'] = _lastGps!.longitude;
+      } else if (bus != null) {
+        body['lat'] = bus!.latitude;
+        body['lng'] = bus!.longitude;
+      }
+      await auth.api.post('/trips/${trip!['_id']}/complete', body);
+      await gpsSub?.cancel();
+      setState(() {
+        trip = null;
+        kids = [];
+        stops = [];
+        events = [];
+        routePoints = [];
+        bus = null;
+        sharingLocation = false;
+        message = 'Trip completed';
+      });
+      await _load();
+    } catch (e) {
+      setState(() => message = e.toString().replaceFirst('Exception: ', ''));
+    }
   }
 
   @override
@@ -314,13 +353,13 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const Text(
-                            'Ready when you are',
+                            'Today\'s trips',
                             style: TextStyle(
                                 fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -0.5),
                           ),
                           const SizedBox(height: 6),
                           const Text(
-                            'Start a trip — your phone GPS updates parents once kids are onboard.',
+                            'Start your assigned instance — GPS updates parents once kids are onboard.',
                             style: TextStyle(color: AppColors.muted),
                           ),
                           if (message != null) ...[
@@ -328,10 +367,47 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                             StatusChip(text: message!),
                           ],
                           const SizedBox(height: 18),
+                          if (todayTrips.where((t) => t['status'] == 'scheduled').isNotEmpty) ...[
+                            ...todayTrips.where((t) => t['status'] == 'scheduled').map((st) {
+                              final label = _periodLabel(st);
+                              final code = st['tripCode'] ?? 'Trip';
+                              final routeName = st['routeId'] is Map
+                                  ? st['routeId']['name']
+                                  : 'Route';
+                              final kidCount = (st['kidIds'] as List?)?.length ?? 0;
+                              return Container(
+                                margin: const EdgeInsets.only(bottom: 12),
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: AppColors.softBg,
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '$code · $routeName',
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w800, fontSize: 17),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      '$kidCount students · $label',
+                                      style: const TextStyle(color: AppColors.muted),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    BoltPrimaryButton(
+                                      label: 'Start $label trip',
+                                      onPressed: () =>
+                                          _startScheduled(st['_id'].toString()),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }),
+                            const SizedBox(height: 8),
+                          ],
                           ...routes.map((r) {
-                            final scheduled = List<Map<String, dynamic>>.from(
-                              r['scheduledTrips'] as List? ?? [],
-                            );
                             return Container(
                               margin: const EdgeInsets.only(bottom: 12),
                               padding: const EdgeInsets.all(16),
@@ -349,30 +425,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    '${(r['kids'] as List?)?.length ?? 0} kids on this route',
+                                    '${(r['kids'] as List?)?.length ?? 0} kids · ad-hoc fallback',
                                     style: const TextStyle(color: AppColors.muted),
                                   ),
-                                  if (scheduled.isNotEmpty) ...[
-                                    const SizedBox(height: 12),
-                                    const Text(
-                                      'Dispatched today',
-                                      style: TextStyle(fontWeight: FontWeight.w700),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    ...scheduled.map((st) {
-                                      final seq = st['sequence'] ?? 1;
-                                      final kidCount =
-                                          (st['kidIds'] as List?)?.length ?? 0;
-                                      return Padding(
-                                        padding: const EdgeInsets.only(bottom: 8),
-                                        child: BoltPrimaryButton(
-                                          label: 'Start trip $seq ($kidCount kids)',
-                                          onPressed: () =>
-                                              _startScheduled(st['_id'].toString()),
-                                        ),
-                                      );
-                                    }),
-                                  ],
                                   const SizedBox(height: 14),
                                   Row(
                                     children: [
@@ -438,7 +493,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                           const SizedBox(height: 8),
                           OutlinedButton(
                             onPressed: _complete,
-                            child: const Text('Complete trip'),
+                            child: Text(
+                              'Complete ${_periodLabel(trip!)} trip',
+                            ),
                           ),
                           const SizedBox(height: 18),
                           const Text('Passengers',
