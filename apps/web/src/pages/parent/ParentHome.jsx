@@ -3,7 +3,13 @@ import { api } from '../../lib/api';
 import { connectSocket } from '../../lib/socket';
 import MapView from '../../components/MapView';
 import { useAuth } from '../../context/AuthContext';
-import { stopsForTripKids } from '../../lib/geo';
+import { fetchDrivingRoute, formatEtaMinutes } from '../../lib/directions';
+import {
+  etaPurposeLabel,
+  nextStopForKid,
+  stopsForTripKids,
+  waypointsToTargetStop,
+} from '../../lib/geo';
 import { anyKidOnBus, isKidOnBus } from '../../lib/mapMarkers';
 import { notificationTypeLabel, registerParentWebPush } from '../../lib/webPush';
 
@@ -25,7 +31,10 @@ export default function ParentHome() {
   const [lateNote, setLateNote] = useState('');
   const [lateKidId, setLateKidId] = useState('');
   const [lateBusy, setLateBusy] = useState(false);
+  /** { [kidId]: { durationSec, stopName, purpose, label } } */
+  const [etas, setEtas] = useState({});
   const selectedRef = useRef(null);
+  const etaFetchRef = useRef(0);
 
   useEffect(() => {
     selectedRef.current = selected;
@@ -168,6 +177,79 @@ export default function ParentHome() {
       ? 'Live · tracking driver'
       : 'Trip started — waiting for pickup';
 
+  const mapStops = selected
+    ? stopsForTripKids(selected.stops, selected.trip.kidIds || selected.myKids || [])
+    : [];
+  const tripKids = selected?.trip?.kidIds || selected?.myKids || [];
+
+  // Mapbox ETA to each child's next pickup/drop-off along the remaining path
+  useEffect(() => {
+    if (!selected || !driverLocation?.lat) {
+      setEtas({});
+      return undefined;
+    }
+    let cancelled = false;
+    const runId = ++etaFetchRef.current;
+    const stops = stopsForTripKids(
+      selected.stops,
+      selected.trip.kidIds || selected.myKids || []
+    );
+    const allKids = selected.trip.kidIds || selected.myKids || [];
+    const events = selected.events || [];
+    const direction = selected.trip.direction;
+    const myKids = selected.myKids || [];
+    const loc = { lat: driverLocation.lat, lng: driverLocation.lng };
+
+    const run = async () => {
+      const next = {};
+      for (const kid of myKids) {
+        const target = nextStopForKid({ kid, stops, direction, events });
+        if (!target?.location) continue;
+        const waypoints = waypointsToTargetStop({
+          driverLocation: loc,
+          stops,
+          direction,
+          kids: allKids,
+          events,
+          targetStop: target,
+        });
+        const route = await fetchDrivingRoute(waypoints);
+        if (cancelled || runId !== etaFetchRef.current) return;
+        if (!route) continue;
+        const onKidBus = isKidOnBus(events, kid._id);
+        const purpose = etaPurposeLabel(target, direction, onKidBus);
+        const mins = formatEtaMinutes(route.durationSec);
+        next[String(kid._id)] = {
+          durationSec: route.durationSec,
+          stopName: target.name,
+          purpose,
+          label: mins ? `≈ ${mins} to ${purpose}` : null,
+          shortLabel: mins ? `≈ ${mins}` : null,
+        };
+      }
+      if (!cancelled && runId === etaFetchRef.current) setEtas(next);
+    };
+
+    run().catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    selected?.trip?._id,
+    selected?.trip?.direction,
+    selected?.events,
+    selected?.myKids,
+    selected?.stops,
+    selected?.trip?.kidIds,
+    driverLocation?.lat,
+    driverLocation?.lng,
+  ]);
+
+  const primaryEta = (() => {
+    const list = Object.values(etas);
+    return list[0] || null;
+  })();
+
   const mapCenter =
     driverLocation ||
     selected?.stops?.[0]?.location ||
@@ -183,16 +265,12 @@ export default function ParentHome() {
           center={mapCenter}
           zoom={onBus ? 15.5 : 14}
           driverLocation={driverLocation}
-          stops={
-            selected
-              ? stopsForTripKids(selected.stops, selected.trip.kidIds || selected.myKids || [])
-              : []
-          }
+          stops={mapStops}
           direction={selected?.trip?.direction}
           showRoute={!!selected}
           liveNavigate={onBus}
           events={selected?.events || []}
-          kids={selected?.trip?.kidIds || selected?.myKids || []}
+          kids={tripKids}
           followDriver={onBus}
           className="map-canvas parent-ride-canvas"
         />
@@ -210,9 +288,17 @@ export default function ParentHome() {
               )}
             </div>
           </div>
-          <button type="button" className="btn btn-ghost parent-ride-logout" onClick={logout}>
-            Sign out
-          </button>
+          <div className="parent-ride-chrome-right">
+            {primaryEta?.label && (
+              <div className="parent-ride-eta" title={primaryEta.stopName}>
+                <strong>{primaryEta.shortLabel}</strong>
+                <small>{primaryEta.purpose}</small>
+              </div>
+            )}
+            <button type="button" className="btn btn-ghost parent-ride-logout" onClick={logout}>
+              Sign out
+            </button>
+          </div>
         </div>
       </div>
 
@@ -279,6 +365,7 @@ export default function ParentHome() {
                     );
                     const waiting = !picked && !dropped;
                     const composing = lateKidId === kid._id;
+                    const eta = etas[String(kid._id)];
                     return (
                       <li key={kid._id} className="kid-row kid-row--stack">
                         <div className="kid-row-main">
@@ -291,9 +378,15 @@ export default function ParentHome() {
                                   ? 'On the bus · tracking'
                                   : 'Waiting for pickup'}
                             </div>
+                            {eta?.label && !dropped && (
+                              <div className="parent-kid-eta">
+                                {eta.label}
+                                {eta.stopName ? ` · ${eta.stopName}` : ''}
+                              </div>
+                            )}
                           </div>
                           <span className={`pill ${picked && !dropped ? 'pill-live' : ''}`}>
-                            {dropped ? 'Done' : picked ? 'Live' : 'Wait'}
+                            {dropped ? 'Done' : eta?.shortLabel || (picked ? 'Live' : 'Wait')}
                           </span>
                         </div>
                         {waiting && (

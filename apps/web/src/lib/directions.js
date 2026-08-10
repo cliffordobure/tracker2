@@ -2,9 +2,9 @@ const TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
 
 /**
  * Fetch a road-snapped driving route through waypoints [{lat,lng}, ...]
- * Returns GeoJSON LineString coordinates as [lng, lat][] or null.
+ * Returns { coordinates, durationSec, distanceM, legDurationsSec } or null.
  */
-export async function fetchRoadRoute(waypoints) {
+export async function fetchDrivingRoute(waypoints) {
   if (!TOKEN || TOKEN.includes('your_mapbox') || !waypoints || waypoints.length < 2) {
     return null;
   }
@@ -32,7 +32,30 @@ export async function fetchRoadRoute(waypoints) {
     console.warn('Mapbox Directions error:', data.code, data.message);
     return null;
   }
-  return data.routes?.[0]?.geometry?.coordinates || null;
+  const route = data.routes?.[0];
+  if (!route?.geometry?.coordinates?.length) return null;
+
+  return {
+    coordinates: route.geometry.coordinates,
+    durationSec: Number(route.duration) || 0,
+    distanceM: Number(route.distance) || 0,
+    legDurationsSec: (route.legs || []).map((l) => Number(l.duration) || 0),
+  };
+}
+
+/** Back-compat: coordinates only. */
+export async function fetchRoadRoute(waypoints) {
+  const route = await fetchDrivingRoute(waypoints);
+  return route?.coordinates || null;
+}
+
+export function formatEtaMinutes(durationSec) {
+  if (!Number.isFinite(durationSec) || durationSec < 0) return null;
+  const mins = Math.max(1, Math.round(durationSec / 60));
+  if (mins < 60) return `${mins} min`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m ? `${h} hr ${m} min` : `${h} hr`;
 }
 
 /** Move along a [lng,lat][] polyline by roughly `stepMeters`. */

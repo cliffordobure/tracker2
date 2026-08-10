@@ -117,3 +117,52 @@ export function distanceToRouteMeters(coordinates, location) {
   }
   return best;
 }
+
+/**
+ * Next stop that matters for this kid (pickup or drop-off), or null if done.
+ * to_school: home then school; to_home: school then home.
+ */
+export function nextStopForKid({ kid, stops, direction, events = [] }) {
+  if (!kid) return null;
+  const picked = kidEventMatch(events, kid._id || kid.id, 'picked_up');
+  const dropped = kidEventMatch(events, kid._id || kid.id, 'dropped_off');
+  if (dropped) return null;
+
+  const ordered = orderedStopsForDirection(stops, direction);
+  const homeId = kidHomeStopId(kid);
+
+  if (direction === 'to_home') {
+    if (!picked) return ordered.find((s) => s.type === 'school') || null;
+    return ordered.find((s) => String(s._id) === homeId) || null;
+  }
+
+  if (!picked) return ordered.find((s) => String(s._id) === homeId) || null;
+  return ordered.find((s) => s.type === 'school') || null;
+}
+
+/** Waypoints from driver through remaining stops up to (and including) target. */
+export function waypointsToTargetStop({
+  driverLocation,
+  stops,
+  direction,
+  kids,
+  events,
+  targetStop,
+}) {
+  if (!driverLocation?.lat || !targetStop?.location) return [];
+  const remaining = remainingServiceStops({ stops, direction, kids, events });
+  const idx = remaining.findIndex((s) => String(s._id) === String(targetStop._id));
+  const path = idx >= 0 ? remaining.slice(0, idx + 1) : [targetStop];
+  return [
+    { lat: driverLocation.lat, lng: driverLocation.lng },
+    ...path.map((s) => s.location).filter((l) => l?.lat != null),
+  ];
+}
+
+export function etaPurposeLabel(stop, direction, kidOnBus) {
+  if (!stop) return 'arrival';
+  if (stop.type === 'school') {
+    return direction === 'to_home' ? 'pickup at school' : 'drop-off at school';
+  }
+  return kidOnBus ? 'drop-off' : 'pickup';
+}

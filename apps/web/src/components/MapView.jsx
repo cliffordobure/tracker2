@@ -6,7 +6,7 @@ import {
   orderedStopsForDirection,
   remainingServiceStops,
 } from '../lib/geo';
-import { fetchRoadRoute, nearestRouteIndex } from '../lib/directions';
+import { fetchDrivingRoute, fetchRoadRoute, nearestRouteIndex } from '../lib/directions';
 import { createBoltCarElement, setBoltCarHeading } from '../lib/mapMarkers';
 
 const TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
@@ -127,6 +127,8 @@ export default function MapView({
   interactive = true,
   onMapClick,
   onRouteReady,
+  /** Called with { durationSec, distanceM } when a live/planned route is fetched. */
+  onRouteEta,
   className = 'map-canvas',
 }) {
   const containerRef = useRef(null);
@@ -139,6 +141,7 @@ export default function MapView({
   const hasZoomedToBusRef = useRef(false);
   const followRef = useRef(followDriver);
   const onRouteReadyRef = useRef(onRouteReady);
+  const onRouteEtaRef = useRef(onRouteEta);
   const lastRerouteAtRef = useRef(0);
   const remainKeyRef = useRef('');
   const liveFetchingRef = useRef(false);
@@ -151,6 +154,10 @@ export default function MapView({
   useEffect(() => {
     onRouteReadyRef.current = onRouteReady;
   }, [onRouteReady]);
+
+  useEffect(() => {
+    onRouteEtaRef.current = onRouteEta;
+  }, [onRouteEta]);
 
   useEffect(() => {
     liveNavRef.current = liveNavigate;
@@ -317,8 +324,9 @@ export default function MapView({
           { lat: driverLocation.lat, lng: driverLocation.lng },
           ...remaining.map((s) => s.location).filter((l) => l?.lat != null),
         ];
-        const coordinates = await fetchRoadRoute(waypoints);
+        const route = await fetchDrivingRoute(waypoints);
         if (cancelled || !mapRef.current) return;
+        const coordinates = route?.coordinates;
         if (!coordinates?.length) return;
 
         remainKeyRef.current = remainKey;
@@ -326,6 +334,10 @@ export default function MapView({
         lastRerouteAtRef.current = Date.now();
         routeCoordsRef.current = coordinates;
         onRouteReadyRef.current?.(coordinates);
+        onRouteEtaRef.current?.({
+          durationSec: route.durationSec,
+          distanceM: route.distanceM,
+        });
 
         const apply = () => {
           ensureLayers(map);

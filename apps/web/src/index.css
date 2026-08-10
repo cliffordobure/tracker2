@@ -698,10 +698,47 @@ th {
   box-shadow: 0 0 0 4px rgba(43, 238, 140, 0.28);
 }
 
+.parent-ride-chrome-right {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  pointer-events: auto;
+}
+
+.parent-ride-eta {
+  display: grid;
+  gap: 0.05rem;
+  padding: 0.55rem 0.85rem;
+  border-radius: 999px;
+  background: rgba(29, 78, 216, 0.95);
+  color: #fff;
+  box-shadow: 0 8px 20px rgba(29, 78, 216, 0.35);
+  text-align: center;
+  min-width: 4.5rem;
+}
+
+.parent-ride-eta strong {
+  font-size: 0.95rem;
+  line-height: 1.1;
+}
+
+.parent-ride-eta small {
+  font-size: 0.65rem;
+  opacity: 0.9;
+  text-transform: capitalize;
+}
+
 .parent-ride-logout {
   background: rgba(255, 255, 255, 0.94) !important;
   border-radius: 999px !important;
   box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+}
+
+.parent-kid-eta {
+  margin-top: 0.25rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #1d4ed8;
 }
 
 .parent-ride-sheet {
