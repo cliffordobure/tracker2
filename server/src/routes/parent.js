@@ -8,6 +8,8 @@ import {
   DriverProfile,
   DeviceToken,
   User,
+  LeaveRequest,
+  Announcement,
 } from '../models/index.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { getVapidPublicKey } from '../services/push.js';
@@ -20,10 +22,23 @@ router.use(authenticate, requireRole('parent'));
 router.get('/kids', async (req, res) => {
   try {
     const kids = await Kid.find({ parentIds: req.user.id, active: true })
-      .populate('schoolId', 'name location address')
+      .populate('schoolId', 'name location address logoUrl')
       .populate('routeId', 'name')
       .populate('homeStopId', 'name location');
     res.json({ kids });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/me', async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('name email phone role');
+    const kids = await Kid.find({ parentIds: req.user.id, active: true })
+      .populate('schoolId', 'name location address logoUrl')
+      .limit(1);
+    const school = kids[0]?.schoolId || null;
+    res.json({ user, school });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -37,8 +52,9 @@ router.get('/trips/active', async (req, res) => {
 
     const trips = await Trip.find({ status: 'active', kidIds: { $in: kidIds } })
       .populate('routeId', 'name')
-      .populate('schoolId', 'name location address')
+      .populate('schoolId', 'name location address logoUrl')
       .populate('driverId', 'name phone')
+      .populate('busId', 'plate label seats')
       .populate('kidIds');
 
     const enriched = await Promise.all(
@@ -85,9 +101,198 @@ router.get('/trips', async (req, res) => {
       .populate('routeId', 'name')
       .populate('schoolId', 'name')
       .populate('driverId', 'name')
+      .populate('busId', 'plate label')
       .sort({ startedAt: -1 })
       .limit(50);
     res.json({ trips });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+function dayCountInclusive(start, end) {
+  const s = new Date(start);
+  s.setHours(0, 0, 0, 0);
+  const e = new Date(end);
+  e.setHours(0, 0, 0, 0);
+  const ms = e.getTime() - s.getTime();
+  if (Number.isNaN(ms) || ms < 0) return 0;
+  return Math.floor(ms / (24 * 60 * 60 * 1000)) + 1;
+}
+
+async function assertParentKid(parentId, kidId) {
+  return Kid.findOne({ _id: kidId, parentIds: parentId, active: true });
+}
+
+router.get('/leave-requests', async (req, res) => {
+  try {
+    const { kidId } = req.query;
+    const kids = await Kid.find({ parentIds: req.user.id, active: true }).select('_id');
+    const kidIds = kids.map((k) => k._id);
+    const filter = { parentId: req.user.id, kidId: { $in: kidIds } };
+    if (kidId) {
+      if (!kidIds.some((id) => id.toString() === String(kidId))) {
+        return res.status(403).json({ error: 'Child not linked to this parent' });
+      }
+      filter.kidId = kidId;
+    }
+    const requests = await LeaveRequest.find(filter)
+      .populate('kidId', 'name grade house admissionNo photoUrl')
+      .sort({ createdAt: -1 })
+      .limit(100);
+    res.json({
+      requests: requests.map((r) => ({
+        ...r.toObject(),
+        days: dayCountInclusive(r.startDate, r.endDate),
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/leave-requests', async (req, res) => {
+  try {
+    const { kidId, leaveType, startDate, endDate, reason, notes, attachmentName, attachmentUrl } =
+      req.body || {};
+    if (!kidId || !startDate || !endDate) {
+      return res.status(400).json({ error: 'kidId, startDate and endDate are required' });
+    }
+    const kid = await assertParentKid(req.user.id, kidId);
+    if (!kid) return res.status(404).json({ error: 'Child not found' });
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) {
+      return res.status(400).json({ error: 'Invalid date range' });
+    }
+
+    const created = await LeaveRequest.create({
+      schoolId: kid.schoolId,
+      kidId: kid._id,
+      parentId: req.user.id,
+      leaveType: ['vacation', 'sick', 'family', 'other'].includes(leaveType) ? leaveType : 'vacation',
+      startDate: start,
+      endDate: end,
+      reason: typeof reason === 'string' ? reason.trim().slice(0, 250) : '',
+      notes: typeof notes === 'string' ? notes.trim().slice(0, 500) : '',
+      attachmentName: typeof attachmentName === 'string' ? attachmentName.slice(0, 120) : '',
+      attachmentUrl: typeof attachmentUrl === 'string' ? attachmentUrl.slice(0, 500) : '',
+      status: 'pending',
+    });
+
+    res.status(201).json({
+      request: { ...created.toObject(), days: dayCountInclusive(created.startDate, created.endDate) },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/leave-requests/:id', async (req, res) => {
+  try {
+    const request = await LeaveRequest.findOne({
+      _id: req.params.id,
+      parentId: req.user.id,
+    }).populate('kidId', 'name grade house admissionNo photoUrl');
+    if (!request) return res.status(404).json({ error: 'Leave request not found' });
+    res.json({
+      request: { ...request.toObject(), days: dayCountInclusive(request.startDate, request.endDate) },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.patch('/leave-requests/:id', async (req, res) => {
+  try {
+    const request = await LeaveRequest.findOne({
+      _id: req.params.id,
+      parentId: req.user.id,
+    });
+    if (!request) return res.status(404).json({ error: 'Leave request not found' });
+    if (request.status !== 'pending') {
+      return res.status(409).json({ error: 'Only pending requests can be edited' });
+    }
+
+    const { endDate, reason, notes, leaveType, attachmentName, attachmentUrl } = req.body || {};
+    if (endDate != null) {
+      const end = new Date(endDate);
+      if (Number.isNaN(end.getTime()) || end < request.startDate) {
+        return res.status(400).json({ error: 'Invalid return date' });
+      }
+      request.endDate = end;
+    }
+    if (typeof reason === 'string') request.reason = reason.trim().slice(0, 250);
+    if (typeof notes === 'string') request.notes = notes.trim().slice(0, 500);
+    if (['vacation', 'sick', 'family', 'other'].includes(leaveType)) {
+      request.leaveType = leaveType;
+    }
+    if (typeof attachmentName === 'string') request.attachmentName = attachmentName.slice(0, 120);
+    if (typeof attachmentUrl === 'string') request.attachmentUrl = attachmentUrl.slice(0, 500);
+
+    await request.save();
+    res.json({
+      request: { ...request.toObject(), days: dayCountInclusive(request.startDate, request.endDate) },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/leave-requests/:id/cancel', async (req, res) => {
+  try {
+    const request = await LeaveRequest.findOne({
+      _id: req.params.id,
+      parentId: req.user.id,
+    });
+    if (!request) return res.status(404).json({ error: 'Leave request not found' });
+    if (request.status !== 'pending') {
+      return res.status(409).json({ error: 'Only pending requests can be cancelled' });
+    }
+    request.status = 'cancelled';
+    await request.save();
+    res.json({
+      request: { ...request.toObject(), days: dayCountInclusive(request.startDate, request.endDate) },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/announcements', async (req, res) => {
+  try {
+    const kids = await Kid.find({ parentIds: req.user.id, active: true }).select('schoolId');
+    const schoolIds = [...new Set(kids.map((k) => k.schoolId?.toString()).filter(Boolean))];
+    if (!schoolIds.length) return res.json({ announcements: [] });
+
+    const { category, q } = req.query;
+    const filter = { schoolId: { $in: schoolIds }, active: true };
+    if (category && category !== 'all') filter.category = category;
+    if (q && String(q).trim()) {
+      const rx = new RegExp(String(q).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      filter.$or = [{ title: rx }, { body: rx }];
+    }
+
+    const announcements = await Announcement.find(filter).sort({ publishedAt: -1 }).limit(100);
+    res.json({ announcements });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/announcements/:id', async (req, res) => {
+  try {
+    const kids = await Kid.find({ parentIds: req.user.id, active: true }).select('schoolId');
+    const schoolIds = new Set(kids.map((k) => k.schoolId?.toString()).filter(Boolean));
+    const announcement = await Announcement.findById(req.params.id);
+    if (!announcement || !announcement.active) {
+      return res.status(404).json({ error: 'Announcement not found' });
+    }
+    if (!schoolIds.has(announcement.schoolId.toString())) {
+      return res.status(403).json({ error: 'Not allowed' });
+    }
+    res.json({ announcement });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

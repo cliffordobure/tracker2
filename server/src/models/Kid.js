@@ -8,6 +8,9 @@ const kidSchema = new mongoose.Schema(
     routeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Route' },
     homeStopId: { type: mongoose.Schema.Types.ObjectId, ref: 'Stop' },
     grade: { type: String, default: '' },
+    house: { type: String, default: '' },
+    admissionNo: { type: String, default: '' },
+    photoUrl: { type: String, default: '' },
     active: { type: Boolean, default: true },
   },
   { timestamps: true }

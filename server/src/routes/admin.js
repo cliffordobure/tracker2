@@ -9,6 +9,8 @@ import {
   Bus,
   DriverProfile,
   Trip,
+  Announcement,
+  LeaveRequest,
 } from '../models/index.js';
 import { authenticate, requireSchoolStaff, requireSuperAdmin } from '../middleware/auth.js';
 import adminTripOps from './adminTripOps.js';
@@ -790,6 +792,76 @@ router.post('/dispatch', async (req, res) => {
         tripCount: groups.length,
       },
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/announcements', async (req, res) => {
+  try {
+    const filter = { ...schoolFilter(req), active: true };
+    const announcements = await Announcement.find(filter).sort({ publishedAt: -1 }).limit(200);
+    res.json({ announcements });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/announcements', async (req, res) => {
+  try {
+    const schoolId = resolveSchoolId(req, { required: true });
+    if (!schoolId) return res.status(400).json({ error: 'schoolId is required' });
+    const { title, body, category, authorName, attachmentName, attachmentUrl } = req.body || {};
+    if (!title?.trim() || !body?.trim()) {
+      return res.status(400).json({ error: 'title and body are required' });
+    }
+    const announcement = await Announcement.create({
+      schoolId,
+      title: title.trim(),
+      body: body.trim(),
+      category: ['general', 'class', 'transport', 'events', 'urgent'].includes(category)
+        ? category
+        : 'general',
+      authorName: authorName?.trim() || req.user.name || 'Admin',
+      attachmentName: attachmentName || '',
+      attachmentUrl: attachmentUrl || '',
+      publishedAt: new Date(),
+    });
+    res.status(201).json({ announcement });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/leave-requests', async (req, res) => {
+  try {
+    const filter = schoolFilter(req);
+    if (req.query.status) filter.status = req.query.status;
+    const requests = await LeaveRequest.find(filter)
+      .populate('kidId', 'name grade house admissionNo')
+      .populate('parentId', 'name phone email')
+      .sort({ createdAt: -1 })
+      .limit(200);
+    res.json({ requests });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.patch('/leave-requests/:id', async (req, res) => {
+  try {
+    const request = await LeaveRequest.findById(req.params.id);
+    if (!request) return res.status(404).json({ error: 'Leave request not found' });
+    if (!assertSchoolAccess(req, request.schoolId)) {
+      return res.status(403).json({ error: 'Not allowed' });
+    }
+    const { status } = req.body || {};
+    if (!['pending', 'approved', 'rejected', 'cancelled'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status' });
+    }
+    request.status = status;
+    await request.save();
+    res.json({ request });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

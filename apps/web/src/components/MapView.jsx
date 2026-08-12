@@ -8,6 +8,7 @@ import {
 } from '../lib/geo';
 import { fetchDrivingRoute, fetchRoadRoute, nearestRouteIndex } from '../lib/directions';
 import { createBoltCarElement, setBoltCarHeading } from '../lib/mapMarkers';
+import { createVehicleMotion } from '../lib/vehicleMotion';
 
 const TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
 const ROUTE_SOURCE = 'trip-route';
@@ -20,9 +21,9 @@ const ROUTE_BLUE = '#1d4ed8';
 const ROUTE_BLUE_SOFT = '#93c5fd';
 const PROGRESS_BLUE = '#1e3a8a';
 /** Reroute when driver is farther than this from the drawn path. */
-const OFF_ROUTE_M = 80;
+const OFF_ROUTE_M = 28;
 /** Don't hammer Mapbox Directions more often than this. */
-const REROUTE_MIN_MS = 7000;
+const REROUTE_MIN_MS = 1200;
 
 function createStopElement(stop, { isNext, index }) {
   const el = document.createElement('div');
@@ -146,6 +147,11 @@ export default function MapView({
   const remainKeyRef = useRef('');
   const liveFetchingRef = useRef(false);
   const liveNavRef = useRef(liveNavigate);
+  const displayBusRef = useRef(null);
+  const animRafRef = useRef(0);
+  const motionRef = useRef(createVehicleMotion());
+  const latestDriverRef = useRef(driverLocation);
+  const lastFollowMoveRef = useRef(0);
 
   useEffect(() => {
     followRef.current = followDriver;
@@ -162,6 +168,10 @@ export default function MapView({
   useEffect(() => {
     liveNavRef.current = liveNavigate;
   }, [liveNavigate]);
+
+  useEffect(() => {
+    latestDriverRef.current = driverLocation;
+  }, [driverLocation]);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -188,6 +198,7 @@ export default function MapView({
     }
 
     return () => {
+      if (animRafRef.current) cancelAnimationFrame(animRafRef.current);
       map.remove();
       mapRef.current = null;
       mapReadyRef.current = false;
@@ -196,6 +207,7 @@ export default function MapView({
       routeKeyRef.current = '';
       routeCoordsRef.current = [];
       hasZoomedToBusRef.current = false;
+      displayBusRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -360,85 +372,124 @@ export default function MapView({
   }, [
     liveNavigate,
     showRoute,
-    driverLocation,
+    // Intentionally NOT full driverLocation — every GPS ping was cancelling fetches
+    driverLocation?.lat,
+    driverLocation?.lng,
     stops,
     direction,
     kids,
     events,
   ]);
 
-  // Live driver marker (Bolt car) + optional progress on planned route
+  // Bolt/Uber continuous forward motion along Mapbox road
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
+    if (!map) return undefined;
 
-    if (!driverLocation?.lat || !driverLocation?.lng) {
-      if (driverMarkerRef.current) {
-        driverMarkerRef.current.remove();
-        driverMarkerRef.current = null;
-      }
-      return;
-    }
+    let lastTs = 0;
+    let running = true;
+    const motion = motionRef.current;
 
-    const lngLat = [driverLocation.lng, driverLocation.lat];
-    const heading = driverLocation.heading;
-
-    const placeBus = () => {
+    const ensureMarker = (pos, heading) => {
       ensureLayers(map);
-
       if (!driverMarkerRef.current) {
         driverMarkerRef.current = new mapboxgl.Marker({
-          element: createBoltCarElement({ heading }),
+          element: createBoltCarElement({ heading: heading || 0 }),
           anchor: 'center',
         })
-          .setLngLat(lngLat)
+          .setLngLat([pos.lng, pos.lat])
           .addTo(map);
-      } else {
-        driverMarkerRef.current.setLngLat(lngLat);
-        setBoltCarHeading(driverMarkerRef.current.getElement(), heading);
-      }
-
-      const route = routeCoordsRef.current;
-      if (route.length && !liveNavRef.current) {
-        const idx = nearestRouteIndex(route, driverLocation);
-        setLine(map, PROGRESS_SOURCE, route.slice(0, Math.max(idx + 1, 2)));
-      }
-
-      // Off-route while live: trigger a fresh fetch by clearing key after cooldown
-      if (
-        liveNavRef.current &&
-        route.length &&
-        distanceToRouteMeters(route, driverLocation) > OFF_ROUTE_M &&
-        Date.now() - lastRerouteAtRef.current >= REROUTE_MIN_MS
-      ) {
-        routeKeyRef.current = 'live:stale';
-      }
-
-      if (!hasZoomedToBusRef.current) {
-        hasZoomedToBusRef.current = true;
-        map.flyTo({
-          center: lngLat,
-          zoom: BUS_ZOOM,
-          speed: 1.15,
-          curve: 1.25,
-          essential: true,
-        });
-        return;
-      }
-
-      if (followRef.current) {
-        map.easeTo({
-          center: lngLat,
-          zoom: Math.max(map.getZoom(), BUS_ZOOM - 0.4),
-          duration: 650,
-          essential: true,
-        });
       }
     };
 
-    if (map.isStyleLoaded()) placeBus();
-    else map.once('load', placeBus);
-  }, [driverLocation]);
+    const loop = (ts) => {
+      if (!running) return;
+      const dt = lastTs ? Math.min(0.05, (ts - lastTs) / 1000) : 0.016;
+      lastTs = ts;
+
+      const raw = latestDriverRef.current;
+      const route = routeCoordsRef.current;
+
+      if (!raw?.lat || !raw?.lng) {
+        animRafRef.current = requestAnimationFrame(loop);
+        return;
+      }
+
+      if (route.length >= 2) {
+        motion.setRoute(route, { lat: raw.lat, lng: raw.lng });
+        const feed = motion.onGps(route, { lat: raw.lat, lng: raw.lng }, raw.speed);
+        const pos = motion.tick(route, dt);
+        if (pos) {
+          displayBusRef.current = pos;
+          ensureMarker(pos, motion.state.heading);
+          driverMarkerRef.current.setLngLat([pos.lng, pos.lat]);
+          setBoltCarHeading(driverMarkerRef.current.getElement(), motion.state.heading);
+
+          if (!liveNavRef.current) {
+            const idx = motion.nearestIndex(route);
+            setLine(map, PROGRESS_SOURCE, route.slice(0, Math.max(idx + 1, 2)));
+          }
+          if (
+            liveNavRef.current &&
+            (feed === 'offRoute' ||
+              motion.state.needsReroute ||
+              distanceToRouteMeters(route, raw) > OFF_ROUTE_M) &&
+            Date.now() - lastRerouteAtRef.current >= REROUTE_MIN_MS
+          ) {
+            routeKeyRef.current = 'live:stale';
+            lastRerouteAtRef.current = Date.now() - REROUTE_MIN_MS; // allow immediate fetch
+          }
+
+          if (!hasZoomedToBusRef.current) {
+            hasZoomedToBusRef.current = true;
+            map.flyTo({
+              center: [pos.lng, pos.lat],
+              zoom: BUS_ZOOM,
+              speed: 1.15,
+              curve: 1.25,
+              essential: true,
+            });
+          } else if (followRef.current && Date.now() - lastFollowMoveRef.current > 400) {
+            lastFollowMoveRef.current = Date.now();
+            map.easeTo({
+              center: [pos.lng, pos.lat],
+              zoom: Math.max(map.getZoom(), BUS_ZOOM - 0.4),
+              duration: 450,
+              essential: true,
+            });
+          }
+        }
+      } else {
+        // No route yet — soft follow raw GPS without teleport spin
+        const prev = displayBusRef.current || { lat: raw.lat, lng: raw.lng };
+        const pos = {
+          lat: prev.lat + (raw.lat - prev.lat) * 0.12,
+          lng: prev.lng + (raw.lng - prev.lng) * 0.12,
+        };
+        displayBusRef.current = pos;
+        ensureMarker(pos, motion.state.heading || raw.heading || 0);
+        driverMarkerRef.current.setLngLat([pos.lng, pos.lat]);
+        if (!hasZoomedToBusRef.current) {
+          hasZoomedToBusRef.current = true;
+          map.flyTo({ center: [pos.lng, pos.lat], zoom: BUS_ZOOM, essential: true });
+        }
+      }
+
+      animRafRef.current = requestAnimationFrame(loop);
+    };
+
+    const start = () => {
+      if (animRafRef.current) cancelAnimationFrame(animRafRef.current);
+      animRafRef.current = requestAnimationFrame(loop);
+    };
+    if (map.isStyleLoaded()) start();
+    else map.once('load', start);
+
+    return () => {
+      running = false;
+      if (animRafRef.current) cancelAnimationFrame(animRafRef.current);
+    };
+  }, []);
 
   if (!TOKEN || TOKEN.includes('your_mapbox')) {
     return (

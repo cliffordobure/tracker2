@@ -13,3 +13,5 @@ export { Notification } from './Notification.js';
 export { DeviceToken } from './DeviceToken.js';
 export { SchoolHoliday } from './SchoolHoliday.js';
 export { ScheduleException } from './ScheduleException.js';
+export { LeaveRequest } from './LeaveRequest.js';
+export { Announcement } from './Announcement.js';

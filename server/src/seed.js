@@ -17,6 +17,8 @@ import {
   DeviceToken,
   SchoolHoliday,
   ScheduleException,
+  Announcement,
+  LeaveRequest,
 } from './models/index.js';
 import {
   generateInstancesForSchedule,
@@ -45,6 +47,8 @@ async function seed() {
     DeviceToken.deleteMany({}),
     SchoolHoliday.deleteMany({}),
     ScheduleException.deleteMany({}),
+    Announcement.deleteMany({}),
+    LeaveRequest.deleteMany({}),
   ]);
 
   const passwordHash = await bcrypt.hash('password123', 10);
@@ -164,6 +168,8 @@ async function seed() {
     routeId: route._id,
     homeStopId: home1._id,
     grade: 'Grade 4',
+    house: 'Blue House',
+    admissionNo: 'GF-2024-041',
   });
 
   const kid2 = await Kid.create({
@@ -173,6 +179,54 @@ async function seed() {
     routeId: route._id,
     homeStopId: home2._id,
     grade: 'Grade 3',
+    house: 'Green House',
+    admissionNo: 'GF-2024-033',
+  });
+
+  await Announcement.insertMany([
+    {
+      schoolId: school._id,
+      title: 'School will be closed on Friday',
+      body:
+        'Dear Parents,\n\nPlease note that the school will be closed this Friday due to staff training. Regular transport will resume on Monday.\n\nThank you for your understanding.',
+      category: 'urgent',
+      authorName: 'Admin',
+      attachmentName: 'Staff Training Schedule.pdf',
+      publishedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+    },
+    {
+      schoolId: school._id,
+      title: 'New homework posted',
+      body: 'Mathematics — Algebra exercises have been posted for Grade 4. Please check the diary module.',
+      category: 'class',
+      authorName: 'Class Teacher',
+      publishedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+    },
+    {
+      schoolId: school._id,
+      title: 'Bus route update — Route A',
+      body: 'Greenview Estate stop pickup window is now 07:05–07:10 AM. Drivers will wait only briefly.',
+      category: 'transport',
+      authorName: 'Transport Office',
+      publishedAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000),
+    },
+  ]);
+
+  const leaveStart = new Date();
+  leaveStart.setDate(leaveStart.getDate() + 10);
+  leaveStart.setHours(0, 0, 0, 0);
+  const leaveEnd = new Date(leaveStart);
+  leaveEnd.setDate(leaveEnd.getDate() + 4);
+  await LeaveRequest.create({
+    schoolId: school._id,
+    kidId: kid1._id,
+    parentId: parent1._id,
+    leaveType: 'vacation',
+    startDate: leaveStart,
+    endDate: leaveEnd,
+    reason: 'Family vacation',
+    notes: 'We will be traveling out of the country.',
+    status: 'pending',
   });
 
   const startDate = new Date();
