@@ -77,6 +77,31 @@ router.get('/routes', async (req, res) => {
   }
 });
 
+async function enrichTripsWithStopCounts(trips) {
+  const routeIds = [
+    ...new Set(
+      trips
+        .map((t) => (t.routeId?._id || t.routeId)?.toString())
+        .filter(Boolean)
+    ),
+  ];
+  const counts = {};
+  await Promise.all(
+    routeIds.map(async (routeId) => {
+      counts[routeId] = await Stop.countDocuments({ routeId });
+    })
+  );
+  return trips.map((t) => {
+    const obj = typeof t.toObject === 'function' ? t.toObject() : { ...t };
+    const rid = (obj.routeId?._id || obj.routeId)?.toString();
+    return {
+      ...obj,
+      stopCount: rid ? counts[rid] || 0 : 0,
+      studentCount: Array.isArray(obj.kidIds) ? obj.kidIds.length : 0,
+    };
+  });
+}
+
 router.get('/trips/today', async (req, res) => {
   try {
     const { start, end } = dayBounds(req.query.date);
@@ -95,7 +120,7 @@ router.get('/trips/today', async (req, res) => {
       .populate('scheduleId', 'name scheduledTime')
       .populate('kidIds', 'name grade')
       .sort({ period: 1, sequence: 1, scheduledFor: 1 });
-    res.json({ trips });
+    res.json({ trips: await enrichTripsWithStopCounts(trips) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -117,7 +142,27 @@ router.get('/trips/scheduled', async (req, res) => {
       .populate('busId', 'plate label seats')
       .populate('kidIds', 'name grade')
       .sort({ sequence: 1 });
-    res.json({ trips });
+    res.json({ trips: await enrichTripsWithStopCounts(trips) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/trips/completed', async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 50, 100);
+    const trips = await Trip.find({
+      driverId: req.user.id,
+      status: 'completed',
+    })
+      .populate('routeId', 'name')
+      .populate('schoolId', 'name location address')
+      .populate('busId', 'plate label seats')
+      .populate('scheduleId', 'name scheduledTime')
+      .populate('kidIds', 'name grade')
+      .sort({ endedAt: -1, updatedAt: -1 })
+      .limit(limit);
+    res.json({ trips: await enrichTripsWithStopCounts(trips) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
