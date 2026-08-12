@@ -22,6 +22,9 @@ const leaveRequestSchema = new mongoose.Schema(
       default: 'pending',
       index: true,
     },
+    reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    reviewedAt: { type: Date, default: null },
+    reviewNote: { type: String, default: '', trim: true, maxlength: 500 },
   },
   { timestamps: true }
 );

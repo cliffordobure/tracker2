@@ -15,6 +15,9 @@ import TripScheduling from './pages/admin/TripScheduling';
 import TripInstances from './pages/admin/TripInstances';
 import LiveTracking from './pages/admin/LiveTracking';
 import SchoolSettings from './pages/admin/SchoolSettings';
+import LeaveRequests from './pages/admin/LeaveRequests';
+import Noticeboard from './pages/admin/Noticeboard';
+import ComingSoon from './pages/admin/ComingSoon';
 import DriverHome from './pages/driver/DriverHome';
 import ParentHome from './pages/parent/ParentHome';
 import { homePathForRole } from './lib/roles';
@@ -74,6 +77,9 @@ export default function App() {
         <Route path="trip-scheduling" element={<TripScheduling />} />
         <Route path="trip-instances" element={<TripInstances />} />
         <Route path="live-tracking" element={<LiveTracking />} />
+        <Route path="leave-requests" element={<LeaveRequests />} />
+        <Route path="noticeboard" element={<Noticeboard />} />
+        <Route path="coming-soon/:feature" element={<ComingSoon />} />
         <Route path="dispatch" element={<Navigate to="/school-admin/trip-scheduling" replace />} />
       </Route>
 

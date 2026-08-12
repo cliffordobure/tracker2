@@ -833,16 +833,56 @@ router.post('/announcements', async (req, res) => {
   }
 });
 
+function leaveDays(startDate, endDate) {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0;
+  const ms = end.setHours(12, 0, 0, 0) - start.setHours(12, 0, 0, 0);
+  return Math.max(1, Math.round(ms / 86400000) + 1);
+}
+
+router.get('/leave-requests/stats', async (req, res) => {
+  try {
+    const filter = schoolFilter(req);
+    const [pending, approved, rejected, cancelled, total] = await Promise.all([
+      LeaveRequest.countDocuments({ ...filter, status: 'pending' }),
+      LeaveRequest.countDocuments({ ...filter, status: 'approved' }),
+      LeaveRequest.countDocuments({ ...filter, status: 'rejected' }),
+      LeaveRequest.countDocuments({ ...filter, status: 'cancelled' }),
+      LeaveRequest.countDocuments(filter),
+    ]);
+    res.json({ stats: { pending, approved, rejected, cancelled, total } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/leave-requests', async (req, res) => {
   try {
     const filter = schoolFilter(req);
     if (req.query.status) filter.status = req.query.status;
+    if (req.query.leaveType) filter.leaveType = req.query.leaveType;
+    if (req.query.from || req.query.to) {
+      filter.startDate = {};
+      if (req.query.from) filter.startDate.$gte = new Date(req.query.from);
+      if (req.query.to) {
+        const to = new Date(req.query.to);
+        to.setHours(23, 59, 59, 999);
+        filter.startDate.$lte = to;
+      }
+    }
     const requests = await LeaveRequest.find(filter)
       .populate('kidId', 'name grade house admissionNo')
       .populate('parentId', 'name phone email')
+      .populate('reviewedBy', 'name email')
       .sort({ createdAt: -1 })
       .limit(200);
-    res.json({ requests });
+    res.json({
+      requests: requests.map((r) => {
+        const obj = r.toObject();
+        return { ...obj, days: leaveDays(obj.startDate, obj.endDate) };
+      }),
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -855,13 +895,23 @@ router.patch('/leave-requests/:id', async (req, res) => {
     if (!assertSchoolAccess(req, request.schoolId)) {
       return res.status(403).json({ error: 'Not allowed' });
     }
-    const { status } = req.body || {};
+    const { status, reviewNote } = req.body || {};
     if (!['pending', 'approved', 'rejected', 'cancelled'].includes(status)) {
       return res.status(400).json({ error: 'Invalid status' });
     }
     request.status = status;
+    if (reviewNote !== undefined) request.reviewNote = String(reviewNote || '').slice(0, 500);
+    if (['approved', 'rejected'].includes(status)) {
+      request.reviewedBy = req.user.id;
+      request.reviewedAt = new Date();
+    }
     await request.save();
-    res.json({ request });
+    const populated = await LeaveRequest.findById(request._id)
+      .populate('kidId', 'name grade house admissionNo')
+      .populate('parentId', 'name phone email')
+      .populate('reviewedBy', 'name email');
+    const obj = populated.toObject();
+    res.json({ request: { ...obj, days: leaveDays(obj.startDate, obj.endDate) } });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
