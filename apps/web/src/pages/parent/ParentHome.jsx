@@ -31,6 +31,7 @@ export default function ParentHome() {
   const [lateNote, setLateNote] = useState('');
   const [lateKidId, setLateKidId] = useState('');
   const [lateBusy, setLateBusy] = useState(false);
+  const [schoolFeed, setSchoolFeed] = useState({ attendance: [], assignments: [], notes: [] });
   /** { [kidId]: { durationSec, stopName, purpose, label } } */
   const [etas, setEtas] = useState({});
   const selectedRef = useRef(null);
@@ -51,14 +52,20 @@ export default function ParentHome() {
   }, []);
 
   const load = useCallback(async () => {
-    const [k, a, n] = await Promise.all([
+    const [k, a, n, s] = await Promise.all([
       api('/parent/kids'),
       api('/parent/trips/active'),
       api('/parent/notifications'),
+      api('/parent/school').catch(() => ({ attendance: [], assignments: [], notes: [] })),
     ]);
     setKids(k.kids);
     setActive(a.trips);
     setNotifications(n.notifications);
+    setSchoolFeed({
+      attendance: s.attendance || [],
+      assignments: s.assignments || [],
+      notes: s.notes || [],
+    });
     applyTrip(a.trips[0] || null);
   }, [applyTrip]);
 
@@ -331,6 +338,13 @@ export default function ParentHome() {
           >
             Kids
           </button>
+          <button
+            type="button"
+            className={sheetTab === 'school' ? 'active' : ''}
+            onClick={() => setSheetTab('school')}
+          >
+            School
+          </button>
         </div>
 
         {sheetTab === 'ride' && (
@@ -516,6 +530,63 @@ export default function ParentHome() {
                 </li>
               ))}
               {!kids.length && <li className="muted">No children linked.</li>}
+            </ul>
+          </div>
+        )}
+
+        {sheetTab === 'school' && (
+          <div className="parent-ride-body">
+            <h2>Today’s register</h2>
+            <ul className="kid-list">
+              {kids.map((k) => {
+                const mark = schoolFeed.attendance.find(
+                  (m) => String(m.kidId?._id || m.kidId) === String(k._id)
+                );
+                return (
+                  <li key={k._id} className="kid-row">
+                    <div>
+                      <strong>{k.name}</strong>
+                      <div className="muted">{k.grade || ''}</div>
+                    </div>
+                    <span className={`pill status-${mark?.status || 'waiting'}`}>
+                      {mark?.status || 'Not marked'}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+
+            <h2 style={{ marginTop: '1.25rem' }}>Assignments</h2>
+            <ul className="notif-list">
+              {schoolFeed.assignments.map((a) => (
+                <li key={a._id}>
+                  <span className="pill">{a.subject || 'Class'}</span>
+                  <strong>{a.title}</strong>
+                  <p>{a.description || 'No extra instructions.'}</p>
+                  <small>
+                    {a.teacherId?.name || 'Teacher'}
+                    {a.dueDate ? ` · due ${new Date(a.dueDate).toLocaleDateString()}` : ''}
+                    {a.grade ? ` · ${a.grade}` : ''}
+                  </small>
+                </li>
+              ))}
+              {!schoolFeed.assignments.length && <li className="muted">No assignments posted.</li>}
+            </ul>
+
+            <h2 style={{ marginTop: '1.25rem' }}>From the teacher</h2>
+            <ul className="notif-list">
+              {schoolFeed.notes.map((n) => (
+                <li key={n._id}>
+                  <span className="pill">{n.category}</span>
+                  <strong>{n.title}</strong>
+                  <p>{n.body}</p>
+                  <small>
+                    {n.kidId?.name || 'Your child'} · {n.teacherId?.name || 'Teacher'} ·{' '}
+                    {new Date(n.createdAt).toLocaleString()}
+                  </small>
+                </li>
+              ))}
+              {!schoolFeed.notes.length && <li className="muted">No teacher notes yet.</li>}
             </ul>
           </div>
         )}

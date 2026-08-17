@@ -10,6 +10,9 @@ import {
   User,
   LeaveRequest,
   Announcement,
+  Assignment,
+  TeacherNote,
+  AttendanceRecord,
 } from '../models/index.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { getVapidPublicKey } from '../services/push.js';
@@ -39,6 +42,59 @@ router.get('/me', async (req, res) => {
       .limit(1);
     const school = kids[0]?.schoolId || null;
     res.json({ user, school });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+function startOfDay(dateInput) {
+  let d;
+  if (!dateInput) d = new Date();
+  else if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+    const [y, m, day] = dateInput.split('-').map(Number);
+    d = new Date(y, m - 1, day);
+  } else d = new Date(dateInput);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+router.get('/school', async (req, res) => {
+  try {
+    const kids = await Kid.find({ parentIds: req.user.id, active: true });
+    const kidIds = kids.map((k) => k._id);
+    if (!kidIds.length) {
+      return res.json({ attendance: [], assignments: [], notes: [] });
+    }
+
+    const day = startOfDay(req.query.date);
+    const schoolIds = [...new Set(kids.map((k) => k.schoolId?.toString()).filter(Boolean))];
+
+    const [marks, assignments, notes] = await Promise.all([
+      AttendanceRecord.find({ kidId: { $in: kidIds }, date: day }).populate('kidId', 'name grade'),
+      Assignment.find({ schoolId: { $in: schoolIds }, active: true })
+        .populate('teacherId', 'name')
+        .sort({ dueDate: 1, createdAt: -1 })
+        .limit(80),
+      TeacherNote.find({ kidId: { $in: kidIds } })
+        .populate('kidId', 'name grade')
+        .populate('teacherId', 'name')
+        .sort({ createdAt: -1 })
+        .limit(40),
+    ]);
+
+    const relevantAssignments = assignments.filter((a) => {
+      if (a.kidIds?.length) {
+        return a.kidIds.some((id) => kidIds.some((k) => k.toString() === id.toString()));
+      }
+      if (a.grade) return kids.some((k) => k.grade === a.grade);
+      return true;
+    });
+
+    res.json({
+      attendance: marks,
+      assignments: relevantAssignments,
+      notes,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

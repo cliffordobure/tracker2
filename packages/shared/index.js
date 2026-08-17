@@ -49,6 +49,9 @@ export const NOTIFICATION_TYPES = {
   TRIP_CANCELLED: 'trip_cancelled',
   TRIP_ASSIGNED: 'trip_assigned',
   LATE_PICKUP_REQUEST: 'late_pickup_request',
+  ASSIGNMENT: 'assignment',
+  TEACHER_NOTE: 'teacher_note',
+  ATTENDANCE_ALERT: 'attendance_alert',
 };
 
 export const EDIT_SCOPES = {

@@ -19,6 +19,9 @@ import {
   ScheduleException,
   Announcement,
   LeaveRequest,
+  AttendanceRecord,
+  Assignment,
+  TeacherNote,
 } from './models/index.js';
 import {
   generateInstancesForSchedule,
@@ -49,6 +52,9 @@ async function seed() {
     ScheduleException.deleteMany({}),
     Announcement.deleteMany({}),
     LeaveRequest.deleteMany({}),
+    AttendanceRecord.deleteMany({}),
+    Assignment.deleteMany({}),
+    TeacherNote.deleteMany({}),
   ]);
 
   const passwordHash = await bcrypt.hash('password123', 10);

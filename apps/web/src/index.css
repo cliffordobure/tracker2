@@ -145,12 +145,18 @@ select {
 }
 
 .card-form input,
-.card-form select {
+.card-form select,
+.card-form textarea {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 0.7rem 0.85rem;
   background: #fff;
+}
+
+.card-form textarea {
+  resize: vertical;
+  min-height: 6rem;
 }
 
 .btn {
@@ -1037,28 +1043,13 @@ th {
   }
 }
 
-.app-shell--teacher-live .main {
+.register-marks {
   display: flex;
-  flex-direction: column;
-  min-height: 100vh;
+  flex-wrap: wrap;
+  gap: 0.35rem;
 }
 
-.app-shell--teacher-live .content {
-  padding: 0;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.teacher-live {
-  position: relative;
-  flex: 1;
-  min-height: calc(100vh - 72px);
-}
-
-.teacher-live .live-tracking--fullscreen {
-  position: absolute;
-  inset: 0;
-  height: 100%;
+.register-marks .btn {
+  padding: 0.35rem 0.65rem;
+  font-size: 0.85rem;
 }

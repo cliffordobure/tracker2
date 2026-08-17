@@ -2,201 +2,119 @@ import { Router } from 'express';
 import {
   User,
   Kid,
-  Trip,
-  TripEvent,
-  Stop,
-  DriverProfile,
   School,
-  Announcement,
+  AttendanceRecord,
+  Assignment,
+  TeacherNote,
 } from '../models/index.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
+import { createAndEmitNotifications, NOTIFICATION_TYPES } from '../services/notifications.js';
+import { getIO } from '../socket.js';
 
 const router = Router();
 router.use(authenticate, requireRole('teacher'));
 
-function dayBounds(dateInput) {
+const ATTENDANCE_STATUSES = ['present', 'absent', 'late', 'excused'];
+const NOTE_CATEGORIES = ['general', 'academic', 'behaviour', 'health', 'urgent'];
+
+function startOfDay(dateInput) {
   let d;
   if (!dateInput) d = new Date();
   else if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
     const [y, m, day] = dateInput.split('-').map(Number);
     d = new Date(y, m - 1, day);
   } else d = new Date(dateInput);
-  const start = new Date(d);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(d);
-  end.setHours(23, 59, 59, 999);
-  return { start, end };
+  d.setHours(0, 0, 0, 0);
+  return d;
 }
 
-function populateTrip(q) {
-  return q
-    .populate('routeId', 'name')
-    .populate('schoolId', 'name location address')
-    .populate('driverId', 'name phone')
-    .populate('busId', 'plate label seats')
-    .populate('kidIds', 'name grade house admissionNo');
+function endOfDay(dateInput) {
+  const d = startOfDay(dateInput);
+  d.setHours(23, 59, 59, 999);
+  return d;
 }
 
-function attendanceFromEvents(events, kidIds = []) {
-  const picked = new Set(
-    events.filter((e) => e.type === 'picked_up').map((e) => String(e.kidId?._id || e.kidId))
-  );
-  const dropped = new Set(
-    events.filter((e) => e.type === 'dropped_off').map((e) => String(e.kidId?._id || e.kidId))
-  );
-  let checkedIn = 0;
-  for (const id of picked) {
-    if (!dropped.has(id)) checkedIn += 1;
-  }
-  return {
-    checkedIn,
-    checkedOut: dropped.size,
-    waiting: Math.max(0, kidIds.length - picked.size),
-    studentCount: kidIds.length,
-  };
-}
-
-function kidTransportStatus(kidId, tripsWithEvents) {
-  const id = kidId.toString();
-  const involved = tripsWithEvents.filter((row) =>
-    (row.trip.kidIds || []).some((k) => (k._id || k).toString() === id)
-  );
-  if (!involved.length) {
-    return { status: 'not_scheduled', label: 'Not on today’s trips', trip: null };
-  }
-
-  const active = involved.find((row) => row.trip.status === 'active');
-  const row =
-    active ||
-    [...involved].sort((a, b) => {
-      const ta = new Date(a.trip.scheduledFor || a.trip.startedAt || 0).getTime();
-      const tb = new Date(b.trip.scheduledFor || b.trip.startedAt || 0).getTime();
-      return tb - ta;
-    })[0];
-
-  const events = row.events || [];
-  const picked = events.some((e) => String(e.kidId?._id || e.kidId) === id && e.type === 'picked_up');
-  const dropped = events.some(
-    (e) => String(e.kidId?._id || e.kidId) === id && e.type === 'dropped_off'
-  );
-  const trip = row.trip;
-  const direction = trip.direction === 'to_school' ? 'to school' : 'to home';
-
-  if (dropped) {
-    return {
-      status: trip.direction === 'to_school' ? 'arrived' : 'dropped_off',
-      label: trip.direction === 'to_school' ? 'Arrived at school' : 'Dropped off',
-      trip,
-    };
-  }
-  if (picked) {
-    return { status: 'on_bus', label: `On bus (${direction})`, trip };
-  }
-  if (trip.status === 'active') {
-    return { status: 'waiting', label: 'Waiting for pickup', trip };
-  }
-  if (trip.status === 'scheduled') {
-    return { status: 'scheduled', label: `Scheduled ${direction}`, trip };
-  }
-  if (trip.status === 'cancelled') {
-    return { status: 'cancelled', label: 'Trip cancelled', trip };
-  }
-  return { status: 'completed', label: 'Trip completed', trip };
-}
-
-async function teacherSchoolId(req) {
+async function teacherContext(req) {
   const teacher = await User.findById(req.user.id).select('schoolId name');
   return { teacher, schoolId: teacher?.schoolId || null };
 }
 
-async function todayTripsForSchool(schoolId, dateInput) {
-  const { start, end } = dayBounds(dateInput);
-  return populateTrip(
-    Trip.find({
-      schoolId,
-      $or: [
-        { serviceDate: { $gte: start, $lte: end } },
-        { serviceDate: null, scheduledFor: { $gte: start, $lte: end } },
-        { serviceDate: null, scheduledFor: null, status: 'active' },
-      ],
-    }).sort({ period: 1, sequence: 1, scheduledFor: 1 })
-  );
+async function schoolKids(schoolId, { grade } = {}) {
+  const filter = { schoolId, active: true };
+  if (grade) filter.grade = grade;
+  return Kid.find(filter)
+    .populate('parentIds', 'name phone email')
+    .sort({ grade: 1, name: 1 });
 }
 
-async function withEvents(trips) {
-  return Promise.all(
-    trips.map(async (trip) => {
-      const events = await TripEvent.find({ tripId: trip._id }).sort({ at: 1 });
-      const attendance = attendanceFromEvents(events, trip.kidIds || []);
-      return { trip, events, attendance };
-    })
-  );
+async function notifyParents(kid, { type, title, body }) {
+  const items = (kid.parentIds || []).map((parent) => ({
+    userId: parent._id || parent,
+    type,
+    title,
+    body,
+    kidId: kid._id,
+  }));
+  if (!items.length) return [];
+  return createAndEmitNotifications(getIO(), items);
+}
+
+function populateKids(q) {
+  return q.populate('parentIds', 'name phone email');
 }
 
 router.get('/overview', async (req, res) => {
   try {
-    const { schoolId } = await teacherSchoolId(req);
+    const { teacher, schoolId } = await teacherContext(req);
     if (!schoolId) {
       return res.json({
         school: null,
-        stats: { students: 0, scheduledToday: 0, activeTrips: 0, onboard: 0, arrived: 0 },
-        kids: [],
-        activeTrips: [],
-        todayTrips: [],
+        teacher: teacher?.toSafeJSON?.() || null,
+        stats: { students: 0, markedToday: 0, present: 0, absent: 0, late: 0, assignments: 0 },
+        unmarked: [],
+        recentNotes: [],
+        assignments: [],
       });
     }
 
-    const school = await School.findById(schoolId);
-    const kids = await Kid.find({ schoolId, active: true })
-      .populate('routeId', 'name')
-      .populate('homeStopId', 'name')
-      .populate('parentIds', 'name phone')
-      .sort({ name: 1 });
+    const day = startOfDay(req.query.date);
+    const [school, kids, marks, assignments, recentNotes] = await Promise.all([
+      School.findById(schoolId),
+      schoolKids(schoolId),
+      AttendanceRecord.find({ schoolId, date: day }),
+      Assignment.find({ schoolId, teacherId: req.user.id, active: true })
+        .sort({ dueDate: 1, createdAt: -1 })
+        .limit(8),
+      TeacherNote.find({ schoolId, teacherId: req.user.id })
+        .populate('kidId', 'name grade')
+        .sort({ createdAt: -1 })
+        .limit(8),
+    ]);
 
-    const trips = await todayTripsForSchool(schoolId, req.query.date);
-    const rows = await withEvents(trips);
-    const activeRows = rows.filter((r) => r.trip.status === 'active');
-
-    let onboard = 0;
-    let arrived = 0;
-    for (const kid of kids) {
-      const st = kidTransportStatus(kid._id, rows);
-      if (st.status === 'on_bus') onboard += 1;
-      if (st.status === 'arrived') arrived += 1;
-    }
+    const byKid = Object.fromEntries(marks.map((m) => [m.kidId.toString(), m]));
+    const unmarked = kids.filter((k) => !byKid[k._id.toString()]);
+    const present = marks.filter((m) => m.status === 'present').length;
+    const absent = marks.filter((m) => m.status === 'absent').length;
+    const late = marks.filter((m) => m.status === 'late').length;
 
     res.json({
       school,
       stats: {
         students: kids.length,
-        scheduledToday: rows.filter((r) => r.trip.status === 'scheduled').length,
-        activeTrips: activeRows.length,
-        onboard,
-        arrived,
+        markedToday: marks.length,
+        unmarked: unmarked.length,
+        present,
+        absent,
+        late,
+        assignments: assignments.length,
       },
-      kids: kids.map((kid) => {
-        const st = kidTransportStatus(kid._id, rows);
-        return {
-          ...kid.toObject(),
-          transport: {
-            status: st.status,
-            label: st.label,
-            tripCode: st.trip?.tripCode || '',
-            tripId: st.trip?._id || null,
-            period: st.trip?.period || null,
-            direction: st.trip?.direction || null,
-          },
-        };
-      }),
-      activeTrips: activeRows.map((r) => ({
-        trip: r.trip,
-        events: r.events,
-        ...r.attendance,
+      unmarked: unmarked.slice(0, 12).map((k) => ({
+        _id: k._id,
+        name: k.name,
+        grade: k.grade,
       })),
-      todayTrips: rows.map((r) => ({
-        trip: r.trip,
-        ...r.attendance,
-      })),
+      recentNotes,
+      assignments,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -205,157 +123,284 @@ router.get('/overview', async (req, res) => {
 
 router.get('/kids', async (req, res) => {
   try {
-    const { schoolId } = await teacherSchoolId(req);
-    if (!schoolId) return res.json({ kids: [] });
+    const { schoolId } = await teacherContext(req);
+    if (!schoolId) return res.json({ kids: [], grades: [] });
+    const kids = await schoolKids(schoolId, { grade: req.query.grade || undefined });
+    const grades = [...new Set(kids.map((k) => k.grade).filter(Boolean))].sort();
+    res.json({ kids, grades });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
-    const kids = await Kid.find({ schoolId, active: true })
-      .populate('routeId', 'name')
-      .populate('homeStopId', 'name location')
-      .populate('parentIds', 'name phone email')
-      .sort({ name: 1 });
+router.get('/attendance', async (req, res) => {
+  try {
+    const { schoolId } = await teacherContext(req);
+    if (!schoolId) return res.json({ date: startOfDay(), kids: [], marks: [] });
 
-    const trips = await todayTripsForSchool(schoolId, req.query.date);
-    const rows = await withEvents(trips);
+    const day = startOfDay(req.query.date);
+    const kids = await schoolKids(schoolId, { grade: req.query.grade || undefined });
+    const marks = await AttendanceRecord.find({
+      schoolId,
+      date: day,
+      kidId: { $in: kids.map((k) => k._id) },
+    });
+    const byKid = Object.fromEntries(marks.map((m) => [m.kidId.toString(), m]));
+    const grades = [
+      ...new Set(
+        (await Kid.find({ schoolId, active: true }).select('grade')).map((k) => k.grade).filter(Boolean)
+      ),
+    ].sort();
 
     res.json({
-      kids: kids.map((kid) => {
-        const st = kidTransportStatus(kid._id, rows);
-        return {
-          ...kid.toObject(),
-          transport: {
-            status: st.status,
-            label: st.label,
-            tripCode: st.trip?.tripCode || '',
-            tripId: st.trip?._id || null,
-            period: st.trip?.period || null,
-            direction: st.trip?.direction || null,
-            bus: st.trip?.busId || null,
-            driver: st.trip?.driverId || null,
-          },
-        };
-      }),
+      date: day,
+      grades,
+      kids: kids.map((kid) => ({
+        ...kid.toObject(),
+        attendance: byKid[kid._id.toString()] || null,
+      })),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.get('/trips/today', async (req, res) => {
+router.post('/attendance', async (req, res) => {
   try {
-    const { schoolId } = await teacherSchoolId(req);
-    if (!schoolId) return res.json({ trips: [] });
+    const { schoolId } = await teacherContext(req);
+    if (!schoolId) return res.status(400).json({ error: 'No school assigned to this teacher' });
 
-    const trips = await todayTripsForSchool(schoolId, req.query.date);
-    const rows = await withEvents(trips);
-    const enriched = await Promise.all(
-      rows.map(async (r) => {
-        const stops = await Stop.find({ routeId: r.trip.routeId?._id || r.trip.routeId }).sort({
-          order: 1,
-        });
-        return {
-          trip: r.trip,
-          events: r.events,
-          stops,
-          ...r.attendance,
-        };
-      })
-    );
-    res.json({ trips: enriched });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.get('/trips/active', async (req, res) => {
-  try {
-    const { schoolId } = await teacherSchoolId(req);
-    if (!schoolId) return res.json({ trips: [] });
-
-    const kids = await Kid.find({ schoolId, active: true });
-    const kidIds = kids.map((k) => k._id);
-    const trips = await populateTrip(
-      Trip.find({ status: 'active', schoolId, kidIds: { $in: kidIds } }).sort({ startedAt: -1 })
-    );
-
-    const enriched = await Promise.all(
-      trips.map(async (trip) => {
-        const [events, stops, profile] = await Promise.all([
-          TripEvent.find({ tripId: trip._id }).sort({ at: 1 }),
-          Stop.find({ routeId: trip.routeId._id || trip.routeId }).sort({ order: 1 }),
-          DriverProfile.findOne({ userId: trip.driverId._id || trip.driverId }),
-        ]);
-        const attendance = attendanceFromEvents(events, trip.kidIds || []);
-        return { trip, events, stops, driverProfile: profile, kids, ...attendance };
-      })
-    );
-
-    res.json({ trips: enriched });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.get('/trips/:id', async (req, res) => {
-  try {
-    const { schoolId } = await teacherSchoolId(req);
-    const trip = await populateTrip(Trip.findById(req.params.id));
-    if (!trip) return res.status(404).json({ error: 'Trip not found' });
-    if (schoolId && trip.schoolId?._id?.toString() !== schoolId.toString()) {
-      return res.status(403).json({ error: 'Not authorized for this trip' });
+    const { kidId, status, note } = req.body || {};
+    if (!kidId || !ATTENDANCE_STATUSES.includes(status)) {
+      return res.status(400).json({ error: 'kidId and a valid status are required' });
     }
 
-    const [events, stops] = await Promise.all([
-      TripEvent.find({ tripId: trip._id }).sort({ at: 1 }),
-      Stop.find({ routeId: trip.routeId._id || trip.routeId }).sort({ order: 1 }),
-    ]);
-    const attendance = attendanceFromEvents(events, trip.kidIds || []);
-    res.json({ trip, events, stops, ...attendance });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+    const kid = await populateKids(Kid.findOne({ _id: kidId, schoolId, active: true }));
+    if (!kid) return res.status(404).json({ error: 'Student not found' });
 
-router.get('/live-tracking', async (req, res) => {
-  try {
-    const { schoolId } = await teacherSchoolId(req);
-    if (!schoolId) return res.json({ buses: [] });
-
-    const trips = await Trip.find({ status: 'active', schoolId })
-      .populate('routeId', 'name')
-      .populate('busId', 'plate label seats')
-      .populate('driverId', 'name phone')
-      .populate('schoolId', 'name')
-      .populate('kidIds', 'name grade')
-      .sort({ startedAt: -1 });
-
-    const enriched = await Promise.all(
-      trips.map(async (trip) => {
-        const events = await TripEvent.find({ tripId: trip._id });
-        const attendance = attendanceFromEvents(events, trip.kidIds || []);
-        return {
-          trip,
-          ...attendance,
-          lastGpsAt: trip.latestLocation?.at || trip.startLocation?.at || null,
-        };
-      })
+    const day = startOfDay(req.body.date);
+    const record = await AttendanceRecord.findOneAndUpdate(
+      { kidId: kid._id, date: day },
+      {
+        schoolId,
+        kidId: kid._id,
+        teacherId: req.user.id,
+        date: day,
+        status,
+        note: typeof note === 'string' ? note.trim().slice(0, 300) : '',
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    res.json({ buses: enriched });
+    if (status === 'absent' || status === 'late') {
+      const label = status === 'absent' ? 'marked absent' : 'marked late';
+      await notifyParents(kid, {
+        type: NOTIFICATION_TYPES.ATTENDANCE_ALERT,
+        title: `${kid.name} ${label}`,
+        body: note
+          ? `${kid.name} was ${label} today. Note: ${note}`
+          : `${kid.name} was ${label} on the class register today.`,
+      });
+    }
+
+    res.json({ record });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/attendance/bulk', async (req, res) => {
+  try {
+    const { schoolId } = await teacherContext(req);
+    if (!schoolId) return res.status(400).json({ error: 'No school assigned to this teacher' });
+    const { marks } = req.body || {};
+    if (!Array.isArray(marks) || !marks.length) {
+      return res.status(400).json({ error: 'marks[] is required' });
+    }
+
+    const day = startOfDay(req.body.date);
+    const saved = [];
+    for (const row of marks) {
+      if (!row?.kidId || !ATTENDANCE_STATUSES.includes(row.status)) continue;
+      const kid = await Kid.findOne({ _id: row.kidId, schoolId, active: true });
+      if (!kid) continue;
+      const record = await AttendanceRecord.findOneAndUpdate(
+        { kidId: kid._id, date: day },
+        {
+          schoolId,
+          kidId: kid._id,
+          teacherId: req.user.id,
+          date: day,
+          status: row.status,
+          note: typeof row.note === 'string' ? row.note.trim().slice(0, 300) : '',
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+      saved.push(record);
+    }
+    res.json({ saved: saved.length, records: saved });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.get('/assignments', async (req, res) => {
+  try {
+    const { schoolId } = await teacherContext(req);
+    if (!schoolId) return res.json({ assignments: [] });
+    const assignments = await Assignment.find({ schoolId, teacherId: req.user.id, active: true })
+      .populate('kidIds', 'name grade')
+      .sort({ dueDate: 1, createdAt: -1 });
+    res.json({ assignments });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.get('/announcements', async (req, res) => {
+router.post('/assignments', async (req, res) => {
   try {
-    const { schoolId } = await teacherSchoolId(req);
-    if (!schoolId) return res.json({ announcements: [] });
-    const announcements = await Announcement.find({ schoolId, active: true })
-      .sort({ publishedAt: -1 })
-      .limit(100);
-    res.json({ announcements });
+    const { schoolId } = await teacherContext(req);
+    if (!schoolId) return res.status(400).json({ error: 'No school assigned to this teacher' });
+
+    const { title, subject, grade, description, dueDate, kidIds } = req.body || {};
+    if (!title?.trim()) return res.status(400).json({ error: 'title is required' });
+
+    const assignment = await Assignment.create({
+      schoolId,
+      teacherId: req.user.id,
+      title: title.trim(),
+      subject: subject?.trim() || '',
+      grade: grade?.trim() || '',
+      description: description?.trim() || '',
+      dueDate: dueDate ? new Date(dueDate) : null,
+      kidIds: Array.isArray(kidIds) ? kidIds : [],
+    });
+
+    let kids;
+    if (assignment.kidIds.length) {
+      kids = await populateKids(Kid.find({ _id: { $in: assignment.kidIds }, schoolId, active: true }));
+    } else if (assignment.grade) {
+      kids = await populateKids(Kid.find({ schoolId, grade: assignment.grade, active: true }));
+    } else {
+      kids = await populateKids(Kid.find({ schoolId, active: true }));
+    }
+
+    const due = assignment.dueDate
+      ? ` Due ${assignment.dueDate.toLocaleDateString()}.`
+      : '';
+    const items = [];
+    for (const kid of kids) {
+      for (const parent of kid.parentIds || []) {
+        items.push({
+          userId: parent._id || parent,
+          type: NOTIFICATION_TYPES.ASSIGNMENT,
+          title: `New assignment: ${assignment.title}`,
+          body: `${kid.name} has a new ${assignment.subject || 'class'} assignment — ${assignment.title}.${due}`,
+          kidId: kid._id,
+        });
+      }
+    }
+    if (items.length) await createAndEmitNotifications(getIO(), items);
+
+    const populated = await Assignment.findById(assignment._id).populate('kidIds', 'name grade');
+    res.status(201).json({ assignment: populated, notified: items.length });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.put('/assignments/:id', async (req, res) => {
+  try {
+    const { schoolId } = await teacherContext(req);
+    const assignment = await Assignment.findOne({
+      _id: req.params.id,
+      schoolId,
+      teacherId: req.user.id,
+    });
+    if (!assignment) return res.status(404).json({ error: 'Assignment not found' });
+
+    for (const key of ['title', 'subject', 'grade', 'description']) {
+      if (req.body[key] !== undefined) assignment[key] = String(req.body[key] || '').trim();
+    }
+    if (req.body.dueDate !== undefined) {
+      assignment.dueDate = req.body.dueDate ? new Date(req.body.dueDate) : null;
+    }
+    if (Array.isArray(req.body.kidIds)) assignment.kidIds = req.body.kidIds;
+    if (req.body.active === false) assignment.active = false;
+    await assignment.save();
+    const populated = await Assignment.findById(assignment._id).populate('kidIds', 'name grade');
+    res.json({ assignment: populated });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete('/assignments/:id', async (req, res) => {
+  try {
+    const { schoolId } = await teacherContext(req);
+    const assignment = await Assignment.findOne({
+      _id: req.params.id,
+      schoolId,
+      teacherId: req.user.id,
+    });
+    if (!assignment) return res.status(404).json({ error: 'Assignment not found' });
+    assignment.active = false;
+    await assignment.save();
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/notes', async (req, res) => {
+  try {
+    const { schoolId } = await teacherContext(req);
+    if (!schoolId) return res.json({ notes: [] });
+    const filter = { schoolId, teacherId: req.user.id };
+    if (req.query.kidId) filter.kidId = req.query.kidId;
+    const notes = await TeacherNote.find(filter)
+      .populate('kidId', 'name grade')
+      .sort({ createdAt: -1 })
+      .limit(100);
+    res.json({ notes });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/notes', async (req, res) => {
+  try {
+    const { schoolId, teacher } = await teacherContext(req);
+    if (!schoolId) return res.status(400).json({ error: 'No school assigned to this teacher' });
+
+    const { kidId, title, body, category } = req.body || {};
+    if (!kidId || !title?.trim() || !body?.trim()) {
+      return res.status(400).json({ error: 'kidId, title and body are required' });
+    }
+
+    const kid = await populateKids(Kid.findOne({ _id: kidId, schoolId, active: true }));
+    if (!kid) return res.status(404).json({ error: 'Student not found' });
+
+    const note = await TeacherNote.create({
+      schoolId,
+      teacherId: req.user.id,
+      kidId: kid._id,
+      category: NOTE_CATEGORIES.includes(category) ? category : 'general',
+      title: title.trim(),
+      body: body.trim().slice(0, 1000),
+    });
+
+    const teacherName = teacher?.name || 'Your teacher';
+    await notifyParents(kid, {
+      type: NOTIFICATION_TYPES.TEACHER_NOTE,
+      title: `${teacherName}: ${note.title}`,
+      body: `${kid.name} — ${note.body}`,
+    });
+
+    const populated = await TeacherNote.findById(note._id).populate('kidId', 'name grade');
+    res.status(201).json({ note: populated });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 

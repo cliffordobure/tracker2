@@ -36,8 +36,8 @@ export default function Login() {
           <p className="eyebrow">SchoolKids Tracker</p>
           <h1>Know where they are, from gate to home.</h1>
           <p className="lede">
-            Super admins onboard schools. School admins manage buses, routes, students, and daily
-            dispatch. Teachers see live arrivals. Parents track the ride live.
+            Super admins onboard schools. School admins run transport. Teachers mark the register,
+            set assignments, and update parents. Parents track the ride live.
           </p>
         </div>
         <form className="login-form card-form" onSubmit={onSubmit}>

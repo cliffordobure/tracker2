@@ -84,6 +84,12 @@ export function notificationTypeLabel(type) {
       return 'Assigned';
     case 'late_pickup_request':
       return 'Late pickup';
+    case 'assignment':
+      return 'Assignment';
+    case 'teacher_note':
+      return 'From teacher';
+    case 'attendance_alert':
+      return 'Attendance';
     default:
       return type || 'Alert';
   }

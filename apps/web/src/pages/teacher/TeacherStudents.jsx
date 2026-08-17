@@ -1,65 +1,64 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
 
 export default function TeacherStudents() {
   const [kids, setKids] = useState([]);
   const [q, setQ] = useState('');
-  const [status, setStatus] = useState('');
+  const [grade, setGrade] = useState('');
   const [error, setError] = useState('');
 
-  const load = async () => {
-    const data = await api('/teacher/kids');
-    setKids(data.kids || []);
-  };
-
   useEffect(() => {
-    load().catch((e) => setError(e.message));
-    const id = setInterval(() => load().catch(() => {}), 10000);
-    return () => clearInterval(id);
+    api('/teacher/kids')
+      .then((d) => setKids(d.kids || []))
+      .catch((e) => setError(e.message));
   }, []);
+
+  const grades = useMemo(
+    () => [...new Set(kids.map((k) => k.grade).filter(Boolean))].sort(),
+    [kids]
+  );
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return kids.filter((k) => {
-      if (status && k.transport?.status !== status) return false;
+      if (grade && k.grade !== grade) return false;
       if (!needle) return true;
-      const hay = [k.name, k.grade, k.admissionNo, k.routeId?.name, k.transport?.tripCode]
+      const hay = [k.name, k.grade, k.admissionNo, ...(k.parentIds || []).map((p) => p.name)]
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
       return hay.includes(needle);
     });
-  }, [kids, q, status]);
+  }, [kids, q, grade]);
 
   return (
     <div className="stack">
       <div>
         <h2>Students</h2>
-        <p className="lede">
-          School roster with today’s transport status. Read-only — check-in and check-out stay with
-          the assigned driver and Trip ID.
-        </p>
+        <p className="lede">Class list with parent contacts. Use this to pick who to message.</p>
       </div>
       {error && <div className="alert">{error}</div>}
 
       <div className="row-actions" style={{ flexWrap: 'wrap', gap: '0.75rem' }}>
         <label>
           Search
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name, grade, route" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name, parent, grade" />
         </label>
         <label>
-          Status
-          <select value={status} onChange={(e) => setStatus(e.target.value)}>
+          Grade
+          <select value={grade} onChange={(e) => setGrade(e.target.value)}>
             <option value="">All</option>
-            <option value="scheduled">Scheduled</option>
-            <option value="waiting">Waiting for pickup</option>
-            <option value="on_bus">On the bus</option>
-            <option value="arrived">Arrived at school</option>
-            <option value="dropped_off">Dropped off</option>
-            <option value="not_scheduled">Not on today’s trips</option>
-            <option value="cancelled">Cancelled</option>
+            {grades.map((g) => (
+              <option key={g} value={g}>
+                {g}
+              </option>
+            ))}
           </select>
         </label>
+        <Link className="btn btn-secondary" to="/teacher/notes">
+          Message a parent
+        </Link>
       </div>
 
       <div className="table-wrap">
@@ -68,10 +67,7 @@ export default function TeacherStudents() {
             <tr>
               <th>Student</th>
               <th>Grade</th>
-              <th>Route</th>
-              <th>Parent</th>
-              <th>Status</th>
-              <th>Trip</th>
+              <th>Parent / guardian</th>
             </tr>
           </thead>
           <tbody>
@@ -82,29 +78,20 @@ export default function TeacherStudents() {
                   {k.admissionNo ? <div className="muted">{k.admissionNo}</div> : null}
                 </td>
                 <td>{k.grade || '—'}</td>
-                <td>{k.routeId?.name || '—'}</td>
                 <td>
                   {(k.parentIds || []).map((p) => p.name).join(', ') || '—'}
                   <div className="muted">
-                    {(k.parentIds || []).map((p) => p.phone).filter(Boolean).join(', ')}
+                    {(k.parentIds || [])
+                      .map((p) => p.phone || p.email)
+                      .filter(Boolean)
+                      .join(' · ')}
                   </div>
-                </td>
-                <td>
-                  <span className={`pill status-${k.transport?.status || 'waiting'}`}>
-                    {k.transport?.label || '—'}
-                  </span>
-                </td>
-                <td>
-                  {k.transport?.tripCode || '—'}
-                  {k.transport?.driver?.name ? (
-                    <div className="muted">{k.transport.driver.name}</div>
-                  ) : null}
                 </td>
               </tr>
             ))}
             {!filtered.length && (
               <tr>
-                <td colSpan={6} className="muted">
+                <td colSpan={3} className="muted">
                   No students match these filters.
                 </td>
               </tr>

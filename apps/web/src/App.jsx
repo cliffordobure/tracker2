@@ -21,10 +21,10 @@ import ComingSoon from './pages/admin/ComingSoon';
 import DriverHome from './pages/driver/DriverHome';
 import ParentHome from './pages/parent/ParentHome';
 import TeacherHome from './pages/teacher/TeacherHome';
-import TeacherLive from './pages/teacher/TeacherLive';
+import TeacherRegister from './pages/teacher/TeacherRegister';
+import TeacherAssignments from './pages/teacher/TeacherAssignments';
+import TeacherNotes from './pages/teacher/TeacherNotes';
 import TeacherStudents from './pages/teacher/TeacherStudents';
-import TeacherTrips from './pages/teacher/TeacherTrips';
-import TeacherNoticeboard from './pages/teacher/TeacherNoticeboard';
 import { homePathForRole } from './lib/roles';
 import './school-admin.css';
 
@@ -46,10 +46,10 @@ const superNav = [
 
 const teacherNav = [
   { to: '/teacher', label: 'Overview', end: true },
-  { to: '/teacher/live', label: 'Live buses' },
+  { to: '/teacher/register', label: 'Register' },
+  { to: '/teacher/assignments', label: 'Assignments' },
+  { to: '/teacher/notes', label: 'Parent updates' },
   { to: '/teacher/students', label: 'Students' },
-  { to: '/teacher/trips', label: "Today's trips" },
-  { to: '/teacher/noticeboard', label: 'Noticeboard' },
 ];
 
 export default function App() {
@@ -127,10 +127,13 @@ export default function App() {
         }
       >
         <Route index element={<TeacherHome />} />
-        <Route path="live" element={<TeacherLive />} />
+        <Route path="register" element={<TeacherRegister />} />
+        <Route path="assignments" element={<TeacherAssignments />} />
+        <Route path="notes" element={<TeacherNotes />} />
         <Route path="students" element={<TeacherStudents />} />
-        <Route path="trips" element={<TeacherTrips />} />
-        <Route path="noticeboard" element={<TeacherNoticeboard />} />
+        <Route path="live" element={<Navigate to="/teacher" replace />} />
+        <Route path="trips" element={<Navigate to="/teacher" replace />} />
+        <Route path="noticeboard" element={<Navigate to="/teacher" replace />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

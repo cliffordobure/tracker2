@@ -5,14 +5,9 @@ export default function Layout({ navItems, title, rideMode = false }) {
   const { user, logout, toast } = useAuth();
   const location = useLocation();
   const isRide = rideMode || location.pathname.startsWith('/parent');
-  const isTeacherLive = location.pathname === '/teacher/live';
 
   return (
-    <div
-      className={`app-shell${isRide ? ' app-shell--ride' : ''}${
-        isTeacherLive ? ' app-shell--teacher-live' : ''
-      }`}
-    >
+    <div className={`app-shell${isRide ? ' app-shell--ride' : ''}`}>
       {!isRide && (
         <aside className="sidebar">
           <div className="brand">
