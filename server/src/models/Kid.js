@@ -11,6 +11,7 @@ const kidSchema = new mongoose.Schema(
     house: { type: String, default: '' },
     admissionNo: { type: String, default: '' },
     photoUrl: { type: String, default: '' },
+    photoPublicId: { type: String, default: '' },
     active: { type: Boolean, default: true },
   },
   { timestamps: true }

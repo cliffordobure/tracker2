@@ -14,6 +14,7 @@ const announcementSchema = new mongoose.Schema(
     authorName: { type: String, default: 'Admin' },
     attachmentName: { type: String, default: '' },
     attachmentUrl: { type: String, default: '' },
+    attachmentPublicId: { type: String, default: '' },
     active: { type: Boolean, default: true },
     publishedAt: { type: Date, default: Date.now },
   },

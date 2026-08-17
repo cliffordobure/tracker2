@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import MapView from '../../components/MapView';
 import { useAuth } from '../../context/AuthContext';
+import MediaPicker from '../../components/MediaPicker';
 
 export default function SchoolSettings() {
   const { user } = useAuth();
@@ -22,6 +23,8 @@ export default function SchoolSettings() {
           name: school.name,
           address: school.address || '',
           location: { ...school.location },
+          logoUrl: school.logoUrl || '',
+          logoPublicId: school.logoPublicId || '',
         });
       })
       .catch((e) => setError(e.message));
@@ -38,6 +41,8 @@ export default function SchoolSettings() {
           name: form.name,
           address: form.address,
           location: form.location,
+          logoUrl: form.logoUrl || '',
+          logoPublicId: form.logoPublicId || '',
         },
       });
       setSaved(true);
@@ -73,6 +78,19 @@ export default function SchoolSettings() {
             onChange={(e) => setForm({ ...form, address: e.target.value })}
           />
         </label>
+        <MediaPicker
+          label="School logo"
+          folder="schools"
+          accept="image/*"
+          value={form.logoUrl ? { url: form.logoUrl, publicId: form.logoPublicId } : null}
+          onChange={(file) =>
+            setForm({
+              ...form,
+              logoUrl: file?.url || '',
+              logoPublicId: file?.publicId || '',
+            })
+          }
+        />
         <p className="hint">Click the map to set the exact school gate location.</p>
         <MapView
           center={form.location}

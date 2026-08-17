@@ -11,6 +11,7 @@ import driverRoutes from './routes/driver.js';
 import parentRoutes from './routes/parent.js';
 import teacherRoutes from './routes/teacher.js';  
 import tripRoutes from './routes/trips.js'; 
+import uploadRoutes from './routes/uploads.js'; 
 
 const app = express();
 const server = http.createServer(app);
@@ -62,6 +63,7 @@ app.use('/driver', driverRoutes);
 app.use('/parent', parentRoutes);
 app.use('/teacher', teacherRoutes);
 app.use('/trips', tripRoutes);
+app.use('/uploads', uploadRoutes);
 
 app.use((err, _req, res, _next) => {
   console.error(err);

@@ -209,7 +209,7 @@ router.get('/leave-requests', async (req, res) => {
 
 router.post('/leave-requests', async (req, res) => {
   try {
-    const { kidId, leaveType, startDate, endDate, reason, notes, attachmentName, attachmentUrl } =
+    const { kidId, leaveType, startDate, endDate, reason, notes, attachmentName, attachmentUrl, attachmentPublicId } =
       req.body || {};
     if (!kidId || !startDate || !endDate) {
       return res.status(400).json({ error: 'kidId, startDate and endDate are required' });
@@ -234,6 +234,7 @@ router.post('/leave-requests', async (req, res) => {
       notes: typeof notes === 'string' ? notes.trim().slice(0, 500) : '',
       attachmentName: typeof attachmentName === 'string' ? attachmentName.slice(0, 120) : '',
       attachmentUrl: typeof attachmentUrl === 'string' ? attachmentUrl.slice(0, 500) : '',
+      attachmentPublicId: typeof attachmentPublicId === 'string' ? attachmentPublicId.slice(0, 200) : '',
       status: 'pending',
     });
 
@@ -271,7 +272,8 @@ router.patch('/leave-requests/:id', async (req, res) => {
       return res.status(409).json({ error: 'Only pending requests can be edited' });
     }
 
-    const { endDate, reason, notes, leaveType, attachmentName, attachmentUrl } = req.body || {};
+    const { endDate, reason, notes, leaveType, attachmentName, attachmentUrl, attachmentPublicId } =
+      req.body || {};
     if (endDate != null) {
       const end = new Date(endDate);
       if (Number.isNaN(end.getTime()) || end < request.startDate) {
@@ -286,6 +288,9 @@ router.patch('/leave-requests/:id', async (req, res) => {
     }
     if (typeof attachmentName === 'string') request.attachmentName = attachmentName.slice(0, 120);
     if (typeof attachmentUrl === 'string') request.attachmentUrl = attachmentUrl.slice(0, 500);
+    if (typeof attachmentPublicId === 'string') {
+      request.attachmentPublicId = attachmentPublicId.slice(0, 200);
+    }
 
     await request.save();
     res.json({

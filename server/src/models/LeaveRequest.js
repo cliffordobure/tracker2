@@ -16,6 +16,7 @@ const leaveRequestSchema = new mongoose.Schema(
     notes: { type: String, default: '', trim: true, maxlength: 500 },
     attachmentName: { type: String, default: '' },
     attachmentUrl: { type: String, default: '' },
+    attachmentPublicId: { type: String, default: '' },
     status: {
       type: String,
       enum: ['pending', 'approved', 'rejected', 'cancelled'],

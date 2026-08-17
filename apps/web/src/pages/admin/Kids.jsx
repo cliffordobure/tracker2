@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import MapView from '../../components/MapView';
+import MediaPicker from '../../components/MediaPicker';
 
 const emptyParent = { name: '', email: '', phone: '', password: 'parent123' };
 
@@ -25,6 +26,7 @@ export default function Kids() {
   const [parentMode, setParentMode] = useState('new');
   const [parent, setParent] = useState(emptyParent);
   const [parentIds, setParentIds] = useState([]);
+  const [photo, setPhoto] = useState(null);
 
   const load = async () => {
     const [k, r, p, s] = await Promise.all([
@@ -68,6 +70,7 @@ export default function Kids() {
     setParentMode('new');
     setParent(emptyParent);
     setParentIds([]);
+    setPhoto(null);
   };
 
   const startEdit = (kid) => {
@@ -91,6 +94,7 @@ export default function Kids() {
     setParentMode('existing');
     setParent(emptyParent);
     setParentIds((kid.parentIds || []).map((p) => p._id || p.id || p).filter(Boolean));
+    setPhoto(kid.photoUrl ? { url: kid.photoUrl, publicId: kid.photoPublicId || '' } : null);
   };
 
   const submitCreate = async () => {
@@ -105,6 +109,8 @@ export default function Kids() {
           lng: boarding.lng,
           stopName: boarding.stopName || `${name} boarding`,
         },
+        photoUrl: photo?.url || '',
+        photoPublicId: photo?.publicId || '',
       };
       if (routeMode === 'existing') body.routeId = routeId;
       else body.routeName = routeName;
@@ -136,6 +142,8 @@ export default function Kids() {
           lng: boarding.lng,
           stopName: boarding.stopName || `${name} boarding`,
         },
+        photoUrl: photo?.url || '',
+        photoPublicId: photo?.publicId || '',
       };
       await api(`/admin/kids/${editingId}`, { method: 'PUT', body });
       setSuccess(`${name} updated.`);
@@ -208,6 +216,7 @@ export default function Kids() {
               {kids.map((k) => (
                 <tr key={k._id}>
                   <td>
+                    {k.photoUrl ? <img src={k.photoUrl} alt="" className="table-thumb" /> : null}
                     <strong>{k.name}</strong>
                     <div className="muted">{k.grade}</div>
                   </td>
@@ -263,6 +272,14 @@ export default function Kids() {
               Grade
               <input value={grade} onChange={(e) => setGrade(e.target.value)} />
             </label>
+            <MediaPicker
+              label="Student photo"
+              folder="kids"
+              accept="image/*"
+              value={photo}
+              onChange={setPhoto}
+              hint="Stored on Cloudinary. Used on registers and parent views."
+            />
             {mode === 'edit' && (
               <label className="check">
                 <input

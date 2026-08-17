@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
+import MediaPicker from '../../components/MediaPicker';
 
 const empty = {
   name: '',
@@ -11,6 +12,8 @@ const empty = {
   vehicleColor: '',
   busId: '',
   assignedRouteIds: [],
+  photoUrl: '',
+  photoPublicId: '',
 };
 
 export default function Drivers() {
@@ -85,6 +88,7 @@ export default function Drivers() {
               {drivers.map((d) => (
                 <tr key={d.id}>
                   <td>
+                    {d.photoUrl ? <img src={d.photoUrl} alt="" className="table-thumb" /> : null}
                     <strong>{d.name}</strong>
                     <div className="muted">{d.email}</div>
                   </td>
@@ -108,6 +112,19 @@ export default function Drivers() {
       </div>
       <form className="card-form" onSubmit={submit}>
         <h3>Add driver</h3>
+        <MediaPicker
+          label="Driver photo"
+          folder="drivers"
+          accept="image/*"
+          value={form.photoUrl ? { url: form.photoUrl, publicId: form.photoPublicId } : null}
+          onChange={(file) =>
+            setForm({
+              ...form,
+              photoUrl: file?.url || '',
+              photoPublicId: file?.publicId || '',
+            })
+          }
+        />
         <label>
           Name
           <input

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
+import MediaPicker from '../../components/MediaPicker';
 
 export default function Noticeboard() {
   const { showToast } = useAuth();
@@ -11,6 +12,9 @@ export default function Noticeboard() {
     title: '',
     body: '',
     category: 'general',
+    attachmentUrl: '',
+    attachmentName: '',
+    attachmentPublicId: '',
   });
   const [saving, setSaving] = useState(false);
 
@@ -36,7 +40,14 @@ export default function Noticeboard() {
     setSaving(true);
     try {
       await api('/admin/announcements', { method: 'POST', body: form });
-      setForm({ title: '', body: '', category: 'general' });
+      setForm({
+        title: '',
+        body: '',
+        category: 'general',
+        attachmentUrl: '',
+        attachmentName: '',
+        attachmentPublicId: '',
+      });
       showToast?.('Announcement published', 'success');
       await load();
     } catch (err) {
@@ -90,6 +101,28 @@ export default function Noticeboard() {
               placeholder="Write the announcement…"
             />
           </label>
+          <MediaPicker
+            label="Attachment (optional)"
+            folder="announcements"
+            value={
+              form.attachmentUrl
+                ? {
+                    url: form.attachmentUrl,
+                    publicId: form.attachmentPublicId,
+                    originalName: form.attachmentName,
+                  }
+                : null
+            }
+            onChange={(file) =>
+              setForm((f) => ({
+                ...f,
+                attachmentUrl: file?.url || '',
+                attachmentPublicId: file?.publicId || '',
+                attachmentName: file?.originalName || '',
+              }))
+            }
+            hint="Image, video, PDF, or document."
+          />
           <button className="sa-btn sa-btn-primary" type="submit" disabled={saving}>
             {saving ? 'Publishing…' : 'Publish'}
           </button>
@@ -110,6 +143,13 @@ export default function Noticeboard() {
                   </span>
                 </div>
                 <p>{a.body}</p>
+                {a.attachmentUrl ? (
+                  <p>
+                    <a href={a.attachmentUrl} target="_blank" rel="noreferrer">
+                      {a.attachmentName || 'Attachment'}
+                    </a>
+                  </p>
+                ) : null}
                 <small>
                   {a.authorName || 'Admin'} ·{' '}
                   {a.publishedAt ? new Date(a.publishedAt).toLocaleString() : ''}

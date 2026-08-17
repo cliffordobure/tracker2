@@ -422,6 +422,8 @@ router.post('/drivers', async (req, res) => {
       phone: phone || '',
       role: 'driver',
       schoolId,
+      photoUrl: req.body.photoUrl || '',
+      photoPublicId: req.body.photoPublicId || '',
     });
     const profile = await DriverProfile.create({
       userId: user._id,
@@ -449,6 +451,8 @@ router.put('/drivers/:id', async (req, res) => {
     if (req.body.password) {
       updates.passwordHash = await bcrypt.hash(req.body.password, 10);
     }
+    if (req.body.photoUrl !== undefined) updates.photoUrl = req.body.photoUrl || '';
+    if (req.body.photoPublicId !== undefined) updates.photoPublicId = req.body.photoPublicId || '';
     const user = await User.findByIdAndUpdate(req.params.id, updates, { new: true });
 
     const profileUpdates = {};
@@ -577,6 +581,8 @@ router.post('/kids/onboard', async (req, res) => {
       routeId: route._id,
       homeStopId: stop._id,
       parentIds: linkedParentIds,
+      photoUrl: req.body.photoUrl || '',
+      photoPublicId: req.body.photoPublicId || '',
     });
 
     const populated = await Kid.findById(kid._id)
@@ -811,7 +817,8 @@ router.post('/announcements', async (req, res) => {
   try {
     const schoolId = resolveSchoolId(req, { required: true });
     if (!schoolId) return res.status(400).json({ error: 'schoolId is required' });
-    const { title, body, category, authorName, attachmentName, attachmentUrl } = req.body || {};
+    const { title, body, category, authorName, attachmentName, attachmentUrl, attachmentPublicId } =
+      req.body || {};
     if (!title?.trim() || !body?.trim()) {
       return res.status(400).json({ error: 'title and body are required' });
     }
@@ -825,6 +832,7 @@ router.post('/announcements', async (req, res) => {
       authorName: authorName?.trim() || req.user.name || 'Admin',
       attachmentName: attachmentName || '',
       attachmentUrl: attachmentUrl || '',
+      attachmentPublicId: attachmentPublicId || '',
       publishedAt: new Date(),
     });
     res.status(201).json({ announcement });

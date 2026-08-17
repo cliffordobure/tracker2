@@ -18,3 +18,4 @@ export { Announcement } from './Announcement.js';
 export { AttendanceRecord } from './AttendanceRecord.js';
 export { Assignment } from './Assignment.js';
 export { TeacherNote } from './TeacherNote.js';
+export { MediaAsset } from './MediaAsset.js';

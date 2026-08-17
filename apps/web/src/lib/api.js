@@ -29,4 +29,21 @@ export async function api(path, options = {}) {
   return data;
 }
 
+export async function uploadFile(file, { folder = 'general' } = {}) {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('folder', folder);
+  const token = getToken();
+  const res = await fetch(`${API_URL}/uploads`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || `Upload failed (${res.status})`);
+  }
+  return data.file;
+}
+
 export { API_URL, getToken };

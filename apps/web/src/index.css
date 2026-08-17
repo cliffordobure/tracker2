@@ -1053,3 +1053,57 @@ th {
   padding: 0.35rem 0.65rem;
   font-size: 0.85rem;
 }
+
+.media-picker {
+  display: grid;
+  gap: 0.4rem;
+  margin-bottom: 0.85rem;
+}
+
+.media-picker-label {
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.media-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.media-picker-thumb {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 14px;
+  background: #eef2f6;
+}
+
+.media-picker-placeholder,
+.media-picker-file {
+  width: 72px;
+  min-height: 72px;
+  border-radius: 14px;
+  background: #eef2f6;
+  color: #64748b;
+  display: grid;
+  place-items: center;
+  font-size: 0.75rem;
+  text-align: center;
+  padding: 0.4rem;
+}
+
+.media-picker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.table-thumb {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  object-fit: cover;
+  vertical-align: middle;
+  margin-right: 0.5rem;
+}

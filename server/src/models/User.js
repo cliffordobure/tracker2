@@ -12,6 +12,8 @@ const userSchema = new mongoose.Schema(
     name: { type: String, required: true, trim: true },
     phone: { type: String, default: '' },
     schoolId: { type: mongoose.Schema.Types.ObjectId, ref: 'School', default: null },
+    photoUrl: { type: String, default: '' },
+    photoPublicId: { type: String, default: '' },
     active: { type: Boolean, default: true },
   },
   { timestamps: true }
@@ -25,6 +27,7 @@ userSchema.methods.toSafeJSON = function toSafeJSON() {
     name: this.name,
     phone: this.phone,
     schoolId: this.schoolId?.toString?.() || this.schoolId || null,
+    photoUrl: this.photoUrl || '',
     active: this.active,
   };
 };
