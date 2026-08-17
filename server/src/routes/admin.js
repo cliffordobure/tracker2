@@ -640,19 +640,25 @@ router.put('/kids/:id', async (req, res) => {
     if (boarding?.lat != null && boarding?.lng != null && routeId) {
       const lat = Number(boarding.lat);
       const lng = Number(boarding.lng);
-      const stopName = boarding.stopName || `${existing.name} boarding`;
-      const routeChanged =
-        existing.routeId?.toString() !== routeId.toString();
+      const stopName = String(boarding.stopName || `${existing.name} boarding`).trim();
+      const routeChanged = existing.routeId?.toString() !== String(routeId);
 
-      if (existing.homeStopId && !routeChanged) {
-        await Stop.findByIdAndUpdate(existing.homeStopId, {
-          name: stopName,
-          location: { lat, lng },
-          type: 'home',
-        });
+      let stop = existing.homeStopId ? await Stop.findById(existing.homeStopId) : null;
+      const sharedCount = stop
+        ? await Kid.countDocuments({ _id: { $ne: existing._id }, homeStopId: stop._id })
+        : 0;
+      const reuseStop = Boolean(stop) && !routeChanged && sharedCount === 0;
+
+      if (reuseStop) {
+        stop.name = stopName;
+        stop.type = 'home';
+        stop.routeId = routeId;
+        stop.location = { lat, lng };
+        await stop.save();
+        updates.homeStopId = stop._id;
       } else {
         const maxOrder = await Stop.findOne({ routeId }).sort({ order: -1 });
-        const stop = await Stop.create({
+        stop = await Stop.create({
           routeId,
           name: stopName,
           type: 'home',

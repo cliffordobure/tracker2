@@ -130,6 +130,8 @@ export default function MapView({
   onRouteReady,
   /** Called with { durationSec, distanceM } when a live/planned route is fetched. */
   onRouteEta,
+  /** Fly the camera here (search result). { lat, lng, zoom?, at? } */
+  focus,
   className = 'map-canvas',
 }) {
   const containerRef = useRef(null);
@@ -143,6 +145,7 @@ export default function MapView({
   const followRef = useRef(followDriver);
   const onRouteReadyRef = useRef(onRouteReady);
   const onRouteEtaRef = useRef(onRouteEta);
+  const onMapClickRef = useRef(onMapClick);
   const lastRerouteAtRef = useRef(0);
   const remainKeyRef = useRef('');
   const liveFetchingRef = useRef(false);
@@ -156,6 +159,10 @@ export default function MapView({
   useEffect(() => {
     followRef.current = followDriver;
   }, [followDriver]);
+
+  useEffect(() => {
+    onMapClickRef.current = onMapClick;
+  }, [onMapClick]);
 
   useEffect(() => {
     onRouteReadyRef.current = onRouteReady;
@@ -193,9 +200,9 @@ export default function MapView({
       ensureLayers(map);
     });
 
-    if (onMapClick) {
-      map.on('click', (e) => onMapClick({ lat: e.lngLat.lat, lng: e.lngLat.lng }));
-    }
+    map.on('click', (e) => {
+      onMapClickRef.current?.({ lat: e.lngLat.lat, lng: e.lngLat.lng });
+    });
 
     return () => {
       if (animRafRef.current) cancelAnimationFrame(animRafRef.current);
@@ -211,6 +218,22 @@ export default function MapView({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || focus?.lat == null || focus?.lng == null) return undefined;
+    const run = () => {
+      map.flyTo({
+        center: [Number(focus.lng), Number(focus.lat)],
+        zoom: focus.zoom ?? 16.2,
+        essential: true,
+        duration: 1100,
+      });
+    };
+    if (mapReadyRef.current || map.isStyleLoaded()) run();
+    else map.once('load', run);
+    return undefined;
+  }, [focus?.lat, focus?.lng, focus?.zoom, focus?.at]);
 
   useEffect(() => {
     const map = mapRef.current;

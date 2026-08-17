@@ -2,8 +2,27 @@ import { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import MapView from '../../components/MapView';
 import MediaPicker from '../../components/MediaPicker';
+import LocationSearch from '../../components/LocationSearch';
 
 const emptyParent = { name: '', email: '', phone: '', password: 'parent123' };
+
+function coordsFromStop(stop) {
+  const loc = stop?.location;
+  if (!loc) return null;
+  if (loc.lat != null && loc.lng != null) {
+    return { lat: Number(loc.lat), lng: Number(loc.lng) };
+  }
+  if (Array.isArray(loc.coordinates) && loc.coordinates.length >= 2) {
+    return { lat: Number(loc.coordinates[1]), lng: Number(loc.coordinates[0]) };
+  }
+  return null;
+}
+
+function formatCoords(loc) {
+  const c = coordsFromStop({ location: loc });
+  if (!c || Number.isNaN(c.lat) || Number.isNaN(c.lng)) return '';
+  return `${c.lat.toFixed(4)}, ${c.lng.toFixed(4)}`;
+}
 
 export default function Kids() {
   const [kids, setKids] = useState([]);
@@ -23,6 +42,7 @@ export default function Kids() {
   const [routeId, setRouteId] = useState('');
   const [routeName, setRouteName] = useState('');
   const [boarding, setBoarding] = useState({ lat: -1.39, lng: 36.74, stopName: '' });
+  const [mapFocus, setMapFocus] = useState(null);
   const [parentMode, setParentMode] = useState('new');
   const [parent, setParent] = useState(emptyParent);
   const [parentIds, setParentIds] = useState([]);
@@ -71,6 +91,7 @@ export default function Kids() {
     setParent(emptyParent);
     setParentIds([]);
     setPhoto(null);
+    setMapFocus(null);
   };
 
   const startEdit = (kid) => {
@@ -85,7 +106,7 @@ export default function Kids() {
     setRouteMode('existing');
     setRouteId(kid.routeId?._id || kid.routeId || routes[0]?._id || '');
     setRouteName('');
-    const loc = kid.homeStopId?.location;
+    const loc = coordsFromStop(kid.homeStopId);
     setBoarding({
       lat: loc?.lat ?? school?.location?.lat ?? -1.39,
       lng: loc?.lng ?? school?.location?.lng ?? 36.74,
@@ -145,7 +166,10 @@ export default function Kids() {
         photoUrl: photo?.url || '',
         photoPublicId: photo?.publicId || '',
       };
-      await api(`/admin/kids/${editingId}`, { method: 'PUT', body });
+      const { kid } = await api(`/admin/kids/${editingId}`, { method: 'PUT', body });
+      if (kid?._id) {
+        setKids((list) => list.map((k) => (k._id === kid._id ? kid : k)));
+      }
       setSuccess(`${name} updated.`);
       resetForm();
       await load();
@@ -221,7 +245,12 @@ export default function Kids() {
                     <div className="muted">{k.grade}</div>
                   </td>
                   <td>{k.routeId?.name}</td>
-                  <td>{k.homeStopId?.name}</td>
+                  <td>
+                    {k.homeStopId?.name || '—'}
+                    {k.homeStopId?.location ? (
+                      <div className="muted">{formatCoords(k.homeStopId.location)}</div>
+                    ) : null}
+                  </td>
                   <td>{(k.parentIds || []).map((p) => p.name).join(', ')}</td>
                   <td className="row-actions">
                     <button type="button" className="btn btn-ghost" onClick={() => startEdit(k)}>
@@ -254,7 +283,7 @@ export default function Kids() {
               key={n}
               type="button"
               className={`wizard-step ${step === n ? 'active' : ''} ${step > n ? 'done' : ''}`}
-              onClick={() => n <= step && setStep(n)}
+              onClick={() => (mode === 'edit' || n <= step) && setStep(n)}
             >
               {n}
             </button>
@@ -342,19 +371,35 @@ export default function Kids() {
         {step === 3 && (
           <>
             <h3>Boarding / drop-off point</h3>
-            <p className="hint">Click the map to set or move this student&apos;s stop.</p>
+            <p className="hint">
+              Search an area to zoom in, then click the map to mark the exact boarding point.
+            </p>
             <label>
               Stop name
               <input
                 value={boarding.stopName}
-                onChange={(e) => setBoarding({ ...boarding, stopName: e.target.value })}
+                onChange={(e) => setBoarding((b) => ({ ...b, stopName: e.target.value }))}
                 placeholder={`${name || 'Student'} boarding`}
               />
             </label>
+            <LocationSearch
+              proximity={school?.location || boarding}
+              placeholder="Search estate, road, or landmark…"
+              onSelect={(place) => {
+                setBoarding((b) => ({
+                  ...b,
+                  lat: place.lat,
+                  lng: place.lng,
+                  stopName: b.stopName.trim() ? b.stopName : place.name,
+                }));
+                setMapFocus({ lat: place.lat, lng: place.lng, zoom: 16.4, at: Date.now() });
+              }}
+            />
             <MapView
               center={{ lat: boarding.lat, lng: boarding.lng }}
               zoom={14}
-              onMapClick={(loc) => setBoarding({ ...boarding, ...loc })}
+              focus={mapFocus}
+              onMapClick={(loc) => setBoarding((b) => ({ ...b, ...loc }))}
               stops={[
                 ...(school?.location
                   ? [{ name: school.name, type: 'school', location: school.location }]
@@ -367,6 +412,11 @@ export default function Kids() {
               ]}
               className="map-canvas map-sm"
             />
+            {boarding.lat != null && boarding.lng != null ? (
+              <p className="hint">
+                Selected point: {Number(boarding.lat).toFixed(5)}, {Number(boarding.lng).toFixed(5)}
+              </p>
+            ) : null}
             {mode === 'edit' && (
               <>
                 <h3 style={{ marginTop: '1rem' }}>Parents</h3>
@@ -466,7 +516,7 @@ export default function Kids() {
               Back
             </button>
           )}
-          {step < maxStep ? (
+          {step < maxStep && (
             <button
               type="button"
               className="btn btn-primary"
@@ -475,7 +525,8 @@ export default function Kids() {
             >
               Next
             </button>
-          ) : mode === 'edit' ? (
+          )}
+          {mode === 'edit' ? (
             <button
               type="button"
               className="btn btn-primary"
@@ -485,9 +536,11 @@ export default function Kids() {
               Save student
             </button>
           ) : (
-            <button type="button" className="btn btn-primary" disabled={!canNext()} onClick={submitCreate}>
-              Create student
-            </button>
+            step >= maxStep && (
+              <button type="button" className="btn btn-primary" disabled={!canNext()} onClick={submitCreate}>
+                Create student
+              </button>
+            )
           )}
         </div>
       </div>

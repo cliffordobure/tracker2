@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import MapView from '../../components/MapView';
+import LocationSearch from '../../components/LocationSearch';
 
 export default function RoutesPage() {
   const [schools, setSchools] = useState([]);
@@ -15,6 +16,7 @@ export default function RoutesPage() {
     location: { lat: -1.39, lng: 36.74 },
   });
   const [error, setError] = useState('');
+  const [mapFocus, setMapFocus] = useState(null);
 
   const loadRoutes = async () => {
     const [r, s] = await Promise.all([api('/admin/routes'), api('/admin/schools')]);
@@ -134,10 +136,23 @@ export default function RoutesPage() {
           {!selectedRoute && <p className="muted">Select a route to manage stops.</p>}
           {selectedRoute && (
             <>
+              <LocationSearch
+                proximity={stops[0]?.location || { lat: -1.3965, lng: 36.7542 }}
+                placeholder="Search an area to zoom the map…"
+                onSelect={(place) => {
+                  setStopForm((f) => ({
+                    ...f,
+                    location: { lat: place.lat, lng: place.lng },
+                    name: f.name.trim() ? f.name : place.name,
+                  }));
+                  setMapFocus({ lat: place.lat, lng: place.lng, zoom: 16.4, at: Date.now() });
+                }}
+              />
               <MapView
                 center={stops[0]?.location || { lat: -1.3965, lng: 36.7542 }}
                 stops={stops}
-                onMapClick={(loc) => setStopForm({ ...stopForm, location: loc })}
+                focus={mapFocus}
+                onMapClick={(loc) => setStopForm((f) => ({ ...f, location: loc }))}
                 className="map-canvas map-md"
               />
               <div className="table-wrap">
