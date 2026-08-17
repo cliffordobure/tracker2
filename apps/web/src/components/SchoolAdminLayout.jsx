@@ -58,7 +58,7 @@ const pageMeta = {
   '/school-admin/school': { title: 'School', crumbs: ['Home', 'Administration', 'School'] },
   '/school-admin/students': { title: 'Students', crumbs: ['Home', 'Administration', 'Students'] },
   '/school-admin/parents': { title: 'Parents', crumbs: ['Home', 'Administration', 'Parents'] },
-  '/school-admin/drivers': { title: 'Drivers / Staff', crumbs: ['Home', 'Transport', 'Drivers'] },
+  '/school-admin/drivers': { title: 'Staff', crumbs: ['Home', 'Administration', 'Staff'] },
   '/school-admin/buses': { title: 'Vehicles', crumbs: ['Home', 'Transport', 'Vehicles'] },
   '/school-admin/routes': { title: 'Routes', crumbs: ['Home', 'Transport', 'Routes'] },
   '/school-admin/trip-scheduling': {

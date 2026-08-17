@@ -448,6 +448,12 @@ router.put('/drivers/:id', async (req, res) => {
     }
 
     const updates = { name: req.body.name, phone: req.body.phone, active: req.body.active };
+    if (req.body.email) {
+      const email = req.body.email.toLowerCase().trim();
+      const taken = await User.findOne({ email, _id: { $ne: existing._id } });
+      if (taken) return res.status(400).json({ error: 'That email is already in use' });
+      updates.email = email;
+    }
     if (req.body.password) {
       updates.passwordHash = await bcrypt.hash(req.body.password, 10);
     }
@@ -470,6 +476,68 @@ router.put('/drivers/:id', async (req, res) => {
       .populate('busId', 'plate label seats');
 
     res.json({ driver: { ...user.toSafeJSON(), profile } });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ——— Teachers ———
+router.get('/teachers', async (req, res) => {
+  const teachers = await User.find({ role: 'teacher', ...schoolFilter(req) }).sort({ name: 1 });
+  res.json({ teachers: teachers.map((t) => t.toSafeJSON()) });
+});
+
+router.post('/teachers', async (req, res) => {
+  try {
+    let schoolId = resolveSchoolId(req);
+    if (req.user.role === 'super_admin') schoolId = req.body.schoolId || schoolId;
+    if (!schoolId) return res.status(400).json({ error: 'schoolId is required' });
+
+    const { email, password, name, phone } = req.body;
+    if (!email || !name) return res.status(400).json({ error: 'name and email are required' });
+    const passwordHash = await bcrypt.hash(password || 'password123', 10);
+    const teacher = await User.create({
+      email: email.toLowerCase().trim(),
+      passwordHash,
+      name,
+      phone: phone || '',
+      role: 'teacher',
+      schoolId,
+      photoUrl: req.body.photoUrl || '',
+      photoPublicId: req.body.photoPublicId || '',
+    });
+    res.status(201).json({ teacher: teacher.toSafeJSON() });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.put('/teachers/:id', async (req, res) => {
+  try {
+    const existing = await User.findOne({ _id: req.params.id, role: 'teacher' });
+    if (!existing) return res.status(404).json({ error: 'Teacher not found' });
+    if (!assertSchoolAccess(req, existing.schoolId)) {
+      return res.status(403).json({ error: 'Cannot edit teacher from another school' });
+    }
+
+    const updates = {
+      name: req.body.name,
+      phone: req.body.phone,
+      active: req.body.active,
+    };
+    if (req.body.email) {
+      const email = req.body.email.toLowerCase().trim();
+      const taken = await User.findOne({ email, _id: { $ne: existing._id } });
+      if (taken) return res.status(400).json({ error: 'That email is already in use' });
+      updates.email = email;
+    }
+    if (req.body.password) {
+      updates.passwordHash = await bcrypt.hash(req.body.password, 10);
+    }
+    if (req.body.photoUrl !== undefined) updates.photoUrl = req.body.photoUrl || '';
+    if (req.body.photoPublicId !== undefined) updates.photoPublicId = req.body.photoPublicId || '';
+    const teacher = await User.findByIdAndUpdate(req.params.id, updates, { new: true });
+    res.json({ teacher: teacher.toSafeJSON() });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

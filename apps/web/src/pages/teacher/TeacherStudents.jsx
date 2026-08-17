@@ -33,14 +33,14 @@ export default function TeacherStudents() {
   }, [kids, q, grade]);
 
   return (
-    <div className="stack">
+    <div className="tw-page">
       <div>
         <h2>Students</h2>
-        <p className="lede">Class list with parent contacts. Use this to pick who to message.</p>
+        <p className="tw-lede">Class list with parent contacts. Use this to pick who to message.</p>
       </div>
-      {error && <div className="alert">{error}</div>}
+      {error && <div className="tw-alert">{error}</div>}
 
-      <div className="row-actions" style={{ flexWrap: 'wrap', gap: '0.75rem' }}>
+      <div className="tw-toolbar">
         <label>
           Search
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name, parent, grade" />
@@ -56,12 +56,12 @@ export default function TeacherStudents() {
             ))}
           </select>
         </label>
-        <Link className="btn btn-secondary" to="/teacher/notes">
+        <Link className="tw-btn tw-btn-secondary" to="/teacher/notes">
           Message a parent
         </Link>
       </div>
 
-      <div className="table-wrap">
+      <div className="tw-table-wrap">
         <table>
           <thead>
             <tr>
@@ -74,13 +74,18 @@ export default function TeacherStudents() {
             {filtered.map((k) => (
               <tr key={k._id}>
                 <td>
-                  <strong>{k.name}</strong>
-                  {k.admissionNo ? <div className="muted">{k.admissionNo}</div> : null}
+                  <div className="tw-student">
+                    {k.photoUrl ? <img src={k.photoUrl} alt="" /> : null}
+                    <div>
+                      <strong>{k.name}</strong>
+                      {k.admissionNo ? <div className="tw-muted">{k.admissionNo}</div> : null}
+                    </div>
+                  </div>
                 </td>
                 <td>{k.grade || '—'}</td>
                 <td>
                   {(k.parentIds || []).map((p) => p.name).join(', ') || '—'}
-                  <div className="muted">
+                  <div className="tw-muted">
                     {(k.parentIds || [])
                       .map((p) => p.phone || p.email)
                       .filter(Boolean)
@@ -91,7 +96,7 @@ export default function TeacherStudents() {
             ))}
             {!filtered.length && (
               <tr>
-                <td colSpan={3} className="muted">
+                <td colSpan={3} className="tw-muted">
                   No students match these filters.
                 </td>
               </tr>

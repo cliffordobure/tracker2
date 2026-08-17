@@ -2,6 +2,14 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
 
+function todayLabel() {
+  return new Date().toLocaleDateString(undefined, {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'short',
+  });
+}
+
 export default function TeacherHome() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
@@ -16,140 +24,159 @@ export default function TeacherHome() {
     load().catch((e) => setError(e.message));
   }, [load]);
 
-  if (!data && !error) return <p>Loading…</p>;
+  if (!data && !error) {
+    return (
+      <div className="tw-page">
+        <p className="tw-muted">Loading classroom…</p>
+      </div>
+    );
+  }
 
   const stats = data?.stats || {};
   const school = data?.school;
+  const unmarked = data?.unmarked || [];
+  const assignments = data?.assignments || [];
+  const notes = data?.recentNotes || [];
 
   return (
-    <div className="stack">
-      {error && <div className="alert">{error}</div>}
-      <div>
-        <p className="eyebrow">Teacher</p>
-        <h2>{school?.name || 'Class workspace'}</h2>
-        <p className="lede">
-          Mark the register, post the class diary with photos, set work, and message a parent
-          privately when needed.
-        </p>
-      </div>
+    <div className="tw-page">
+      {error && <div className="tw-alert">{error}</div>}
 
-      <div className="stat-grid">
-        <div className="stat">
+      <section className="tw-hero">
+        <div>
+          <p className="tw-kicker" style={{ color: 'rgba(244,255,251,0.75)' }}>
+            Classroom
+          </p>
+          <h2>{school?.name || 'Class workspace'}</h2>
+          <p>Mark the register, post diary photos, set work, and message a parent when needed.</p>
+        </div>
+        <div className="tw-hero-date">
+          <small>Today</small>
+          <strong>{todayLabel()}</strong>
+        </div>
+      </section>
+
+      <div className="tw-metrics">
+        <div className="tw-metric">
           <span>Students</span>
           <strong>{stats.students ?? 0}</strong>
         </div>
-        <div className="stat">
-          <span>Register today</span>
+        <div className="tw-metric">
+          <span>Register</span>
           <strong>
             {stats.markedToday ?? 0}/{stats.students ?? 0}
           </strong>
         </div>
-        <div className="stat">
+        <div className="tw-metric is-present">
           <span>Present</span>
           <strong>{stats.present ?? 0}</strong>
         </div>
-        <div className="stat">
+        <div className="tw-metric is-away">
           <span>Absent / late</span>
           <strong>{(stats.absent || 0) + (stats.late || 0)}</strong>
         </div>
-        <div className="stat">
-          <span>Open assignments</span>
+        <div className="tw-metric">
+          <span>Assignments</span>
           <strong>{stats.assignments ?? 0}</strong>
         </div>
       </div>
 
-      <div className="split">
-        <div className="panel">
-          <div className="panel-head">
+      <div className="tw-actions">
+        <Link className="tw-action" to="/teacher/register">
+          <span className="tw-action-icon">✓</span>
+          <strong>Mark register</strong>
+          <span>Take today’s attendance</span>
+        </Link>
+        <Link className="tw-action" to="/teacher/diary">
+          <span className="tw-action-icon">✎</span>
+          <strong>Class diary</strong>
+          <span>Photos and the day’s story</span>
+        </Link>
+        <Link className="tw-action" to="/teacher/assignments">
+          <span className="tw-action-icon">☰</span>
+          <strong>Set work</strong>
+          <span>Post homework or classwork</span>
+        </Link>
+        <Link className="tw-action" to="/teacher/notes">
+          <span className="tw-action-icon">✉</span>
+          <strong>Message a parent</strong>
+          <span>Private note to a guardian</span>
+        </Link>
+      </div>
+
+      <div className="tw-grid">
+        <div className="tw-panel">
+          <div className="tw-panel-head">
             <div>
-              <h2>Register still open</h2>
-              <p className="muted">Students not marked on today’s class register</p>
+              <h3>Register still open</h3>
+              <p>Students not marked on today’s class register</p>
             </div>
-            <Link className="btn btn-primary" to="/teacher/register">
-              Mark register
+            <Link className="tw-btn tw-btn-primary" to="/teacher/register">
+              Mark
             </Link>
           </div>
-          <ul className="kid-list">
-            {(data?.unmarked || []).map((k) => (
-              <li key={k._id} className="kid-row">
+          <ul className="tw-list">
+            {unmarked.map((k) => (
+              <li key={k._id}>
                 <div>
                   <strong>{k.name}</strong>
-                  <div className="muted">{k.grade || 'No grade'}</div>
+                  <div className="tw-muted">{k.grade || 'No grade'}</div>
                 </div>
               </li>
             ))}
-            {!data?.unmarked?.length && (
-              <li className="muted">All students on the register have been marked.</li>
-            )}
+            {!unmarked.length && <p className="tw-empty">All students on the register have been marked.</p>}
           </ul>
         </div>
 
-        <div className="stack">
-          <div className="panel">
-            <div className="panel-head">
+        <div className="tw-page">
+          <div className="tw-panel">
+            <div className="tw-panel-head">
               <div>
-                <h2>Class diary</h2>
-                <p className="muted">Photos and the day’s story for parents</p>
+                <h3>Assignments</h3>
+                <p>Work you have set for the class</p>
               </div>
-              <Link className="btn btn-secondary" to="/teacher/diary">
-                Open diary
-              </Link>
-            </div>
-            <p className="muted" style={{ margin: 0 }}>
-              Take or upload photos of the children, write a short update, and tag the class or
-              specific kids. Parents see only entries that include their child.
-            </p>
-          </div>
-
-          <div className="panel">
-            <div className="panel-head">
-              <div>
-                <h2>Assignments</h2>
-                <p className="muted">Work you have set for the class</p>
-              </div>
-              <Link className="btn btn-secondary" to="/teacher/assignments">
+              <Link className="tw-btn tw-btn-secondary" to="/teacher/assignments">
                 Set work
               </Link>
             </div>
-            <ul className="kid-list">
-              {(data?.assignments || []).slice(0, 5).map((a) => (
-                <li key={a._id} className="kid-row">
+            <ul className="tw-list">
+              {assignments.slice(0, 4).map((a) => (
+                <li key={a._id}>
                   <div>
                     <strong>{a.title}</strong>
-                    <div className="muted">
+                    <div className="tw-muted">
                       {a.subject || 'Class'}
                       {a.grade ? ` · ${a.grade}` : ''}
-                      {a.dueDate ? ` · due ${new Date(a.dueDate).toLocaleDateString()}` : ''}
                     </div>
                   </div>
                 </li>
               ))}
-              {!data?.assignments?.length && <li className="muted">No assignments yet.</li>}
+              {!assignments.length && <p className="tw-empty">No assignments yet.</p>}
             </ul>
           </div>
 
-          <div className="panel">
-            <div className="panel-head">
+          <div className="tw-panel">
+            <div className="tw-panel-head">
               <div>
-                <h2>Parent updates</h2>
-                <p className="muted">Recent notes sent to guardians</p>
+                <h3>Parent updates</h3>
+                <p>Recent notes sent to guardians</p>
               </div>
-              <Link className="btn btn-ghost" to="/teacher/notes">
-                Message a parent
+              <Link className="tw-btn tw-btn-ghost" to="/teacher/notes">
+                Message
               </Link>
             </div>
-            <ul className="kid-list">
-              {(data?.recentNotes || []).slice(0, 5).map((n) => (
-                <li key={n._id} className="kid-row">
+            <ul className="tw-list">
+              {notes.slice(0, 4).map((n) => (
+                <li key={n._id}>
                   <div>
                     <strong>{n.title}</strong>
-                    <div className="muted">
+                    <div className="tw-muted">
                       {n.kidId?.name || 'Student'} · {n.category}
                     </div>
                   </div>
                 </li>
               ))}
-              {!data?.recentNotes?.length && <li className="muted">No parent updates sent yet.</li>}
+              {!notes.length && <p className="tw-empty">No parent updates sent yet.</p>}
             </ul>
           </div>
         </div>

@@ -78,17 +78,17 @@ export default function TeacherRegister() {
   };
 
   return (
-    <div className="stack">
+    <div className="tw-page">
       <div>
         <h2>Class register</h2>
-        <p className="lede">
+        <p className="tw-lede">
           Mark who is present, absent, late, or excused. Parents are notified when a child is absent
           or late.
         </p>
       </div>
-      {error && <div className="alert">{error}</div>}
+      {error && <div className="tw-alert">{error}</div>}
 
-      <div className="row-actions" style={{ flexWrap: 'wrap', gap: '0.75rem' }}>
+      <div className="tw-toolbar">
         <label>
           Date
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
@@ -104,31 +104,31 @@ export default function TeacherRegister() {
             ))}
           </select>
         </label>
-        <button type="button" className="btn btn-secondary" onClick={markAllPresent}>
+        <button type="button" className="tw-btn tw-btn-secondary" onClick={markAllPresent}>
           Mark remaining present
         </button>
       </div>
 
-      <div className="stat-grid">
-        <div className="stat">
+      <div className="tw-metrics tw-metrics-4">
+        <div className="tw-metric is-present">
           <span>Present</span>
           <strong>{summary.present}</strong>
         </div>
-        <div className="stat">
+        <div className="tw-metric is-away">
           <span>Absent</span>
           <strong>{summary.absent}</strong>
         </div>
-        <div className="stat">
+        <div className="tw-metric">
           <span>Late</span>
           <strong>{summary.late}</strong>
         </div>
-        <div className="stat">
+        <div className="tw-metric">
           <span>Not marked</span>
           <strong>{summary.unmarked}</strong>
         </div>
       </div>
 
-      <div className="table-wrap">
+      <div className="tw-table-wrap">
         <table>
           <thead>
             <tr>
@@ -143,17 +143,23 @@ export default function TeacherRegister() {
               return (
                 <tr key={k._id}>
                   <td>
-                    <strong>{k.name}</strong>
-                    {k.admissionNo ? <div className="muted">{k.admissionNo}</div> : null}
+                    <div className="tw-student">
+                      {k.photoUrl ? <img src={k.photoUrl} alt="" /> : null}
+                      <div>
+                        <strong>{k.name}</strong>
+                        {k.admissionNo ? <div className="tw-muted">{k.admissionNo}</div> : null}
+                      </div>
+                    </div>
                   </td>
                   <td>{k.grade || '—'}</td>
                   <td>
-                    <div className="register-marks">
+                    <div className="tw-marks">
                       {STATUSES.map((s) => (
                         <button
                           key={s.v}
                           type="button"
-                          className={`btn ${current === s.v ? 'btn-primary' : 'btn-ghost'}`}
+                          data-status={s.v}
+                          className={`tw-mark ${current === s.v ? 'is-on' : ''}`}
                           disabled={busyId === k._id}
                           onClick={() => mark(k._id, s.v)}
                         >
@@ -167,7 +173,7 @@ export default function TeacherRegister() {
             })}
             {!kids.length && (
               <tr>
-                <td colSpan={3} className="muted">
+                <td colSpan={3} className="tw-muted">
                   No students in this class.
                 </td>
               </tr>

@@ -20,6 +20,7 @@ import Noticeboard from './pages/admin/Noticeboard';
 import ComingSoon from './pages/admin/ComingSoon';
 import DriverHome from './pages/driver/DriverHome';
 import ParentHome from './pages/parent/ParentHome';
+import TeacherLayout from './components/TeacherLayout';
 import TeacherHome from './pages/teacher/TeacherHome';
 import TeacherRegister from './pages/teacher/TeacherRegister';
 import TeacherAssignments from './pages/teacher/TeacherAssignments';
@@ -43,15 +44,6 @@ function Protected({ roles, children }) {
 const superNav = [
   { to: '/super-admin', label: 'Dashboard', end: true },
   { to: '/super-admin/schools', label: 'Schools' },
-];
-
-const teacherNav = [
-  { to: '/teacher', label: 'Overview', end: true },
-  { to: '/teacher/register', label: 'Register' },
-  { to: '/teacher/diary', label: 'Diary' },
-  { to: '/teacher/assignments', label: 'Assignments' },
-  { to: '/teacher/notes', label: 'Parent updates' },
-  { to: '/teacher/students', label: 'Students' },
 ];
 
 export default function App() {
@@ -124,7 +116,7 @@ export default function App() {
         path="/teacher"
         element={
           <Protected roles={['teacher']}>
-            <Layout navItems={teacherNav} title="Teacher" />
+            <TeacherLayout />
           </Protected>
         }
       >

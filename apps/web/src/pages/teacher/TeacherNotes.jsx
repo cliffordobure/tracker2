@@ -45,32 +45,34 @@ export default function TeacherNotes() {
   };
 
   return (
-    <div className="split">
-      <div className="stack">
+    <div className="tw-split">
+      <div className="tw-page">
         <div>
           <h2>Update a parent</h2>
-          <p className="lede">
+          <p className="tw-lede">
             Send a note about a student — behaviour, classwork, health, or anything the guardian
             should know. It appears in the parent app alerts.
           </p>
         </div>
-        {error && <div className="alert">{error}</div>}
-        <ul className="notif-list">
+        {error && <div className="tw-alert">{error}</div>}
+        <div className="tw-page">
           {notes.map((n) => (
-            <li key={n._id}>
-              <span className="pill">{n.category}</span>
+            <article key={n._id} className="tw-note">
+              <span className="tw-pill">{n.category}</span>
               <strong>{n.title}</strong>
-              <p>{n.body}</p>
-              <small>
+              <p className="tw-lede" style={{ margin: 0 }}>
+                {n.body}
+              </p>
+              <small className="tw-muted">
                 {n.kidId?.name || 'Student'} · {new Date(n.createdAt).toLocaleString()}
               </small>
-            </li>
+            </article>
           ))}
-          {!notes.length && <li className="muted">No parent updates yet.</li>}
-        </ul>
+          {!notes.length && <p className="tw-empty">No parent updates yet.</p>}
+        </div>
       </div>
 
-      <form className="card-form" onSubmit={submit}>
+      <form className="tw-form" onSubmit={submit}>
         <h3>New note</h3>
         <label>
           Student
@@ -119,7 +121,7 @@ export default function TeacherNotes() {
             placeholder="Write what the parent should know…"
           />
         </label>
-        <button className="btn btn-primary" type="submit" disabled={busy || !form.kidId}>
+        <button className="tw-btn tw-btn-primary" type="submit" disabled={busy || !form.kidId}>
           {busy ? 'Sending…' : 'Send to parent'}
         </button>
       </form>

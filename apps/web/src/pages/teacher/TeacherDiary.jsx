@@ -145,24 +145,24 @@ export default function TeacherDiary() {
   const open = selectedEntries.find((e) => e._id === openId) || selectedEntries[0] || null;
 
   return (
-    <div className="diary-layout">
-      <div className="stack">
+    <div className="tw-split">
+      <div className="tw-page">
         <div>
           <h2>Class diary</h2>
-          <p className="lede">
+          <p className="tw-lede">
             Post the day’s story with photos of the children. Parents of the tagged class or
             students see it in their diary.
           </p>
         </div>
-        {error && <div className="alert">{error}</div>}
+        {error && <div className="tw-alert">{error}</div>}
 
-        <div className="diary-cal card-form">
+        <div className="tw-panel tw-diary-cal">
           <div className="diary-cal-head">
-            <button type="button" className="btn btn-ghost" onClick={() => shiftMonth(-1)}>
+            <button type="button" className="tw-btn tw-btn-ghost" onClick={() => shiftMonth(-1)}>
               ‹
             </button>
             <strong>{monthLabel}</strong>
-            <button type="button" className="btn btn-ghost" onClick={() => shiftMonth(1)}>
+            <button type="button" className="tw-btn tw-btn-ghost" onClick={() => shiftMonth(1)}>
               ›
             </button>
           </div>
@@ -194,7 +194,7 @@ export default function TeacherDiary() {
           </div>
         </div>
 
-        <div className="stack">
+        <div className="tw-page">
           {selectedEntries.map((e) => (
             <article
               key={e._id}
@@ -205,7 +205,7 @@ export default function TeacherDiary() {
                 <img src={e.media[0].url} alt="" className="diary-cover" />
               ) : null}
               <div className="diary-card-body">
-                <span className="pill">{e.label || 'general'}</span>
+                <span className="tw-pill">{e.label || 'general'}</span>
                 <h3>{e.title}</h3>
                 {e.body ? <p>{e.body}</p> : null}
                 {e.media?.length > 1 ? (
@@ -221,19 +221,19 @@ export default function TeacherDiary() {
                   {' · '}
                   {e.teacherId?.name || 'You'}
                 </small>
-                <button type="button" className="btn btn-ghost" onClick={() => remove(e._id)}>
+                <button type="button" className="tw-btn tw-btn-ghost" onClick={() => remove(e._id)}>
                   Remove
                 </button>
               </div>
             </article>
           ))}
           {!selectedEntries.length && (
-            <p className="muted">No diary posts on this day yet. Use the form to add one.</p>
+            <p className="tw-empty">No diary posts on this day yet. Use the form to add one.</p>
           )}
         </div>
       </div>
 
-      <form className="card-form" onSubmit={submit}>
+      <form className="tw-form" onSubmit={submit}>
         <h3>Write today’s diary</h3>
         <label>
           Date
@@ -319,7 +319,7 @@ export default function TeacherDiary() {
               </button>
             ))}
           </div>
-          <label className="btn btn-secondary">
+          <label className="tw-btn tw-btn-secondary">
             {uploading ? 'Uploading…' : form.media.length ? 'Add more photos' : 'Upload photos'}
             <input
               type="file"
@@ -335,7 +335,7 @@ export default function TeacherDiary() {
           </label>
           <p className="hint">Up to 8 photos. They are stored on Cloudinary and shown to parents.</p>
         </div>
-        <button className="btn btn-primary" type="submit" disabled={busy || uploading}>
+        <button className="tw-btn tw-btn-primary" type="submit" disabled={busy || uploading}>
           {busy ? 'Posting…' : 'Post to parent diary'}
         </button>
       </form>

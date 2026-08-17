@@ -55,16 +55,16 @@ export default function TeacherAssignments() {
   };
 
   return (
-    <div className="split">
-      <div className="stack">
+    <div className="tw-split">
+      <div className="tw-page">
         <div>
           <h2>Assignments</h2>
-          <p className="lede">
+          <p className="tw-lede">
             Set class work. Parents of the matching students are notified when you post.
           </p>
         </div>
-        {error && <div className="alert">{error}</div>}
-        <div className="table-wrap">
+        {error && <div className="tw-alert">{error}</div>}
+        <div className="tw-table-wrap">
           <table>
             <thead>
               <tr>
@@ -79,13 +79,13 @@ export default function TeacherAssignments() {
                 <tr key={a._id}>
                   <td>
                     <strong>{a.title}</strong>
-                    <div className="muted">{a.subject || '—'}</div>
-                    {a.description ? <div className="muted">{a.description}</div> : null}
+                    <div className="tw-muted">{a.subject || '—'}</div>
+                    {a.description ? <div className="tw-muted">{a.description}</div> : null}
                   </td>
                   <td>{a.grade || 'All grades'}</td>
                   <td>{a.dueDate ? new Date(a.dueDate).toLocaleDateString() : '—'}</td>
                   <td>
-                    <button type="button" className="btn btn-ghost" onClick={() => remove(a._id)}>
+                    <button type="button" className="tw-btn tw-btn-ghost" onClick={() => remove(a._id)}>
                       Remove
                     </button>
                   </td>
@@ -93,7 +93,7 @@ export default function TeacherAssignments() {
               ))}
               {!assignments.length && (
                 <tr>
-                  <td colSpan={4} className="muted">
+                  <td colSpan={4} className="tw-muted">
                     No assignments yet.
                   </td>
                 </tr>
@@ -103,7 +103,7 @@ export default function TeacherAssignments() {
         </div>
       </div>
 
-      <form className="card-form" onSubmit={submit}>
+      <form className="tw-form" onSubmit={submit}>
         <h3>New assignment</h3>
         <label>
           Title
@@ -150,7 +150,7 @@ export default function TeacherAssignments() {
             placeholder="What should students do, and how should they submit?"
           />
         </label>
-        <button className="btn btn-primary" type="submit" disabled={busy}>
+        <button className="tw-btn tw-btn-primary" type="submit" disabled={busy}>
           {busy ? 'Posting…' : 'Post assignment'}
         </button>
       </form>

@@ -99,9 +99,11 @@ router.get('/overview', async (req, res) => {
     const present = marks.filter((m) => m.status === 'present').length;
     const absent = marks.filter((m) => m.status === 'absent').length;
     const late = marks.filter((m) => m.status === 'late').length;
+    const grades = [...new Set(kids.map((k) => k.grade).filter(Boolean))].sort();
 
     res.json({
       school,
+      grades,
       stats: {
         students: kids.length,
         markedToday: marks.length,
