@@ -52,6 +52,7 @@ export const NOTIFICATION_TYPES = {
   ASSIGNMENT: 'assignment',
   TEACHER_NOTE: 'teacher_note',
   ATTENDANCE_ALERT: 'attendance_alert',
+  DIARY: 'diary',
 };
 
 export const EDIT_SCOPES = {

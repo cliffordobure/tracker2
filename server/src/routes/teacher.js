@@ -6,6 +6,7 @@ import {
   AttendanceRecord,
   Assignment,
   TeacherNote,
+  DiaryEntry,
 } from '../models/index.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { createAndEmitNotifications, NOTIFICATION_TYPES } from '../services/notifications.js';
@@ -16,6 +17,8 @@ router.use(authenticate, requireRole('teacher'));
 
 const ATTENDANCE_STATUSES = ['present', 'absent', 'late', 'excused'];
 const NOTE_CATEGORIES = ['general', 'academic', 'behaviour', 'health', 'urgent'];
+const DIARY_LABELS = ['general', 'class', 'activity', 'meal', 'academic', 'health'];
+const MAX_DIARY_MEDIA = 8;
 
 function startOfDay(dateInput) {
   let d;
@@ -401,6 +404,170 @@ router.post('/notes', async (req, res) => {
     res.status(201).json({ note: populated });
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+function ymd(d) {
+  const x = d instanceof Date ? d : new Date(d);
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+}
+
+function monthRange(monthInput) {
+  const raw = String(monthInput || '');
+  const match = raw.match(/^(\d{4})-(\d{2})$/);
+  const now = new Date();
+  const year = match ? Number(match[1]) : now.getFullYear();
+  const month = match ? Number(match[2]) - 1 : now.getMonth();
+  const from = new Date(year, month, 1);
+  from.setHours(0, 0, 0, 0);
+  const to = new Date(year, month + 1, 0);
+  to.setHours(23, 59, 59, 999);
+  return { from, to };
+}
+
+function normalizeDiaryMedia(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((m) => m?.url)
+    .slice(0, MAX_DIARY_MEDIA)
+    .map((m) => ({
+      url: String(m.url),
+      publicId: String(m.publicId || ''),
+      resourceType: ['image', 'video', 'raw'].includes(m.resourceType) ? m.resourceType : 'image',
+      originalName: String(m.originalName || ''),
+    }));
+}
+
+function populateDiary(q) {
+  return q
+    .populate('teacherId', 'name')
+    .populate('kidIds', 'name grade');
+}
+
+async function audienceKids(schoolId, { kidIds, grade } = {}) {
+  if (Array.isArray(kidIds) && kidIds.length) {
+    return populateKids(Kid.find({ _id: { $in: kidIds }, schoolId, active: true }));
+  }
+  if (grade) {
+    return populateKids(Kid.find({ schoolId, grade, active: true }));
+  }
+  return populateKids(Kid.find({ schoolId, active: true }));
+}
+
+router.get('/diary', async (req, res) => {
+  try {
+    const { schoolId } = await teacherContext(req);
+    if (!schoolId) return res.json({ entries: [], dates: [] });
+
+    const filter = { schoolId, active: true };
+    if (req.query.date) {
+      filter.date = startOfDay(req.query.date);
+    } else {
+      const { from, to } = monthRange(req.query.month);
+      filter.date = { $gte: from, $lte: to };
+    }
+
+    const { from, to } = monthRange(req.query.month || req.query.date);
+    const [entries, monthEntries] = await Promise.all([
+      populateDiary(DiaryEntry.find(filter).sort({ date: -1, createdAt: -1 }).limit(120)),
+      DiaryEntry.find({ schoolId, active: true, date: { $gte: from, $lte: to } }).select('date'),
+    ]);
+
+    const dates = [...new Set(monthEntries.map((e) => ymd(e.date)))];
+    res.json({ entries, dates });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/diary', async (req, res) => {
+  try {
+    const { schoolId, teacher } = await teacherContext(req);
+    if (!schoolId) return res.status(400).json({ error: 'No school assigned to this teacher' });
+
+    const { title, body, label, grade, kidIds, date } = req.body || {};
+    if (!title?.trim()) return res.status(400).json({ error: 'title is required' });
+
+    const entry = await DiaryEntry.create({
+      schoolId,
+      teacherId: req.user.id,
+      date: startOfDay(date),
+      title: title.trim().slice(0, 160),
+      body: String(body || '').trim().slice(0, 4000),
+      label: DIARY_LABELS.includes(label) ? label : 'general',
+      grade: grade?.trim() || '',
+      kidIds: Array.isArray(kidIds) ? kidIds : [],
+      media: normalizeDiaryMedia(req.body.media),
+    });
+
+    const kids = await audienceKids(schoolId, { kidIds: entry.kidIds, grade: entry.grade });
+    const teacherName = teacher?.name || 'Teacher';
+    const photoNote = entry.media.length
+      ? ` ${entry.media.length} photo${entry.media.length === 1 ? '' : 's'} attached.`
+      : '';
+    const items = [];
+    for (const kid of kids) {
+      for (const parent of kid.parentIds || []) {
+        items.push({
+          userId: parent._id || parent,
+          type: NOTIFICATION_TYPES.DIARY,
+          title: `Class diary: ${entry.title}`,
+          body: `${teacherName} posted about ${kid.name}.${photoNote}`,
+          kidId: kid._id,
+        });
+      }
+    }
+    if (items.length) await createAndEmitNotifications(getIO(), items);
+
+    const populated = await populateDiary(DiaryEntry.findById(entry._id));
+    res.status(201).json({ entry: populated, notified: items.length });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.put('/diary/:id', async (req, res) => {
+  try {
+    const { schoolId } = await teacherContext(req);
+    const entry = await DiaryEntry.findOne({
+      _id: req.params.id,
+      schoolId,
+      teacherId: req.user.id,
+      active: true,
+    });
+    if (!entry) return res.status(404).json({ error: 'Diary entry not found' });
+
+    if (req.body.title !== undefined) entry.title = String(req.body.title || '').trim().slice(0, 160);
+    if (req.body.body !== undefined) entry.body = String(req.body.body || '').trim().slice(0, 4000);
+    if (DIARY_LABELS.includes(req.body.label)) entry.label = req.body.label;
+    if (req.body.grade !== undefined) entry.grade = String(req.body.grade || '').trim();
+    if (Array.isArray(req.body.kidIds)) entry.kidIds = req.body.kidIds;
+    if (req.body.date) entry.date = startOfDay(req.body.date);
+    if (req.body.media !== undefined) entry.media = normalizeDiaryMedia(req.body.media);
+    if (!entry.title) return res.status(400).json({ error: 'title is required' });
+    await entry.save();
+
+    const populated = await populateDiary(DiaryEntry.findById(entry._id));
+    res.json({ entry: populated });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete('/diary/:id', async (req, res) => {
+  try {
+    const { schoolId } = await teacherContext(req);
+    const entry = await DiaryEntry.findOne({
+      _id: req.params.id,
+      schoolId,
+      teacherId: req.user.id,
+    });
+    if (!entry) return res.status(404).json({ error: 'Diary entry not found' });
+    entry.active = false;
+    await entry.save();
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

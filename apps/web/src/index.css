@@ -1107,3 +1107,143 @@ th {
   vertical-align: middle;
   margin-right: 0.5rem;
 }
+
+.diary-layout {
+  display: grid;
+  gap: 1.5rem;
+}
+
+@media (min-width: 960px) {
+  .diary-layout {
+    grid-template-columns: 1.15fr 0.85fr;
+    align-items: start;
+  }
+}
+
+.diary-cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.diary-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.35rem;
+}
+
+.diary-cal-dow {
+  color: #64748b;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 0.35rem;
+}
+
+.diary-day {
+  aspect-ratio: 1;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.diary-day.has-entry {
+  background: #ffedd5;
+  color: #c2410c;
+}
+
+.diary-day.is-today {
+  box-shadow: inset 0 0 0 1.5px #0f766e;
+}
+
+.diary-day.is-selected {
+  background: #0f766e;
+  color: #fff;
+}
+
+.diary-card {
+  background: #fff;
+  border: 1px solid #e7ebef;
+  border-radius: 18px;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.diary-cover {
+  width: 100%;
+  height: 180px;
+  object-fit: cover;
+  display: block;
+}
+
+.diary-card-body {
+  padding: 1rem 1.1rem 0.85rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.diary-card-body h3 {
+  margin: 0.15rem 0 0;
+}
+
+.diary-card-body p {
+  margin: 0;
+  color: #475569;
+}
+
+.diary-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.diary-thumbs img,
+.diary-thumb-wrap img {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 10px;
+  display: block;
+}
+
+.diary-thumb-wrap {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.diary-more {
+  width: 56px;
+  height: 56px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: #0f172a;
+  color: #fff;
+  font-weight: 800;
+  font-size: 0.85rem;
+}
+
+.diary-kids {
+  border: 1px solid #e7ebef;
+  border-radius: 14px;
+  padding: 0.75rem 0.9rem;
+  margin: 0 0 0.85rem;
+}
+
+.diary-kids legend {
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.diary-kid-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+  margin: 0.25rem 0;
+}

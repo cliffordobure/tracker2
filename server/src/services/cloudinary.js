@@ -9,6 +9,7 @@ const FOLDERS = [
   'leave',
   'announcements',
   'attachments',
+  'diary',
   'general',
 ];
 

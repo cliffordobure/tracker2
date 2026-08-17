@@ -25,6 +25,7 @@ import TeacherRegister from './pages/teacher/TeacherRegister';
 import TeacherAssignments from './pages/teacher/TeacherAssignments';
 import TeacherNotes from './pages/teacher/TeacherNotes';
 import TeacherStudents from './pages/teacher/TeacherStudents';
+import TeacherDiary from './pages/teacher/TeacherDiary';
 import { homePathForRole } from './lib/roles';
 import './school-admin.css';
 
@@ -47,6 +48,7 @@ const superNav = [
 const teacherNav = [
   { to: '/teacher', label: 'Overview', end: true },
   { to: '/teacher/register', label: 'Register' },
+  { to: '/teacher/diary', label: 'Diary' },
   { to: '/teacher/assignments', label: 'Assignments' },
   { to: '/teacher/notes', label: 'Parent updates' },
   { to: '/teacher/students', label: 'Students' },
@@ -128,6 +130,7 @@ export default function App() {
       >
         <Route index element={<TeacherHome />} />
         <Route path="register" element={<TeacherRegister />} />
+        <Route path="diary" element={<TeacherDiary />} />
         <Route path="assignments" element={<TeacherAssignments />} />
         <Route path="notes" element={<TeacherNotes />} />
         <Route path="students" element={<TeacherStudents />} />

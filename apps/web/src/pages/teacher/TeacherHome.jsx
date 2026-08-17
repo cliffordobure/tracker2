@@ -28,7 +28,8 @@ export default function TeacherHome() {
         <p className="eyebrow">Teacher</p>
         <h2>{school?.name || 'Class workspace'}</h2>
         <p className="lede">
-          Mark the daily register, set assignments, and message parents about a student.
+          Mark the register, post the class diary with photos, set work, and message a parent
+          privately when needed.
         </p>
       </div>
 
@@ -84,6 +85,22 @@ export default function TeacherHome() {
         </div>
 
         <div className="stack">
+          <div className="panel">
+            <div className="panel-head">
+              <div>
+                <h2>Class diary</h2>
+                <p className="muted">Photos and the day’s story for parents</p>
+              </div>
+              <Link className="btn btn-secondary" to="/teacher/diary">
+                Open diary
+              </Link>
+            </div>
+            <p className="muted" style={{ margin: 0 }}>
+              Take or upload photos of the children, write a short update, and tag the class or
+              specific kids. Parents see only entries that include their child.
+            </p>
+          </div>
+
           <div className="panel">
             <div className="panel-head">
               <div>

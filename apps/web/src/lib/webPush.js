@@ -90,6 +90,8 @@ export function notificationTypeLabel(type) {
       return 'From teacher';
     case 'attendance_alert':
       return 'Attendance';
+    case 'diary':
+      return 'Class diary';
     default:
       return type || 'Alert';
   }

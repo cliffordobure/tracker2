@@ -13,6 +13,7 @@ import {
   Assignment,
   TeacherNote,
   AttendanceRecord,
+  DiaryEntry,
 } from '../models/index.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { getVapidPublicKey } from '../services/push.js';
@@ -58,18 +59,60 @@ function startOfDay(dateInput) {
   return d;
 }
 
+function ymd(d) {
+  const x = d instanceof Date ? d : new Date(d);
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+}
+
+function monthRange(monthInput) {
+  const raw = String(monthInput || '');
+  const match = raw.match(/^(\d{4})-(\d{2})$/);
+  const now = new Date();
+  const year = match ? Number(match[1]) : now.getFullYear();
+  const month = match ? Number(match[2]) - 1 : now.getMonth();
+  const from = new Date(year, month, 1);
+  from.setHours(0, 0, 0, 0);
+  const to = new Date(year, month + 1, 0);
+  to.setHours(23, 59, 59, 999);
+  return { from, to };
+}
+
+function parentDiaryMatch(kids, schoolIds) {
+  const kidIds = kids.map((k) => k._id);
+  const grades = [...new Set(kids.map((k) => k.grade).filter(Boolean))];
+  return {
+    schoolId: { $in: schoolIds },
+    active: true,
+    $or: [
+      { kidIds: { $in: kidIds } },
+      {
+        $and: [
+          { $or: [{ kidIds: { $exists: false } }, { kidIds: { $size: 0 } }] },
+          { grade: { $in: grades } },
+        ],
+      },
+      {
+        $and: [
+          { $or: [{ kidIds: { $exists: false } }, { kidIds: { $size: 0 } }] },
+          { $or: [{ grade: '' }, { grade: null }, { grade: { $exists: false } }] },
+        ],
+      },
+    ],
+  };
+}
+
 router.get('/school', async (req, res) => {
   try {
     const kids = await Kid.find({ parentIds: req.user.id, active: true });
     const kidIds = kids.map((k) => k._id);
     if (!kidIds.length) {
-      return res.json({ attendance: [], assignments: [], notes: [] });
+      return res.json({ attendance: [], assignments: [], notes: [], diary: [] });
     }
 
     const day = startOfDay(req.query.date);
     const schoolIds = [...new Set(kids.map((k) => k.schoolId?.toString()).filter(Boolean))];
 
-    const [marks, assignments, notes] = await Promise.all([
+    const [marks, assignments, notes, diary] = await Promise.all([
       AttendanceRecord.find({ kidId: { $in: kidIds }, date: day }).populate('kidId', 'name grade'),
       Assignment.find({ schoolId: { $in: schoolIds }, active: true })
         .populate('teacherId', 'name')
@@ -78,6 +121,14 @@ router.get('/school', async (req, res) => {
       TeacherNote.find({ kidId: { $in: kidIds } })
         .populate('kidId', 'name grade')
         .populate('teacherId', 'name')
+        .sort({ createdAt: -1 })
+        .limit(40),
+      DiaryEntry.find({
+        ...parentDiaryMatch(kids, schoolIds),
+        date: day,
+      })
+        .populate('teacherId', 'name')
+        .populate('kidIds', 'name grade')
         .sort({ createdAt: -1 })
         .limit(40),
     ]);
@@ -94,7 +145,39 @@ router.get('/school', async (req, res) => {
       attendance: marks,
       assignments: relevantAssignments,
       notes,
+      diary,
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/diary', async (req, res) => {
+  try {
+    const kids = await Kid.find({ parentIds: req.user.id, active: true });
+    if (!kids.length) return res.json({ entries: [], dates: [] });
+
+    const schoolIds = [...new Set(kids.map((k) => k.schoolId?.toString()).filter(Boolean))];
+    const match = parentDiaryMatch(kids, schoolIds);
+    const { from, to } = monthRange(req.query.month || req.query.date);
+
+    if (req.query.date) match.date = startOfDay(req.query.date);
+    else match.date = { $gte: from, $lte: to };
+
+    const [entries, monthEntries] = await Promise.all([
+      DiaryEntry.find(match)
+        .populate('teacherId', 'name')
+        .populate('kidIds', 'name grade')
+        .sort({ date: -1, createdAt: -1 })
+        .limit(120),
+      DiaryEntry.find({
+        ...parentDiaryMatch(kids, schoolIds),
+        date: { $gte: from, $lte: to },
+      }).select('date'),
+    ]);
+
+    const dates = [...new Set(monthEntries.map((e) => ymd(e.date)))];
+    res.json({ entries, dates });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -31,7 +31,7 @@ export default function ParentHome() {
   const [lateNote, setLateNote] = useState('');
   const [lateKidId, setLateKidId] = useState('');
   const [lateBusy, setLateBusy] = useState(false);
-  const [schoolFeed, setSchoolFeed] = useState({ attendance: [], assignments: [], notes: [] });
+  const [schoolFeed, setSchoolFeed] = useState({ attendance: [], assignments: [], notes: [], diary: [] });
   /** { [kidId]: { durationSec, stopName, purpose, label } } */
   const [etas, setEtas] = useState({});
   const selectedRef = useRef(null);
@@ -56,7 +56,7 @@ export default function ParentHome() {
       api('/parent/kids'),
       api('/parent/trips/active'),
       api('/parent/notifications'),
-      api('/parent/school').catch(() => ({ attendance: [], assignments: [], notes: [] })),
+      api('/parent/school').catch(() => ({ attendance: [], assignments: [], notes: [], diary: [] })),
     ]);
     setKids(k.kids);
     setActive(a.trips);
@@ -65,6 +65,7 @@ export default function ParentHome() {
       attendance: s.attendance || [],
       assignments: s.assignments || [],
       notes: s.notes || [],
+      diary: s.diary || [],
     });
     applyTrip(a.trips[0] || null);
   }, [applyTrip]);
@@ -571,6 +572,32 @@ export default function ParentHome() {
                 </li>
               ))}
               {!schoolFeed.assignments.length && <li className="muted">No assignments posted.</li>}
+            </ul>
+
+            <h2>Class diary</h2>
+            <ul className="notif-list">
+              {(schoolFeed.diary || []).map((e) => (
+                <li key={e._id}>
+                  <span className="pill">{e.label || 'diary'}</span>
+                  <strong>{e.title}</strong>
+                  {e.body ? <p>{e.body}</p> : null}
+                  {e.media?.length ? (
+                    <div className="diary-thumbs" style={{ marginTop: '0.6rem' }}>
+                      {e.media.slice(0, 4).map((m) => (
+                        <img key={m.publicId || m.url} src={m.url} alt="" />
+                      ))}
+                    </div>
+                  ) : null}
+                  <small>
+                    {e.teacherId?.name || 'Teacher'}
+                    {e.grade ? ` · ${e.grade}` : ''}
+                    {e.createdAt ? ` · ${new Date(e.createdAt).toLocaleString()}` : ''}
+                  </small>
+                </li>
+              ))}
+              {!(schoolFeed.diary || []).length && (
+                <li className="muted">No class diary for today yet.</li>
+              )}
             </ul>
 
             <h2 style={{ marginTop: '1.25rem' }}>From the teacher</h2>

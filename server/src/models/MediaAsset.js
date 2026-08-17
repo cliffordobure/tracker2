@@ -6,7 +6,7 @@ const mediaAssetSchema = new mongoose.Schema(
     uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     folder: {
       type: String,
-      enum: ['kids', 'drivers', 'users', 'schools', 'leave', 'announcements', 'attachments', 'general'],
+      enum: ['kids', 'drivers', 'users', 'schools', 'leave', 'announcements', 'attachments', 'diary', 'general'],
       default: 'general',
       index: true,
     },

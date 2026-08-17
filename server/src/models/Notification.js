@@ -16,6 +16,7 @@ const notificationSchema = new mongoose.Schema(
         'assignment',
         'teacher_note',
         'attendance_alert',
+        'diary',
       ],
       required: true,
     },
