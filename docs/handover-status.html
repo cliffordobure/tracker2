@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>School Bus Tracking System — Handover Status Report</title>
+  <style>
+    @page { size: A4; margin: 18mm 16mm 20mm 16mm; }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      font-family: "Segoe UI", Calibri, Arial, sans-serif;
+      color: #12231f;
+      font-size: 11pt;
+      line-height: 1.45;
+    }
+    h1 { font-size: 22pt; margin: 0 0 6px; letter-spacing: -0.3px; }
+    h2 {
+      font-size: 14pt;
+      margin: 28px 0 10px;
+      padding-bottom: 4px;
+      border-bottom: 2px solid #0c6b57;
+      color: #0c6b57;
+      page-break-after: avoid;
+    }
+    h3 { font-size: 12pt; margin: 16px 0 8px; color: #1a2e29; page-break-after: avoid; }
+    p { margin: 0 0 10px; }
+    .lede { color: #4a5c57; font-size: 11pt; }
+    .meta { color: #6b7c77; font-size: 9.5pt; margin-bottom: 18px; }
+    .kpis {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin: 16px 0 8px;
+    }
+    .kpi {
+      border: 1px solid #d7e3df;
+      padding: 10px 12px;
+      background: #f7faf9;
+    }
+    .kpi strong { display: block; font-size: 20pt; line-height: 1.1; }
+    .kpi span { font-size: 8.5pt; color: #5b6d68; text-transform: uppercase; letter-spacing: 0.04em; }
+    .kpi.done strong { color: #0c6b57; }
+    .kpi.partial strong { color: #9a6b12; }
+    .kpi.missing strong { color: #a33b3b; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 9.5pt;
+      margin: 0 0 8px;
+    }
+    th, td {
+      border: 1px solid #d7e3df;
+      padding: 6px 8px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: #0c6b57;
+      color: #fff;
+      font-weight: 600;
+      font-size: 8.5pt;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    tr { page-break-inside: avoid; }
+    .badge {
+      display: inline-block;
+      font-size: 8pt;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 2px 6px;
+    }
+    .badge.done { background: #d7efe6; color: #0c6b57; }
+    .badge.partial { background: #f7e7c4; color: #7a5410; }
+    .badge.missing { background: #f6d6d6; color: #8b2e2e; }
+    .badge.pass { background: #d7efe6; color: #0c6b57; }
+    .badge.gap { background: #f7e7c4; color: #7a5410; }
+    .badge.fail { background: #f6d6d6; color: #8b2e2e; }
+    ol.todo { margin: 0; padding-left: 20px; }
+    ol.todo li { margin: 0 0 8px; page-break-inside: avoid; }
+    .note {
+      background: #f3f7f6;
+      border-left: 3px solid #0c6b57;
+      padding: 8px 12px;
+      font-size: 10pt;
+      margin: 10px 0 16px;
+    }
+    .warn {
+      background: #fbf6ea;
+      border-left: 3px solid #c47a2c;
+      padding: 8px 12px;
+      font-size: 10pt;
+      margin: 10px 0 16px;
+    }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .muted { color: #5b6d68; }
+    .footer {
+      margin-top: 24px;
+      font-size: 8.5pt;
+      color: #6b7c77;
+      border-top: 1px solid #d7e3df;
+      padding-top: 8px;
+    }
+    .num { width: 42px; white-space: nowrap; }
+    .status { width: 78px; }
+  </style>
+</head>
+<body>
+  <h1>School Bus Tracking System</h1>
+  <p class="lede"><strong>Developer handover status report</strong> — Steps 1–52, Live Tracking, Admin navigation, scheduling, Driver App, and Reports &amp; Analytics.</p>
+  <p class="meta">Audit date: 17 August 2026 &nbsp;·&nbsp; Method: code review plus live API tests on localhost:4001 &nbsp;·&nbsp; Confirmed on TRIP-1005 (bus KDA 123A, driver Daniel Kamau)</p>
+
+  <div class="kpis">
+    <div class="kpi"><strong>52</strong><span>Steps reviewed</span></div>
+    <div class="kpi done"><strong>24</strong><span>Done / working</span></div>
+    <div class="kpi partial"><strong>21</strong><span>Partial</span></div>
+    <div class="kpi missing"><strong>7</strong><span>Missing</span></div>
+  </div>
+
+  <div class="note">
+    The core trip loop is working: Recurring Schedule → Trip Instance (Trip ID) → Driver start → GPS → manual check-in → manual check-out → trip complete → Live Tracking while active → history after execution. TRIP-1005 was started, checked in/out, and completed during this audit, so it will not appear as startable in the Driver App for the rest of 17 August 2026.
+  </div>
+
+  <h2>1. What is done (24 steps)</h2>
+  <p>These items are implemented and were confirmed in code and/or live tests.</p>
+  <table>
+    <thead>
+      <tr><th class="num">Step</th><th>Item</th><th>Evidence</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>1</td><td>Project foundation &amp; architecture</td><td>Monorepo, MongoDB, Express, JWT, Socket.IO, Vite admin/driver/parent apps. API health OK.</td></tr>
+      <tr><td>2</td><td>Authentication &amp; login</td><td>Login/logout/JWT tested for school_admin, driver, parent, super_admin, teacher. Invalid credentials return 401.</td></tr>
+      <tr><td>4</td><td>School / organization management</td><td>School profile CRUD. Super admin onboards schools; school admin edits name, address, and gate location.</td></tr>
+      <tr><td>8</td><td>Student management</td><td>Create, edit, delete, and onboard wizard. 3 students in current data.</td></tr>
+      <tr><td>9</td><td>Parent / guardian management</td><td>Parent CRUD. 3/3 students linked to parents.</td></tr>
+      <tr><td>11</td><td>Bus management</td><td>Plate, label, seats, status. Bus KDA 123A live-tested.</td></tr>
+      <tr><td>12</td><td>Driver management</td><td>Driver users, profiles, contact, bus/route assignment. Daniel Kamau live-tested.</td></tr>
+      <tr><td>13</td><td>Route management</td><td>Create/edit/activate routes. Route A — Pipeline live-tested.</td></tr>
+      <tr><td>15</td><td>Student-to-route assignment</td><td>3/3 students assigned to a route.</td></tr>
+      <tr><td>16</td><td>Driver-to-route assignment</td><td>DriverProfile.assignedRouteIds plus per-schedule driverId.</td></tr>
+      <tr><td>20</td><td>Live GPS tracking foundation</td><td>Location pings stored. lat/lng/heading/speed tested on TRIP-1005.</td></tr>
+      <tr><td>21</td><td>Map &amp; vehicle tracking</td><td>Admin Live Tracking map with auto-refresh. Active bus showed plate, driver, route, Trip ID.</td></tr>
+      <tr><td>22</td><td>Trip management foundation</td><td>Trip instances with status, route, bus, driver, and Trip ID (TRIP-nnnn).</td></tr>
+      <tr><td>23</td><td>Driver App (foundation)</td><td>Web + APK. Today’s instances, start/end, GPS, check-in/out.</td></tr>
+      <tr><td>24</td><td>Trip start</td><td>TRIP-1005 started; start GPS stored. Cancelled, completed, and already-active trips cannot start.</td></tr>
+      <tr><td>25</td><td>Trip stop / end</td><td>End GPS stored. Complete blocked while a student was still checked in (HTTP 409).</td></tr>
+      <tr><td>26</td><td>Manual student check-in</td><td>Pickup stored against TRIP-1005. Live count went to in=1.</td></tr>
+      <tr><td>27</td><td>Manual student check-out</td><td>Drop-off stored against TRIP-1005, then trip completed.</td></tr>
+      <tr><td>29</td><td>Parent transport visibility</td><td>Parent sees linked child, live trip API, trip history, and notifications.</td></tr>
+      <tr><td>36</td><td>Parent / student notifications foundation</td><td>trip_started, kid_picked_up, kid_dropped_off, trip_completed emitted after TRIP-1005.</td></tr>
+      <tr><td>39</td><td>Security &amp; access control</td><td>Driver/parent blocked from admin (403). Admin blocked from driver/parent routes.</td></tr>
+      <tr><td>45</td><td>Deployment &amp; production configuration</td><td>Render API + Vercel web + env/JWT/Mongo/Mapbox. Remote /health OK.</td></tr>
+      <tr><td>46</td><td>Core system &amp; Driver App handover</td><td>Foundation for Steps 47–52 is in place.</td></tr>
+      <tr><td>49</td><td>Student &amp; parent assignment</td><td>parentIds on students. Parent visibility confirmed.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>2. What is partial (21 steps)</h2>
+  <p>These exist in some form, but they do not fully match the handover document.</p>
+  <table>
+    <thead>
+      <tr><th class="num">Step</th><th>Item</th><th>What works</th><th>What is still incomplete</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>3</td><td>User &amp; role management</td><td>Roles exist: super_admin, school_admin, driver, parent, teacher.</td><td>No Users &amp; Roles screen or permission matrix. /admin/users is 404. Teacher API exists with no web route.</td></tr>
+      <tr><td>10</td><td>Student transport profile</td><td>Route and homeStopId fields exist.</td><td>Only 1 of 3 students has a pickup stop set.</td></tr>
+      <tr><td>14</td><td>Route stop management</td><td>Stops can be created under a route, with order and map point.</td><td>No Transport → Stops menu and no /admin/stops list.</td></tr>
+      <tr><td>17</td><td>Bus-to-route assignment</td><td>Bus is assigned on the schedule / trip instance.</td><td>No standing bus-to-route assignment record.</td></tr>
+      <tr><td>18</td><td>Pickup / drop-off configuration</td><td>One home stop per student.</td><td>No separate pickup vs drop-off stop.</td></tr>
+      <tr><td>19</td><td>Transport dashboard</td><td>School dashboard has trip charts and counts.</td><td>Not a dedicated transport operations dashboard.</td></tr>
+      <tr><td>28</td><td>Student attendance / trip history</td><td>TripEvent records store check-in/out against the Trip ID.</td><td>No dedicated attendance report or per-student status page.</td></tr>
+      <tr><td>30</td><td>Transport notifications</td><td>Parent and driver in-app + push notifications work.</td><td>No Admin Notifications page. Header badge shows a fake count of 12.</td></tr>
+      <tr><td>31</td><td>Transport alerts</td><td>Driver approach/arrive toasts and late-pickup alerts.</td><td>No admin operational-alerts module.</td></tr>
+      <tr><td>32</td><td>Admin transport controls</td><td>Buses, drivers, routes, schedules, instances, cancel/override work.</td><td>Stops, campuses, and users are not as specified.</td></tr>
+      <tr><td>33</td><td>Student transport status</td><td>Live Tracking shows check-in/out counts.</td><td>No student-by-student status screen for the active trip.</td></tr>
+      <tr><td>34</td><td>Trip tracking &amp; history</td><td>Instances, events, and GPS are retained.</td><td>No dedicated history/report view beyond the instances table.</td></tr>
+      <tr><td>35</td><td>Driver trip history</td><td>/driver/trips/completed returned 15 trips.</td><td>Driver App has no history list UI.</td></tr>
+      <tr><td>37</td><td>Transport data &amp; API services</td><td>Core APIs for students, parents, buses, drivers, routes, trips, GPS, attendance work.</td><td>Missing campuses, classes, reports, audit, users, standalone stops APIs.</td></tr>
+      <tr><td>38</td><td>Database &amp; relationships</td><td>School, User, Kid, Bus, Route, Stop, Schedule, Trip, Event, GPS, Holiday, Exception exist.</td><td>No Campus, Class, AcademicYear, or AuditLog entities.</td></tr>
+      <tr><td>42</td><td>Operational search &amp; filtering</td><td>Trip Instances filter by date, status, and route.</td><td>Topbar “Search anything” is unused local state.</td></tr>
+      <tr><td>43</td><td>Production notifications &amp; error handling</td><td>API validation and UI toasts exist.</td><td>Fake admin notification/message counts. CORS throws on unknown origins.</td></tr>
+      <tr><td>44</td><td>Testing &amp; integration</td><td>This audit live-tested the scheduled Trip ID flow.</td><td>smoke-test.js still starts an ad-hoc trip, not a scheduled instance.</td></tr>
+      <tr><td>48</td><td>Route, stop, bus &amp; driver management</td><td>Create/manage routes, buses, and drivers works.</td><td>Stops are nested inside Routes; no dedicated Stops page.</td></tr>
+      <tr><td>50</td><td>Trip scheduling &amp; instances</td><td>ONE_TIME, EVERY_DAY, WEEKDAYS, CUSTOM_DAYS; morning/afternoon/evening; exceptions; holidays; edit scopes; unique Trip IDs. Same-period overlap blocked (tested).</td><td>Conflict is by whole period, not time window, so a bus cannot run two morning trips at different times. No duplicate. No scheduling audit history. Data currently only has morning trips.</td></tr>
+      <tr><td>51</td><td>Driver App trip execution</td><td>Today’s Trip Instances, Start {period} trip, GPS, check-in/out, assigned-driver gate, open-check-in block — all tested.</td><td>Ad-hoc Start morning/evening still bypasses Trip IDs. Admin cannot operate a trip (403). No completed-history UI. Only one active trip per driver.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>3. What is missing (7 steps)</h2>
+  <p>These have no working module. APIs return 404.</p>
+  <table>
+    <thead>
+      <tr><th class="num">Step</th><th>Item</th><th>Current state</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>5</td><td>Campus management</td><td>No Campus model, API, or UI. /admin/campuses is 404. School is a single location.</td></tr>
+      <tr><td>6</td><td>Academic year / term management</td><td>No AcademicYear or Term entity. /admin/academic-years is 404.</td></tr>
+      <tr><td>7</td><td>Class / grade management</td><td>Classes nav item is Coming Soon. Grade is free text on the student (Grade 4, Grade 3, 1).</td></tr>
+      <tr><td>40</td><td>Audit &amp; activity logging</td><td>No AuditLog model, API, or UI. /admin/audit-logs is 404.</td></tr>
+      <tr><td>41</td><td>Admin reporting foundation</td><td>No reports routes or pages. Only leave-request CSV exists.</td></tr>
+      <tr><td>47</td><td>Student, class &amp; campus assignment</td><td>No class or campus entities to assign. Grade is a string field only.</td></tr>
+      <tr><td>52</td><td>Production reports &amp; analytics</td><td>/admin/reports and /admin/reports/analytics are 404. No executive dashboard, trip instance report, attendance report, performance reports, or trip CSV.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>4. What still needs to be done</h2>
+  <p>Build list, ordered by how blocking each item is against the handover document. Start at the top.</p>
+  <ol class="todo">
+    <li><strong>Step 52 — Reports &amp; Analytics.</strong> Executive dashboard (scheduled, completed, in-progress, cancelled, pending, average duration, start delay, attendance). Trip Instance report. Student attendance per Trip ID with timestamps/locations. Driver, bus, and route performance. Recurring schedule performance and exceptions. Audit history for scheduling. CSV exports. Read-only — must not modify operational records.</li>
+    <li><strong>Admin navigation (spec section 4).</strong> Required order: Dashboard → Students → Parents → Classes → Campuses → Transport → Live Tracking → Reports &amp; Analytics → Notifications → Users &amp; Roles → Settings → Audit Logs. Transport submenu: Buses, Drivers, Routes, Stops, Trip Scheduling, Trip Instances. Live Tracking must be a top-level item, not nested under Transport.</li>
+    <li><strong>Steps 5 + 47 — Campuses.</strong> Create/manage campuses and assign students, routes, and trip instances to the correct campus.</li>
+    <li><strong>Steps 7 + 47 — Classes.</strong> Class/grade entities (not free-text grade) and student-to-class assignment for scheduling and reporting.</li>
+    <li><strong>Step 6 — Academic year / term.</strong> Configure academic years, terms, and operating periods.</li>
+    <li><strong>Step 40 — Audit logs.</strong> Record important administrative and operational changes, including scheduling edits, with an Admin Audit Logs screen.</li>
+    <li><strong>Step 3 — Users &amp; Roles.</strong> Admin screen to create users, assign roles, and manage permissions. Add a teacher web route or drop the unused teacher API from the product surface.</li>
+    <li><strong>Step 30 — Admin Notifications.</strong> Real notifications page for transport events. Remove fake header badges (12 notifications / 4 messages).</li>
+    <li><strong>Step 14 — Dedicated Stops page.</strong> Transport → Stops: create, order, assign to routes.</li>
+    <li><strong>Step 50 — Time-window conflicts.</strong> Allow a bus to run multiple morning (or afternoon/evening) trips when times do not overlap. Today the conflict check blocks any second trip in the same period.</li>
+    <li><strong>Step 50 — Duplicate and schedule audit.</strong> Duplicate a recurring schedule. Keep an audit history of schedule changes. Historical completed trips must continue not to be silently rewritten.</li>
+    <li><strong>Step 18 — Separate pickup and drop-off stops.</strong> Configure each student’s pickup stop and drop-off stop independently. Also set home stops for the 2 of 3 students currently missing one.</li>
+    <li><strong>Steps 35 + 51 — Driver trip history UI.</strong> Show assigned and completed trips in the Driver App (API already returns completed trips).</li>
+    <li><strong>Step 51 — Driver App alignment.</strong> Remove ad-hoc Start morning / Start evening that creates trips without a scheduled Trip ID. Allow authorized admin roles to operate a trip. Keep Start/End Morning, Afternoon, and Evening controls tied to the correct Trip ID.</li>
+    <li><strong>Step 42 — Operational search.</strong> Wire the topbar search so it actually filters students, parents, routes, buses, drivers, and trips.</li>
+    <li><strong>Step 2 — Password change / reset.</strong> Self-service password change. Admins can already set a password on create/edit.</li>
+    <li><strong>Step 41 / 28 / 33 / 34 — Reporting data surfaces.</strong> Student attendance per Trip ID, trip history report, and student transport status for the applicable trip (feeds Step 52).</li>
+    <li><strong>Step 44 — Update smoke tests.</strong> Replace ad-hoc trip start with the scheduled Trip ID flow used in production.</li>
+  </ol>
+
+  <h2>5. Live tests run on 17 August 2026</h2>
+  <table>
+    <thead>
+      <tr><th>Check</th><th class="status">Result</th><th>Detail</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>API health</td><td><span class="badge pass">Pass</span></td><td>Local API on :4001 and Render production both returned ok</td></tr>
+      <tr><td>Login — 5 roles</td><td><span class="badge pass">Pass</span></td><td>school_admin, driver, parent, super_admin, teacher</td></tr>
+      <tr><td>Invalid password</td><td><span class="badge pass">Pass</span></td><td>401</td></tr>
+      <tr><td>RBAC walls</td><td><span class="badge pass">Pass</span></td><td>Driver/parent cannot hit admin; admin cannot hit driver/parent APIs</td></tr>
+      <tr><td>CRUD modules</td><td><span class="badge pass">Pass</span></td><td>Dashboard, school, students, parents, drivers, buses, routes, schedules, instances, holidays, leave, noticeboard</td></tr>
+      <tr><td>Same-period conflict</td><td><span class="badge pass">Pass</span></td><td>Second morning trip for KDA 123A / Daniel created 0 instances, 1 conflict</td></tr>
+      <tr><td>Start TRIP-1005</td><td><span class="badge pass">Pass</span></td><td>Status active; start GPS stored</td></tr>
+      <tr><td>Live map while active</td><td><span class="badge pass">Pass</span></td><td>KDA 123A, Daniel Kamau, morning, to school, Route A; in=0 then in=1</td></tr>
+      <tr><td>GPS ping</td><td><span class="badge pass">Pass</span></td><td>lat/lng/heading/speed persisted</td></tr>
+      <tr><td>Check-in / check-out</td><td><span class="badge pass">Pass</span></td><td>picked_up then dropped_off on that Trip ID</td></tr>
+      <tr><td>Block end with open check-in</td><td><span class="badge pass">Pass</span></td><td>409 Cannot complete trip while students are still checked in</td></tr>
+      <tr><td>End trip + leave live map</td><td><span class="badge pass">Pass</span></td><td>Completed; live buses = 0; restart rejected with 400</td></tr>
+      <tr><td>Parent notifications</td><td><span class="badge pass">Pass</span></td><td>trip_started, kid_picked_up, kid_dropped_off, trip_completed</td></tr>
+      <tr><td>Campuses / classes / reports / audit / users</td><td><span class="badge fail">Missing</span></td><td>All 404</td></tr>
+      <tr><td>Admin start trip</td><td><span class="badge gap">Gap</span></td><td>403 — spec allows authorized admin roles; code is driver-only</td></tr>
+    </tbody>
+  </table>
+
+  <h2>6. Admin navigation — required vs current</h2>
+  <div class="grid2">
+    <div>
+      <h3>Required</h3>
+      <table>
+        <thead><tr><th class="num">#</th><th>Menu item</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>Dashboard</td></tr>
+          <tr><td>2</td><td>Students</td></tr>
+          <tr><td>3</td><td>Parents</td></tr>
+          <tr><td>4</td><td>Classes</td></tr>
+          <tr><td>5</td><td>Campuses</td></tr>
+          <tr><td>6</td><td>Transport</td></tr>
+          <tr><td>7</td><td>Live Tracking (top-level)</td></tr>
+          <tr><td>8</td><td>Reports &amp; Analytics</td></tr>
+          <tr><td>9</td><td>Notifications</td></tr>
+          <tr><td>10</td><td>Users &amp; Roles</td></tr>
+          <tr><td>11</td><td>Settings</td></tr>
+          <tr><td>12</td><td>Audit Logs</td></tr>
+        </tbody>
+      </table>
+      <p class="muted">Transport submenu: Buses · Drivers · Routes · Stops · Trip Scheduling · Trip Instances</p>
+    </div>
+    <div>
+      <h3>Current</h3>
+      <table>
+        <thead><tr><th class="num">#</th><th>Menu item</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>Dashboard</td></tr>
+          <tr><td>2</td><td>School</td></tr>
+          <tr><td>3</td><td>Students</td></tr>
+          <tr><td>4</td><td>Parents</td></tr>
+          <tr><td>5</td><td>Staff</td></tr>
+          <tr><td>6</td><td>Classes (coming soon)</td></tr>
+          <tr><td>7</td><td>Subjects / Examinations / Assignments (coming soon)</td></tr>
+          <tr><td>8</td><td>Attendance / Leave / Bulk attendance</td></tr>
+          <tr><td>9</td><td>Noticeboard / Messages</td></tr>
+          <tr><td>10</td><td>Transport (includes Live Tracking)</td></tr>
+        </tbody>
+      </table>
+      <p class="muted">Transport submenu: Routes · Drivers · Vehicles · Trip Scheduling · Trip Instances · Live Tracking (should be top-level)</p>
+    </div>
+  </div>
+  <div class="warn">
+    Live Tracking is in the wrong place. The spec requires a dedicated top-level Admin menu item, separate from Transport scheduling and Reports &amp; Analytics.
+  </div>
+
+  <h2>7. Recommended first implementation slice</h2>
+  <p>Start with <strong>Reports &amp; Analytics (Step 52)</strong> and <strong>moving Live Tracking to a top-level menu</strong>. Those are specified as production surfaces: one is entirely absent, the other is misplaced.</p>
+
+  <p class="footer">
+    SchoolKids Tracker — handover status report · 17 August 2026 · 52 steps: 24 done, 21 partial, 7 missing.
+  </p>
+</body>
+</html>

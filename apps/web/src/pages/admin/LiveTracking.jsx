@@ -19,7 +19,7 @@ function tripLabel(t) {
   return t.busId?.label || t.busId?.plate || 'Bus';
 }
 
-export default function LiveTracking() {
+export default function LiveTracking({ endpoint = '/admin/live-tracking' } = {}) {
   const [buses, setBuses] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [error, setError] = useState('');
@@ -34,13 +34,13 @@ export default function LiveTracking() {
 
   const load = useCallback(async () => {
     try {
-      const data = await api('/admin/live-tracking');
+      const data = await api(endpoint);
       setBuses(data.buses || []);
       setError('');
     } catch (err) {
       setError(err.message);
     }
-  }, []);
+  }, [endpoint]);
 
   useEffect(() => {
     load();

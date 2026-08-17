@@ -20,6 +20,11 @@ import Noticeboard from './pages/admin/Noticeboard';
 import ComingSoon from './pages/admin/ComingSoon';
 import DriverHome from './pages/driver/DriverHome';
 import ParentHome from './pages/parent/ParentHome';
+import TeacherHome from './pages/teacher/TeacherHome';
+import TeacherLive from './pages/teacher/TeacherLive';
+import TeacherStudents from './pages/teacher/TeacherStudents';
+import TeacherTrips from './pages/teacher/TeacherTrips';
+import TeacherNoticeboard from './pages/teacher/TeacherNoticeboard';
 import { homePathForRole } from './lib/roles';
 import './school-admin.css';
 
@@ -37,6 +42,14 @@ function Protected({ roles, children }) {
 const superNav = [
   { to: '/super-admin', label: 'Dashboard', end: true },
   { to: '/super-admin/schools', label: 'Schools' },
+];
+
+const teacherNav = [
+  { to: '/teacher', label: 'Overview', end: true },
+  { to: '/teacher/live', label: 'Live buses' },
+  { to: '/teacher/students', label: 'Students' },
+  { to: '/teacher/trips', label: "Today's trips" },
+  { to: '/teacher/noticeboard', label: 'Noticeboard' },
 ];
 
 export default function App() {
@@ -103,6 +116,21 @@ export default function App() {
         }
       >
         <Route index element={<ParentHome />} />
+      </Route>
+
+      <Route
+        path="/teacher"
+        element={
+          <Protected roles={['teacher']}>
+            <Layout navItems={teacherNav} title="Teacher" />
+          </Protected>
+        }
+      >
+        <Route index element={<TeacherHome />} />
+        <Route path="live" element={<TeacherLive />} />
+        <Route path="students" element={<TeacherStudents />} />
+        <Route path="trips" element={<TeacherTrips />} />
+        <Route path="noticeboard" element={<TeacherNoticeboard />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

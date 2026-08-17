@@ -868,6 +868,36 @@
   color: #b91c1c;
 }
 
+.pill.status-completed {
+  background: rgba(15, 23, 42, 0.08);
+  color: #334155;
+}
+
+.pill.status-on_bus {
+  background: rgba(12, 107, 87, 0.15);
+  color: var(--sa-accent-deep, #0c6b57);
+}
+
+.pill.status-arrived {
+  background: rgba(29, 78, 216, 0.12);
+  color: #1d4ed8;
+}
+
+.pill.status-waiting {
+  background: rgba(196, 122, 44, 0.14);
+  color: #9a6b12;
+}
+
+.pill.status-dropped_off {
+  background: rgba(12, 107, 87, 0.12);
+  color: #0c6b57;
+}
+
+.pill.status-not_scheduled {
+  background: rgba(15, 23, 42, 0.06);
+  color: #64748b;
+}
+
 .sa-shell--live-map .sa-topbar {
   padding-bottom: 0.35rem;
 }

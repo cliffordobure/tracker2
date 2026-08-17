@@ -37,7 +37,7 @@ export default function Login() {
           <h1>Know where they are, from gate to home.</h1>
           <p className="lede">
             Super admins onboard schools. School admins manage buses, routes, students, and daily
-            dispatch — parents track the ride live.
+            dispatch. Teachers see live arrivals. Parents track the ride live.
           </p>
         </div>
         <form className="login-form card-form" onSubmit={onSubmit}>
@@ -60,7 +60,8 @@ export default function Login() {
             {submitting ? 'Signing in…' : 'Sign in'}
           </button>
           <p className="hint">
-            Demo: admin@ / schooladmin@ / driver@ / parent1@ schooltracker.test — password123
+            Demo: admin@ / schooladmin@ / teacher@ / driver@ / parent1@ schooltracker.test —
+            password123
           </p>
         </form>
       </div>
