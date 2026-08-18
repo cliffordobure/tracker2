@@ -2351,16 +2351,25 @@ function attachmentSizeLabel(bytes) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function isDiaryImageMedia(m) {
+  const type = String(m?.resourceType || '').toLowerCase();
+  if (type === 'image') return true;
+  if (type === 'video' || type === 'raw') return false;
+  const hay = `${m?.url || ''} ${m?.originalName || ''}`;
+  return /\.(jpe?g|png|gif|webp|heic|bmp)($|\?)/i.test(hay) || /\/image\/upload\//i.test(hay);
+}
+
 function serializeDiaryAttachments(entry) {
   return (entry.media || [])
-    .filter((m) => m && (m.url || m.originalName))
+    .filter((m) => m && m.url)
     .map((m) => {
       const name = m.originalName || (String(m.url || '').split('/').pop() || 'Attachment');
-      const kind = /\.pdf($|\?)/i.test(name) || m.resourceType === 'raw' ? 'pdf' : m.resourceType || 'file';
+      const image = isDiaryImageMedia(m);
+      const pdf = !image && (/\.pdf($|\?)/i.test(name) || m.resourceType === 'raw');
       return {
         url: m.url || '',
         name,
-        kind,
+        kind: image ? 'image' : pdf ? 'pdf' : m.resourceType || 'file',
         sizeLabel: attachmentSizeLabel(m.bytes),
       };
     });
@@ -2393,6 +2402,7 @@ function serializeParentDiary(entry, { kids = [], userId, previous = [], kidId }
   const doc = entry.toObject ? entry.toObject() : entry;
   const kid = pickDiaryKid(doc, kids, kidId);
   const teacher = doc.teacherId && typeof doc.teacherId === 'object' ? doc.teacherId : {};
+  const attachments = serializeDiaryAttachments(doc);
   return {
     _id: doc._id,
     id: String(doc._id),
@@ -2410,10 +2420,10 @@ function serializeParentDiary(entry, { kids = [], userId, previous = [], kidId }
     kid: diaryKidCard(kid),
     highlights: serializeDiaryHighlights(doc),
     homework: serializeDiaryHomework(doc),
-    attachments: serializeDiaryAttachments(doc),
+    attachments,
     comments: serializeDiaryComments(doc, userId),
     previous,
-    photoUrl: (doc.media || []).find((m) => m?.url && m.resourceType !== 'raw')?.url || '',
+    photoUrl: attachments.find((m) => m.kind === 'image')?.url || '',
   };
 }
 
@@ -2663,6 +2673,7 @@ async function buildParentDiaryFeed(kids, query = {}) {
   for (const e of entries) {
     const meta = diaryTypeMeta(e.label);
     const kidsMeta = feedChildLabel(e.kidIds, kids);
+    const media = serializeDiaryAttachments(e);
     items.push({
       id: String(e._id),
       _id: e._id,
@@ -2673,11 +2684,12 @@ async function buildParentDiaryFeed(kids, query = {}) {
       teacherName: e.teacherId?.name || 'Teacher',
       date: e.date || e.createdAt,
       time: formatClock(e.time || e.createdAt),
-      attachments: (e.media || []).length,
+      attachments: media.length,
+      media,
       childLabel: kidsMeta.childLabel,
       childId: kidsMeta.childId,
       source: 'diary',
-      photoUrl: (e.media || []).find((m) => m?.url)?.url || '',
+      photoUrl: media.find((m) => m.kind === 'image')?.url || '',
     });
   }
   for (const a of announcements) {
@@ -6024,6 +6036,15 @@ router.post('/messages', async (req, res) => {
       convo.lastMessage = body;
       convo.lastMessageAt = new Date();
       convo.archived = false;
+      if (convo.driverId) {
+        convo.driverUnreadCount = (convo.driverUnreadCount || 0) + 1;
+      } else if (convo.counterpartUserId) {
+        const other = await User.findById(convo.counterpartUserId).select('role');
+        if (other?.role === 'driver') {
+          convo.driverId = other._id;
+          convo.driverUnreadCount = (convo.driverUnreadCount || 0) + 1;
+        }
+      }
       await convo.save();
       if (convo.counterpartUserId) {
         await createAndEmitNotifications(getIO(), [
@@ -6087,6 +6108,15 @@ router.post('/messages/:id', async (req, res) => {
     convo.lastMessageAt = message.createdAt;
     convo.archived = false;
     convo.unreadCount = 0;
+    if (convo.driverId) {
+      convo.driverUnreadCount = (convo.driverUnreadCount || 0) + 1;
+    } else if (convo.counterpartUserId) {
+      const other = await User.findById(convo.counterpartUserId).select('role');
+      if (other?.role === 'driver') {
+        convo.driverId = other._id;
+        convo.driverUnreadCount = (convo.driverUnreadCount || 0) + 1;
+      }
+    }
     await convo.save();
     if (convo.counterpartUserId) {
       await createAndEmitNotifications(getIO(), [

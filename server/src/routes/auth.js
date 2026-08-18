@@ -145,8 +145,23 @@ router.put('/me', authenticate, async (req, res) => {
         'emailUpdates',
         'smsUpdates',
         'calendarSync',
+        'quietHours',
       ]) {
         if (typeof next[key] === 'boolean') user.preferences[key] = next[key];
+      }
+      if (next.quietHoursStart !== undefined) {
+        const v = String(next.quietHoursStart || '').trim();
+        if (/^\d{1,2}:\d{2}$/.test(v)) user.preferences.quietHoursStart = v.length === 4 ? `0${v}` : v;
+      }
+      if (next.quietHoursEnd !== undefined) {
+        const v = String(next.quietHoursEnd || '').trim();
+        if (/^\d{1,2}:\d{2}$/.test(v)) user.preferences.quietHoursEnd = v.length === 4 ? `0${v}` : v;
+      }
+      if (next.distanceUnit !== undefined) {
+        user.preferences.distanceUnit = String(next.distanceUnit) === 'mi' ? 'mi' : 'km';
+      }
+      if (next.timeFormat !== undefined) {
+        user.preferences.timeFormat = String(next.timeFormat) === '24' ? '24' : '12';
       }
       user.markModified('preferences');
     }

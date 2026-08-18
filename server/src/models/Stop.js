@@ -10,6 +10,7 @@ const stopSchema = new mongoose.Schema(
       lat: { type: Number, required: true },
       lng: { type: Number, required: true },
     },
+    address: { type: String, default: '', trim: true, maxlength: 200 },
   },
   { timestamps: true }
 );

@@ -36,6 +36,39 @@ const tripSchema = new mongoose.Schema(
     startLocation: locationPoint,
     endLocation: locationPoint,
     latestLocation: locationPoint,
+    stopNotes: {
+      type: [
+        {
+          stopId: { type: mongoose.Schema.Types.ObjectId, ref: 'Stop' },
+          text: { type: String, default: '', trim: true, maxlength: 500 },
+          at: { type: Date, default: Date.now },
+        },
+      ],
+      default: [],
+    },
+    incidents: {
+      type: [
+        {
+          type: {
+            type: String,
+            enum: ['accident', 'breakdown', 'traffic', 'road_block', 'weather', 'passenger', 'unsafe', 'other'],
+            required: true,
+          },
+          severity: { type: String, enum: ['low', 'medium', 'high'], default: 'medium' },
+          details: { type: String, required: true, trim: true, maxlength: 500 },
+          occurredAt: { type: Date, default: Date.now },
+          location: {
+            lat: Number,
+            lng: Number,
+            at: Date,
+          },
+          nextStopName: { type: String, default: '' },
+          nextStopKm: { type: Number, default: null },
+          photoUrls: { type: [String], default: [] },
+        },
+      ],
+      default: [],
+    },
   },
   { timestamps: true }
 );

@@ -3,12 +3,13 @@ import mongoose from 'mongoose';
 const conversationSchema = new mongoose.Schema(
   {
     schoolId: { type: mongoose.Schema.Types.ObjectId, ref: 'School', required: true, index: true },
-    parentId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    parentId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
     counterpartUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
+    driverId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
     type: { type: String, enum: ['direct', 'group'], default: 'direct', index: true },
     title: { type: String, required: true, trim: true, maxlength: 120 },
     roleLabel: { type: String, default: 'Teacher', trim: true, maxlength: 60 },
-    avatarKind: { type: String, enum: ['teacher', 'admin', 'group'], default: 'teacher' },
+    avatarKind: { type: String, enum: ['teacher', 'admin', 'group', 'parent', 'driver'], default: 'teacher' },
     photoUrl: { type: String, default: '' },
     online: { type: Boolean, default: false },
     subtitle: { type: String, default: '', trim: true, maxlength: 80 },
@@ -16,6 +17,7 @@ const conversationSchema = new mongoose.Schema(
     lastMessage: { type: String, default: '', trim: true, maxlength: 400 },
     lastMessageAt: { type: Date, default: Date.now, index: true },
     unreadCount: { type: Number, default: 0, min: 0 },
+    driverUnreadCount: { type: Number, default: 0, min: 0 },
     archived: { type: Boolean, default: false, index: true },
     sourceKey: { type: String, default: '', index: true },
   },
@@ -23,9 +25,14 @@ const conversationSchema = new mongoose.Schema(
 );
 
 conversationSchema.index({ parentId: 1, lastMessageAt: -1 });
+conversationSchema.index({ driverId: 1, lastMessageAt: -1 });
 conversationSchema.index(
   { parentId: 1, sourceKey: 1 },
   { unique: true, partialFilterExpression: { sourceKey: { $gt: '' } } }
+);
+conversationSchema.index(
+  { driverId: 1, sourceKey: 1 },
+  { unique: true, partialFilterExpression: { sourceKey: { $gt: '' }, driverId: { $type: 'objectId' } } }
 );
 
 export const Conversation = mongoose.model('Conversation', conversationSchema);

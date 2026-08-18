@@ -16,7 +16,7 @@ const router = Router();
 async function emitTripStarted(trip, kids) {
   const io = getIO();
   const directionLabel = trip.direction === 'to_school' ? 'morning (to school)' : 'evening (to home)';
-  const notifications = [];
+    const notifications = [];
   for (const kid of kids) {
     for (const parentId of kid.parentIds || []) {
       notifications.push({
@@ -29,16 +29,44 @@ async function emitTripStarted(trip, kids) {
       });
     }
   }
-  await createAndEmitNotifications(io, notifications);
+  const driverId = trip.driverId?._id || trip.driverId;
+  if (driverId) {
+    const stops = await Stop.find({ routeId: trip.routeId }).sort({ order: 1 }).select('name type');
+    const school = stops.find((s) => s.type === 'school');
+    const home = stops.find((s) => s.type !== 'school');
+    const fromName = trip.direction === 'to_home' ? school?.name : home?.name;
+    const started = trip.startedAt ? new Date(trip.startedAt) : new Date();
+    const hh = started.getHours();
+    const mm = String(started.getMinutes()).padStart(2, '0');
+    const ampm = hh >= 12 ? 'PM' : 'AM';
+    const clock = `${hh % 12 || 12}:${mm} ${ampm}`;
+    notifications.push({
+      userId: driverId,
+      type: 'trip_started',
+      title: 'Route started',
+      body: fromName
+        ? `You started the route at ${clock} from ${fromName}.`
+        : `You started the ${directionLabel} route at ${clock}.`,
+      tripId: trip._id,
+      key: `${driverId}:trip_started:${trip._id}`,
+    });
+  }
+  const parentNotes = notifications.filter((n) => !n.key);
+  const driverNotes = notifications.filter((n) => n.key);
+  if (parentNotes.length) await createAndEmitNotifications(io, parentNotes);
+  if (driverNotes.length) {
+    try {
+      await createAndEmitNotifications(io, driverNotes);
+    } catch (_) {}
+  }
 
   const populated = await Trip.findById(trip._id)
     .populate('routeId', 'name')
-    .populate('schoolId', 'name location address')
+    .populate('schoolId', 'name location address supportPhone')
     .populate('busId', 'plate label seats')
     .populate('kidIds');
 
   io?.to(`trip:${trip._id}`).emit('trip:started', { trip: populated });
-  const driverId = trip.driverId?._id || trip.driverId;
   if (driverId) io?.to(`user:${driverId}`).emit('trip:started', { trip: populated });
   for (const kid of kids) {
     for (const parentId of kid.parentIds || []) {
@@ -235,6 +263,8 @@ router.post('/:id/kids/:kidId/pickup', authenticate, requireRole('driver'), asyn
     const existing = await TripEvent.findOne({ tripId: trip._id, kidId, type: 'picked_up' });
     if (existing) return res.status(409).json({ error: 'Kid already marked picked up' });
 
+    await TripEvent.deleteMany({ tripId: trip._id, kidId, type: 'not_picked_up' });
+
     const location = trip.latestLocation
       ? { lat: trip.latestLocation.lat, lng: trip.latestLocation.lng }
       : undefined;
@@ -247,8 +277,9 @@ router.post('/:id/kids/:kidId/pickup', authenticate, requireRole('driver'), asyn
       location,
     });
 
-    const kid = await Kid.findById(kidId);
+    const kid = await Kid.findById(kidId).populate('homeStopId', 'name');
     const io = getIO();
+    const stopName = kid?.homeStopId?.name ? String(kid.homeStopId.name) : '';
     const notifications = (kid?.parentIds || []).map((parentId) => ({
       userId: parentId,
       type: 'kid_picked_up',
@@ -257,6 +288,18 @@ router.post('/:id/kids/:kidId/pickup', authenticate, requireRole('driver'), asyn
       tripId: trip._id,
       kidId: kid._id,
     }));
+    const driverId = trip.driverId?._id || trip.driverId;
+    if (driverId && kid) {
+      notifications.push({
+        userId: driverId,
+        type: 'kid_picked_up',
+        title: 'Student picked up',
+        body: stopName ? `${kid.name} was picked up at ${stopName}.` : `${kid.name} was picked up.`,
+        tripId: trip._id,
+        kidId: kid._id,
+        key: `${driverId}:pickup:${trip._id}:${kid._id}`,
+      });
+    }
     await createAndEmitNotifications(io, notifications);
 
     const payload = { tripId: trip._id.toString(), kidId, event };
@@ -266,6 +309,98 @@ router.post('/:id/kids/:kidId/pickup', authenticate, requireRole('driver'), asyn
     }
 
     res.json({ event });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/:id/kids/:kidId/miss', authenticate, requireRole('driver'), async (req, res) => {
+  try {
+    const trip = await Trip.findOne({ _id: req.params.id, driverId: req.user.id, status: 'active' });
+    if (!trip) return res.status(404).json({ error: 'Active trip not found' });
+
+    const kidId = req.params.kidId;
+    if (!trip.kidIds.some((id) => id.toString() === kidId)) {
+      return res.status(400).json({ error: 'Kid is not on this trip' });
+    }
+
+    const picked = await TripEvent.findOne({ tripId: trip._id, kidId, type: 'picked_up' });
+    if (picked) return res.status(400).json({ error: 'Kid is already picked up' });
+
+    const existing = await TripEvent.findOne({ tripId: trip._id, kidId, type: 'not_picked_up' });
+    if (existing) return res.status(409).json({ error: 'Kid already marked not picked up' });
+
+    const location = trip.latestLocation
+      ? { lat: trip.latestLocation.lat, lng: trip.latestLocation.lng }
+      : undefined;
+
+    const event = await TripEvent.create({
+      tripId: trip._id,
+      kidId,
+      type: 'not_picked_up',
+      at: new Date(),
+      location,
+    });
+
+    const kid = await Kid.findById(kidId).populate('homeStopId', 'name');
+    const driverId = trip.driverId?._id || trip.driverId;
+    if (driverId && kid) {
+      const stopName = kid.homeStopId?.name ? String(kid.homeStopId.name) : '';
+      await createAndEmitNotifications(getIO(), [
+        {
+          userId: driverId,
+          type: 'attendance_alert',
+          title: 'Student not picked up',
+          body: stopName
+            ? `${kid.name} was not picked up at ${stopName}.`
+            : `${kid.name} was marked not picked up.`,
+          tripId: trip._id,
+          kidId: kid._id,
+          key: `${driverId}:miss:${trip._id}:${kid._id}`,
+        },
+      ]);
+    }
+
+    res.json({ event });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/:id/stops/:stopId/note', authenticate, requireRole('driver'), async (req, res) => {
+  try {
+    const trip = await Trip.findOne({
+      _id: req.params.id,
+      driverId: req.user.id,
+      status: { $in: ['scheduled', 'active'] },
+    });
+    if (!trip) return res.status(404).json({ error: 'Trip not found' });
+
+    const text = String(req.body?.text || '').trim().slice(0, 500);
+    if (!text) return res.status(400).json({ error: 'Note text is required' });
+
+    if (!Array.isArray(trip.stopNotes)) trip.stopNotes = [];
+    trip.stopNotes.push({
+      stopId: req.params.stopId,
+      text,
+      at: new Date(),
+    });
+    await trip.save();
+    const note = trip.stopNotes[trip.stopNotes.length - 1];
+    const driverId = trip.driverId?._id || trip.driverId;
+    if (driverId && text.toLowerCase().startsWith('incident:')) {
+      await createAndEmitNotifications(getIO(), [
+        {
+          userId: driverId,
+          type: 'reminder',
+          title: 'Incident reported',
+          body: text.replace(/^Incident:\s*/i, '').slice(0, 200) || 'An incident note was saved on this trip.',
+          tripId: trip._id,
+          key: `${driverId}:incident:${note._id}`,
+        },
+      ]);
+    }
+    res.json({ note, stopNotes: trip.stopNotes });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -310,6 +445,18 @@ router.post('/:id/kids/:kidId/dropoff', authenticate, requireRole('driver'), asy
       tripId: trip._id,
       kidId: kid._id,
     }));
+    const driverId = trip.driverId?._id || trip.driverId;
+    if (driverId && kid) {
+      notifications.push({
+        userId: driverId,
+        type: 'kid_dropped_off',
+        title: 'Student dropped off',
+        body: `${kid.name} was dropped off at ${place}.`,
+        tripId: trip._id,
+        kidId: kid._id,
+        key: `${driverId}:drop:${trip._id}:${kid._id}`,
+      });
+    }
     await createAndEmitNotifications(io, notifications);
 
     const payload = { tripId: trip._id.toString(), kidId, event };
@@ -359,11 +506,21 @@ router.post('/:id/complete', authenticate, requireRole('driver'), async (req, re
         });
       }
     }
+    const driverId = trip.driverId?._id || trip.driverId;
+    if (driverId) {
+      notifications.push({
+        userId: driverId,
+        type: 'trip_completed',
+        title: 'Route completed',
+        body: 'You completed the route.',
+        tripId: trip._id,
+        key: `${driverId}:trip_completed:${trip._id}`,
+      });
+    }
     await createAndEmitNotifications(io, notifications);
 
     const payload = { tripId: trip._id.toString() };
     io?.to(`trip:${trip._id}`).emit('trip:completed', payload);
-    const driverId = trip.driverId?._id || trip.driverId;
     if (driverId) io?.to(`user:${driverId}`).emit('trip:completed', payload);
     for (const kid of kids) {
       for (const parentId of kid.parentIds || []) {
@@ -380,9 +537,11 @@ router.post('/:id/complete', authenticate, requireRole('driver'), async (req, re
 router.get('/:id', authenticate, async (req, res) => {
   try {
     const trip = await Trip.findById(req.params.id)
-      .populate('routeId', 'name')
-      .populate('schoolId', 'name location address')
+      .populate('routeId', 'name description')
+      .populate('schoolId', 'name location address supportPhone')
       .populate('driverId', 'name phone')
+      .populate('busId', 'plate label seats')
+      .populate('scheduleId', 'name scheduledTime scheduleType period direction')
       .populate('kidIds');
 
     if (!trip) return res.status(404).json({ error: 'Trip not found' });
