@@ -115,7 +115,9 @@ export default function TeacherLayout() {
 
         <div className="tw-sidebar-foot">
           <div className="tw-user-mini">
-            <span>{initial}</span>
+            <span>
+              {user?.photoUrl ? <img src={user.photoUrl} alt="" /> : initial}
+            </span>
             <div>
               <strong>{user?.name || 'Teacher'}</strong>
               <small>Signed in</small>
@@ -139,7 +141,9 @@ export default function TeacherLayout() {
             <h1>{title}</h1>
           </div>
           <div className="tw-topbar-user">
-            <span className="tw-avatar">{initial}</span>
+            <span className="tw-avatar">
+              {user?.photoUrl ? <img src={user.photoUrl} alt="" /> : initial}
+            </span>
             <div>
               <strong>{user?.name || 'Teacher'}</strong>
               <small>{user?.email}</small>

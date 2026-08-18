@@ -14,6 +14,8 @@ import {
 } from '../models/index.js';
 import { authenticate, requireSchoolStaff, requireSuperAdmin } from '../middleware/auth.js';
 import adminTripOps from './adminTripOps.js';
+import { createAndEmitNotifications, NOTIFICATION_TYPES } from '../services/notifications.js';
+import { getIO } from '../socket.js';
 
 const router = Router();
 router.use(authenticate, requireSchoolStaff);
@@ -903,12 +905,44 @@ router.post('/announcements', async (req, res) => {
       category: ['general', 'class', 'transport', 'events', 'urgent'].includes(category)
         ? category
         : 'general',
+      kind:
+        category === 'urgent'
+          ? 'important'
+          : category === 'events'
+            ? 'event'
+            : category === 'transport'
+              ? 'information'
+              : 'general',
+      icon:
+        category === 'urgent'
+          ? 'megaphone'
+          : category === 'events'
+            ? 'trophy'
+            : category === 'transport'
+              ? 'bus'
+              : 'calendar',
+      scope: 'school',
+      audience: 'All Teachers, Parents & Students',
       authorName: authorName?.trim() || req.user.name || 'Admin',
       attachmentName: attachmentName || '',
       attachmentUrl: attachmentUrl || '',
       attachmentPublicId: attachmentPublicId || '',
       publishedAt: new Date(),
     });
+    const teachers = await User.find({ schoolId, role: 'teacher', active: true }).select('_id');
+    if (teachers.length) {
+      await createAndEmitNotifications(
+        getIO(),
+        teachers.map((t) => ({
+          userId: t._id,
+          type: NOTIFICATION_TYPES.ANNOUNCEMENT,
+          key: `announcement:${announcement._id}`,
+          title: announcement.title,
+          body: String(announcement.body || '').slice(0, 400),
+          link: 'announcements',
+        }))
+      );
+    }
     res.status(201).json({ announcement });
   } catch (err) {
     res.status(500).json({ error: err.message });

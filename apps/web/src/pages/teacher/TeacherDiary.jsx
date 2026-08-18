@@ -3,11 +3,13 @@ import { api, uploadFile } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 
 const LABELS = [
-  { value: 'general', label: 'General' },
-  { value: 'class', label: 'Class' },
+  { value: 'lesson', label: 'Lesson' },
   { value: 'activity', label: 'Activity' },
-  { value: 'meal', label: 'Meal' },
+  { value: 'general', label: 'General note' },
+  { value: 'behaviour', label: 'Behavior' },
+  { value: 'class', label: 'Class' },
   { value: 'academic', label: 'Academic' },
+  { value: 'meal', label: 'Meal' },
   { value: 'health', label: 'Health' },
 ];
 
@@ -24,7 +26,7 @@ function emptyForm(date) {
   return {
     title: '',
     body: '',
-    label: 'class',
+    label: 'lesson',
     grade: '',
     kidIds: [],
     media: [],

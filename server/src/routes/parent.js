@@ -14,6 +14,9 @@ import {
   TeacherNote,
   AttendanceRecord,
   DiaryEntry,
+  Assessment,
+  AcademicTerm,
+  SchoolHoliday,
 } from '../models/index.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { getVapidPublicKey } from '../services/push.js';
@@ -43,6 +46,248 @@ router.get('/me', async (req, res) => {
       .limit(1);
     const school = kids[0]?.schoolId || null;
     res.json({ user, school });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+function behaviourLabel(score) {
+  if (score >= 80) return 'Excellent';
+  if (score >= 70) return 'Very good';
+  if (score >= 55) return 'Good';
+  if (score >= 40) return 'Fair';
+  return 'Needs support';
+}
+
+function firstName(name) {
+  return String(name || '').trim().split(/\s+/)[0] || 'Child';
+}
+
+function sampleEvents() {
+  const y = new Date().getFullYear();
+  return [
+    {
+      _id: 'sample-ptm',
+      title: 'Parent-Teacher Meeting',
+      date: new Date(y, 7, 25, 15, 0),
+      endDate: new Date(y, 7, 25, 17, 0),
+      location: 'School Hall',
+      kind: 'meeting',
+    },
+    {
+      _id: 'sample-trip',
+      title: 'School Trip - Wildlife Park',
+      date: new Date(y, 8, 5, 7, 30),
+      endDate: new Date(y, 8, 5, 16, 0),
+      location: 'Nairobi National Park',
+      kind: 'trip',
+    },
+    {
+      _id: 'sample-quiz',
+      title: 'Inter-Class Quiz Competition',
+      date: new Date(y, 8, 15, 14, 0),
+      endDate: new Date(y, 8, 15, 16, 0),
+      location: 'School Auditorium',
+      kind: 'event',
+    },
+  ];
+}
+
+router.get('/overview', async (req, res) => {
+  try {
+    const kids = await Kid.find({ parentIds: req.user.id, active: true })
+      .populate('schoolId', 'name location address logoUrl')
+      .populate('routeId', 'name')
+      .populate('homeStopId', 'name location')
+      .sort({ name: 1 });
+    const kidIds = kids.map((k) => k._id);
+    const schoolIds = [...new Set(kids.map((k) => k.schoolId?._id?.toString() || k.schoolId?.toString()).filter(Boolean))];
+    const grades = [...new Set(kids.map((k) => k.grade).filter(Boolean))];
+    const today = startOfDay();
+
+    const [activeTrips, notifications, announcements, holidays, assignments, marks] = await Promise.all([
+      kidIds.length
+        ? Trip.find({ status: 'active', kidIds: { $in: kidIds } })
+            .populate('routeId', 'name')
+            .populate('driverId', 'name phone')
+            .populate('busId', 'plate label')
+        : [],
+      Notification.find({ userId: req.user.id }).sort({ createdAt: -1 }).limit(80),
+      schoolIds.length
+        ? Announcement.find({
+            schoolId: { $in: schoolIds },
+            active: true,
+            archived: { $ne: true },
+            $or: [
+              { scope: { $ne: 'class' } },
+              { scope: 'class', grade: { $in: grades } },
+              { category: 'class', grade: { $in: grades } },
+            ],
+          })
+            .sort({ publishedAt: -1, createdAt: -1 })
+            .limit(20)
+        : [],
+      schoolIds.length
+        ? SchoolHoliday.find({ schoolId: { $in: schoolIds }, active: true, date: { $gte: today } }).sort({ date: 1 }).limit(8)
+        : [],
+      kidIds.length
+        ? Assignment.find({
+            schoolId: { $in: schoolIds },
+            active: true,
+            status: { $ne: 'draft' },
+            $or: [{ kidIds: { $in: kidIds } }, { kidIds: { $size: 0 }, grade: { $in: grades } }, { kidIds: { $exists: false }, grade: { $in: grades } }],
+          }).limit(80)
+        : [],
+      kidIds.length ? AttendanceRecord.find({ kidId: { $in: kidIds }, date: today }) : [],
+    ]);
+
+    const tripIds = activeTrips.map((t) => t._id);
+    const eventsToday = tripIds.length ? await TripEvent.find({ tripId: { $in: tripIds } }) : [];
+    const checkIns = eventsToday.filter((e) => e.type === 'picked_up' && kidIds.some((id) => String(e.kidId) === String(id))).length;
+    let pendingCheckouts = 0;
+    for (const kid of kids) {
+      const id = kid._id.toString();
+      const picked = eventsToday.some((e) => String(e.kidId) === id && e.type === 'picked_up');
+      const dropped = eventsToday.some((e) => String(e.kidId) === id && e.type === 'dropped_off');
+      if (picked && !dropped) pendingCheckouts += 1;
+      if (activeTrips.length && !picked && !dropped) pendingCheckouts += 1;
+    }
+
+    const featured = kids[0] || null;
+    let progress = null;
+    if (featured) {
+      const schoolId = featured.schoolId?._id || featured.schoolId;
+      const now = new Date();
+      const term = schoolId
+        ? await AcademicTerm.findOne({
+            schoolId,
+            active: true,
+            startDate: { $lte: now },
+            endDate: { $gte: now },
+          }).sort({ startDate: -1 })
+        : null;
+      const from = term?.startDate || new Date(now.getFullYear(), now.getMonth() - 2, 1);
+      const to = term?.endDate || now;
+      const prevTerm = schoolId
+        ? await AcademicTerm.findOne({
+            schoolId,
+            active: true,
+            endDate: { $lt: from },
+          }).sort({ endDate: -1 })
+        : null;
+      const [academic, behaviour, termMarks, prevAcademic] = await Promise.all([
+        Assessment.find({ kidId: featured._id, active: true, kind: 'academic', date: { $gte: from, $lte: to } }),
+        Assessment.find({ kidId: featured._id, active: true, kind: 'behaviour', date: { $gte: from, $lte: to } }),
+        AttendanceRecord.find({ kidId: featured._id, date: { $gte: startOfDay(from), $lte: to } }),
+        prevTerm
+          ? Assessment.find({
+              kidId: featured._id,
+              active: true,
+              kind: 'academic',
+              date: { $gte: prevTerm.startDate, $lte: prevTerm.endDate },
+            })
+          : [],
+      ]);
+      const avg = academic.length
+        ? Math.round(academic.reduce((s, r) => s + (r.score || 0), 0) / academic.length)
+        : 0;
+      const prevAvg = prevAcademic.length
+        ? Math.round(prevAcademic.reduce((s, r) => s + (r.score || 0), 0) / prevAcademic.length)
+        : 0;
+      const present = termMarks.filter((m) => m.status === 'present').length;
+      const attendancePct = termMarks.length ? Math.round((present / termMarks.length) * 100) : 0;
+      const pendingAssignments = assignments.filter((a) => {
+        if (a.kidIds?.length && !a.kidIds.some((id) => String(id) === String(featured._id))) return false;
+        if (a.grade && featured.grade && a.grade !== featured.grade) return false;
+        if (!a.dueDate) return true;
+        return new Date(a.dueDate) >= today;
+      }).length;
+      const behaviourAvg = behaviour.length
+        ? behaviour.reduce((s, r) => s + (r.score || 0), 0) / behaviour.length
+        : 0;
+      progress = {
+        kidId: featured._id,
+        kidName: featured.name,
+        firstName: firstName(featured.name),
+        averageScore: avg,
+        attendancePct,
+        pendingAssignments,
+        behaviour: behaviour.length ? behaviourLabel(behaviourAvg) : 'Good',
+        improvement: prevAvg ? avg - prevAvg : 0,
+        term: term?.name || 'This term',
+      };
+    }
+
+    const unread = notifications.filter((n) => n.read !== true).length;
+    const mappedKids = kids.map((k, i) => ({
+      _id: k._id,
+      name: k.name,
+      grade: k.grade || '',
+      admissionNo: k.admissionNo || '',
+      rollNo: k.house || `${i + 1}`,
+      photoUrl: k.photoUrl || '',
+      schoolId: k.schoolId,
+      routeId: k.routeId,
+      homeStopId: k.homeStopId,
+    }));
+
+    const holidayEvents = holidays.map((h) => ({
+      _id: h._id,
+      title: h.name,
+      date: h.date,
+      endDate: null,
+      location: 'School',
+      kind: 'holiday',
+    }));
+    const announcementEvents = announcements
+      .filter((a) => a.kind === 'event' || a.category === 'events')
+      .map((a) => ({
+        _id: a._id,
+        title: a.title,
+        date: a.publishedAt || a.createdAt,
+        endDate: null,
+        location: a.audience || a.grade || 'School',
+        kind: 'event',
+      }));
+    const events = [...holidayEvents, ...announcementEvents]
+      .sort((a, b) => new Date(a.date) - new Date(b.date))
+      .slice(0, 6);
+
+    const active = activeTrips[0] || null;
+    res.json({
+      kids: mappedKids,
+      featuredKidId: featured?._id || null,
+      progress,
+      summary: {
+        tripsToday: activeTrips.length,
+        checkIns,
+        pendingCheckouts,
+        unread,
+      },
+      activeTrip: active
+        ? {
+            _id: active._id,
+            direction: active.direction,
+            status: active.status,
+            startedAt: active.startedAt,
+            scheduledFor: active.scheduledFor,
+            routeName: active.routeId?.name || '',
+            driverName: active.driverId?.name || '',
+            plate: active.busId?.plate || '',
+          }
+        : null,
+      announcements: announcements.slice(0, 8).map((a) => ({
+        _id: a._id,
+        title: a.title,
+        body: a.body,
+        kind: a.kind || a.category || 'general',
+        category: a.category || 'general',
+        publishedAt: a.publishedAt || a.createdAt,
+      })),
+      events: events.length ? events : sampleEvents(),
+      notifications: notifications.slice(0, 12),
+      school: featured?.schoolId || null,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -83,6 +328,8 @@ function parentDiaryMatch(kids, schoolIds) {
   return {
     schoolId: { $in: schoolIds },
     active: true,
+    private: { $ne: true },
+    status: { $ne: 'draft' },
     $or: [
       { kidIds: { $in: kidIds } },
       {
@@ -114,7 +361,7 @@ router.get('/school', async (req, res) => {
 
     const [marks, assignments, notes, diary] = await Promise.all([
       AttendanceRecord.find({ kidId: { $in: kidIds }, date: day }).populate('kidId', 'name grade'),
-      Assignment.find({ schoolId: { $in: schoolIds }, active: true })
+      Assignment.find({ schoolId: { $in: schoolIds }, active: true, status: { $ne: 'draft' } })
         .populate('teacherId', 'name')
         .sort({ dueDate: 1, createdAt: -1 })
         .limit(80),
@@ -406,16 +653,30 @@ router.post('/leave-requests/:id/cancel', async (req, res) => {
 
 router.get('/announcements', async (req, res) => {
   try {
-    const kids = await Kid.find({ parentIds: req.user.id, active: true }).select('schoolId');
+    const kids = await Kid.find({ parentIds: req.user.id, active: true }).select('schoolId grade');
     const schoolIds = [...new Set(kids.map((k) => k.schoolId?.toString()).filter(Boolean))];
     if (!schoolIds.length) return res.json({ announcements: [] });
 
     const { category, q } = req.query;
-    const filter = { schoolId: { $in: schoolIds }, active: true };
+    const grades = [...new Set(kids.map((k) => k.grade).filter(Boolean))];
+    const filter = {
+      schoolId: { $in: schoolIds },
+      active: true,
+      archived: { $ne: true },
+      $and: [
+        {
+          $or: [
+            { scope: { $ne: 'class' } },
+            { scope: 'class', grade: { $in: grades } },
+            { category: 'class', grade: { $in: grades } },
+          ],
+        },
+      ],
+    };
     if (category && category !== 'all') filter.category = category;
     if (q && String(q).trim()) {
       const rx = new RegExp(String(q).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-      filter.$or = [{ title: rx }, { body: rx }];
+      filter.$and.push({ $or: [{ title: rx }, { body: rx }] });
     }
 
     const announcements = await Announcement.find(filter).sort({ publishedAt: -1 }).limit(100);
@@ -430,7 +691,7 @@ router.get('/announcements/:id', async (req, res) => {
     const kids = await Kid.find({ parentIds: req.user.id, active: true }).select('schoolId');
     const schoolIds = new Set(kids.map((k) => k.schoolId?.toString()).filter(Boolean));
     const announcement = await Announcement.findById(req.params.id);
-    if (!announcement || !announcement.active) {
+    if (!announcement || !announcement.active || announcement.archived) {
       return res.status(404).json({ error: 'Announcement not found' });
     }
     if (!schoolIds.has(announcement.schoolId.toString())) {

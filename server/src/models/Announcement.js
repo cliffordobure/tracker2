@@ -11,6 +11,24 @@ const announcementSchema = new mongoose.Schema(
       default: 'general',
       index: true,
     },
+    kind: {
+      type: String,
+      enum: ['important', 'general', 'information', 'event', 'reminder'],
+      default: 'general',
+      index: true,
+    },
+    scope: {
+      type: String,
+      enum: ['school', 'class'],
+      default: 'school',
+      index: true,
+    },
+    grade: { type: String, default: '', trim: true, index: true },
+    teacherId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
+    audience: { type: String, default: '' },
+    icon: { type: String, default: '' },
+    sourceKey: { type: String, default: '', index: true },
+    archived: { type: Boolean, default: false, index: true },
     authorName: { type: String, default: 'Admin' },
     attachmentName: { type: String, default: '' },
     attachmentUrl: { type: String, default: '' },
@@ -19,6 +37,11 @@ const announcementSchema = new mongoose.Schema(
     publishedAt: { type: Date, default: Date.now },
   },
   { timestamps: true }
+);
+
+announcementSchema.index(
+  { schoolId: 1, sourceKey: 1 },
+  { unique: true, partialFilterExpression: { sourceKey: { $gt: '' } } }
 );
 
 export const Announcement = mongoose.model('Announcement', announcementSchema);

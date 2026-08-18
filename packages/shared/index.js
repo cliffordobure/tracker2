@@ -53,6 +53,10 @@ export const NOTIFICATION_TYPES = {
   TEACHER_NOTE: 'teacher_note',
   ATTENDANCE_ALERT: 'attendance_alert',
   DIARY: 'diary',
+  ANNOUNCEMENT: 'announcement',
+  MESSAGE: 'message',
+  REMINDER: 'reminder',
+  SYSTEM: 'system',
 };
 
 export const EDIT_SCOPES = {

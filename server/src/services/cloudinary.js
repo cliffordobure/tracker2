@@ -9,6 +9,7 @@ const FOLDERS = [
   'leave',
   'announcements',
   'attachments',
+  'assignments',
   'diary',
   'general',
 ];
@@ -35,6 +36,8 @@ const RAW_MIMES = new Set([
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.ms-excel',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   'text/plain',
 ]);
 
@@ -75,6 +78,7 @@ export function allowedFolders() {
 
 export function normalizeFolder(folder) {
   const key = String(folder || 'general').trim().toLowerCase();
+  if (key === 'avatars') return 'users';
   return FOLDERS.includes(key) ? key : 'general';
 }
 

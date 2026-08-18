@@ -98,4 +98,72 @@ router.get('/me', authenticate, async (req, res) => {
   }
 });
 
+router.put('/me', authenticate, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    if (req.body.name !== undefined) {
+      const name = String(req.body.name || '').trim();
+      if (!name) return res.status(400).json({ error: 'name is required' });
+      user.name = name.slice(0, 80);
+    }
+    if (req.body.phone !== undefined) user.phone = String(req.body.phone || '').trim().slice(0, 40);
+    if (req.body.photoUrl !== undefined) user.photoUrl = String(req.body.photoUrl || '').trim();
+    if (req.body.photoPublicId !== undefined) user.photoPublicId = String(req.body.photoPublicId || '').trim();
+    if (req.body.aboutMe !== undefined) user.aboutMe = String(req.body.aboutMe || '').trim().slice(0, 800);
+    if (req.body.dateOfBirth !== undefined) {
+      const raw = req.body.dateOfBirth;
+      user.dateOfBirth = raw ? new Date(raw) : null;
+    }
+    if (req.body.gender !== undefined) {
+      const gender = String(req.body.gender || '').trim().toLowerCase();
+      user.gender = ['female', 'male', 'other'].includes(gender) ? gender : '';
+    }
+    if (req.body.nationality !== undefined) user.nationality = String(req.body.nationality || '').trim().slice(0, 60);
+    if (req.body.idNumber !== undefined) user.idNumber = String(req.body.idNumber || '').trim().slice(0, 40);
+    if (req.body.yearsOfService !== undefined) {
+      const n = Number(req.body.yearsOfService);
+      user.yearsOfService = Number.isFinite(n) ? Math.max(0, Math.min(60, Math.round(n))) : 0;
+    }
+    if (req.body.jobTitle !== undefined) user.jobTitle = String(req.body.jobTitle || 'Class Teacher').trim().slice(0, 80);
+    if (req.body.twoFactorEnabled !== undefined) user.twoFactorEnabled = req.body.twoFactorEnabled === true;
+    if (req.body.language !== undefined) user.language = String(req.body.language || 'English').trim().slice(0, 40);
+    if (req.body.theme !== undefined) {
+      const theme = String(req.body.theme || 'system').trim().toLowerCase();
+      user.theme = ['system', 'light', 'dark'].includes(theme) ? theme : 'system';
+    }
+
+    await user.save();
+    return res.json({ user: user.toSafeJSON() });
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+});
+
+router.put('/password', authenticate, async (req, res) => {
+  try {
+    const currentPassword = String(req.body?.currentPassword || '');
+    const newPassword = String(req.body?.newPassword || '');
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: 'currentPassword and newPassword are required' });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: 'New password must be at least 6 characters' });
+    }
+
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const ok = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!ok) return res.status(400).json({ error: 'Current password is incorrect' });
+
+    user.passwordHash = await bcrypt.hash(newPassword, 10);
+    await user.save();
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+});
+
 export default router;
