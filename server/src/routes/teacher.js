@@ -15,6 +15,7 @@ import {
   Notification,
   LessonPlan,
   TeachingResource,
+  SchoolOuting,
 } from '../models/index.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { createAndEmitNotifications, NOTIFICATION_TYPES } from '../services/notifications.js';
@@ -1926,6 +1927,10 @@ function applyDiaryFields(entry, body) {
     const n = Number(body.durationMinutes);
     entry.durationMinutes = Number.isFinite(n) ? Math.max(0, Math.min(240, Math.round(n))) : 0;
   }
+  if (body.time !== undefined) {
+    const raw = String(body.time || '').trim();
+    entry.time = /^\d{1,2}:\d{2}$/.test(raw) ? raw.padStart(5, '0').slice(-5) : '';
+  }
   if (body.engagement !== undefined) {
     const n = Number(body.engagement);
     entry.engagement = n >= 1 && n <= 5 ? n : 0;
@@ -2770,6 +2775,77 @@ router.post('/resources/:id/favorite', async (req, res) => {
     }
     await row.save();
     res.json({ resource: serializeResource(row, req.user.id) });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+function serializeOuting(row) {
+  return {
+    _id: row._id,
+    title: row.title,
+    location: row.location || '',
+    notes: row.notes || '',
+    startAt: row.startAt,
+    endAt: row.endAt,
+    grade: row.grade || '',
+    audience: row.audience || '',
+    busCount: row.busCount ?? 1,
+    teacherCount: row.teacherCount ?? 1,
+    status: row.status,
+    createdAt: row.createdAt,
+  };
+}
+
+router.get('/outings', async (req, res) => {
+  try {
+    const { schoolId } = await teacherContext(req);
+    if (!schoolId) return res.json({ outings: [] });
+    const outings = await SchoolOuting.find({ schoolId, active: true }).sort({ startAt: 1 }).limit(80);
+    res.json({ outings: outings.map(serializeOuting) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/outings', async (req, res) => {
+  try {
+    const { schoolId, teacher } = await teacherContext(req);
+    if (!schoolId) return res.status(400).json({ error: 'No school linked' });
+    const body = req.body || {};
+    if (!body.title || !body.startAt) {
+      return res.status(400).json({ error: 'title and startAt are required' });
+    }
+    const startAt = new Date(body.startAt);
+    const endAt = body.endAt ? new Date(body.endAt) : null;
+    if (Number.isNaN(startAt.getTime())) return res.status(400).json({ error: 'Invalid start date' });
+    const outing = await SchoolOuting.create({
+      schoolId,
+      title: String(body.title).trim().slice(0, 160),
+      location: String(body.location || '').trim().slice(0, 160),
+      notes: String(body.notes || '').trim().slice(0, 2000),
+      startAt,
+      endAt: endAt && !Number.isNaN(endAt.getTime()) ? endAt : null,
+      grade: String(body.grade || '').trim().slice(0, 40),
+      audience: String(body.audience || '').trim().slice(0, 80),
+      busCount: Number(body.busCount) > 0 ? Number(body.busCount) : 1,
+      teacherCount: Number(body.teacherCount) > 0 ? Number(body.teacherCount) : 1,
+      status: ['upcoming', 'completed', 'cancelled'].includes(body.status) ? body.status : 'upcoming',
+    });
+    const kids = await schoolKids(schoolId, { grade: outing.grade || undefined });
+    const items = [];
+    for (const kid of kids) {
+      for (const parent of kid.parentIds || []) {
+        items.push({
+          userId: parent._id || parent,
+          type: NOTIFICATION_TYPES.ANNOUNCEMENT,
+          title: outing.title,
+          body: `School trip on ${startAt.toLocaleDateString()}. Please review and grant permission.`,
+        });
+      }
+    }
+    if (items.length) await createAndEmitNotifications(getIO(), items);
+    res.status(201).json({ outing: serializeOuting(outing), teacherId: teacher?._id });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

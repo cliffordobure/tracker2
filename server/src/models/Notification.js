@@ -30,6 +30,9 @@ const notificationSchema = new mongoose.Schema(
     kidId: { type: mongoose.Schema.Types.ObjectId, ref: 'Kid' },
     key: { type: String, default: '' },
     link: { type: String, default: '' },
+    authorName: { type: String, default: '', trim: true },
+    important: { type: Boolean, default: false, index: true },
+    archived: { type: Boolean, default: false, index: true },
     read: { type: Boolean, default: false },
   },
   { timestamps: true }

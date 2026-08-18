@@ -456,6 +456,18 @@ export default function LeaveRequests() {
               <dt>Leave Type</dt>
               <dd>{TYPE_LABEL[selected.leaveType] || selected.leaveType}</dd>
             </div>
+            {selected.durationType && (
+              <div>
+                <dt>Duration</dt>
+                <dd>
+                  {selected.durationType === 'long'
+                    ? 'Long Leave'
+                    : selected.durationType === 'emergency'
+                      ? 'Emergency Leave'
+                      : 'Short Leave'}
+                </dd>
+              </div>
+            )}
             <div>
               <dt>Start Date</dt>
               <dd>
@@ -482,6 +494,12 @@ export default function LeaveRequests() {
               <dt>Additional Notes</dt>
               <dd>{selected.notes || '—'}</dd>
             </div>
+            {selected.extensionReason ? (
+              <div>
+                <dt>Return Date Change</dt>
+                <dd>{selected.extensionReason}</dd>
+              </div>
+            ) : null}
             {(selected.attachmentName || selected.attachmentUrl) && (
               <div>
                 <dt>Attachment</dt>

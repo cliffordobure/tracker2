@@ -10,6 +10,9 @@ const schoolSchema = new mongoose.Schema(
       lat: { type: Number, required: true },
       lng: { type: Number, required: true },
     },
+    supportEmail: { type: String, default: '', trim: true },
+    supportPhone: { type: String, default: '', trim: true },
+    supportHours: { type: String, default: '', trim: true },
   },
   { timestamps: true }
 );

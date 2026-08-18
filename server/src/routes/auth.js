@@ -133,6 +133,23 @@ router.put('/me', authenticate, async (req, res) => {
       const theme = String(req.body.theme || 'system').trim().toLowerCase();
       user.theme = ['system', 'light', 'dark'].includes(theme) ? theme : 'system';
     }
+    if (req.body.preferences && typeof req.body.preferences === 'object') {
+      const next = req.body.preferences;
+      user.preferences = user.preferences || {};
+      for (const key of [
+        'notifyTrips',
+        'notifyDiary',
+        'notifyAnnouncements',
+        'notifyMessages',
+        'notifyLeave',
+        'emailUpdates',
+        'smsUpdates',
+        'calendarSync',
+      ]) {
+        if (typeof next[key] === 'boolean') user.preferences[key] = next[key];
+      }
+      user.markModified('preferences');
+    }
 
     await user.save();
     return res.json({ user: user.toSafeJSON() });

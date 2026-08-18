@@ -33,6 +33,16 @@ const announcementSchema = new mongoose.Schema(
     attachmentName: { type: String, default: '' },
     attachmentUrl: { type: String, default: '' },
     attachmentPublicId: { type: String, default: '' },
+    attachmentSize: { type: Number, default: 0 },
+    reactionCount: { type: Number, default: 0, min: 0 },
+    likedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    acknowledgedBy: [
+      {
+        userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        at: { type: Date, default: Date.now },
+      },
+    ],
+    readBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     active: { type: Boolean, default: true },
     publishedAt: { type: Date, default: Date.now },
   },
