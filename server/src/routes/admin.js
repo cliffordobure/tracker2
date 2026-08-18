@@ -9,8 +9,10 @@ import {
   Bus,
   DriverProfile,
   Trip,
+  TripEvent,
   Announcement,
   LeaveRequest,
+  Notification,
 } from '../models/index.js';
 import { authenticate, requireSchoolStaff, requireSuperAdmin } from '../middleware/auth.js';
 import adminTripOps from './adminTripOps.js';
@@ -62,23 +64,170 @@ function chunk(arr, size) {
   return out;
 }
 
+function combineServiceTime(serviceDate, scheduledTime, scheduledFor) {
+  if (scheduledFor) {
+    const d = new Date(scheduledFor);
+    if (!Number.isNaN(d.getTime())) return d;
+  }
+  const base = serviceDate ? new Date(serviceDate) : new Date();
+  if (Number.isNaN(base.getTime())) return null;
+  if (!scheduledTime) return base;
+  const [hh, mm] = String(scheduledTime).split(':').map(Number);
+  const d = new Date(base);
+  d.setHours(Number.isFinite(hh) ? hh : 0, Number.isFinite(mm) ? mm : 0, 0, 0);
+  return d;
+}
+
+function monthStart() {
+  const d = new Date();
+  d.setDate(1);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
 // ——— Dashboard ———
 router.get('/dashboard', async (req, res) => {
   try {
     const filter = schoolFilter(req);
     const schoolId = resolveSchoolId(req);
+    const { start, end } = dayBounds();
+    const sinceMonth = monthStart();
 
-    const [schools, routes, kids, parents, drivers, buses, activeTrips, scheduledTrips] =
-      await Promise.all([
-        schoolId ? School.countDocuments({ _id: schoolId }) : School.countDocuments(),
-        Route.countDocuments(filter),
-        Kid.countDocuments({ ...filter, active: true }),
-        User.countDocuments({ role: 'parent', active: true, ...filter }),
-        User.countDocuments({ role: 'driver', active: true, ...filter }),
-        Bus.countDocuments({ ...filter, active: true }),
-        Trip.countDocuments({ ...filter, status: 'active' }),
-        Trip.countDocuments({ ...filter, status: 'scheduled' }),
-      ]);
+    const routeDocs = await Route.find(filter).select('_id');
+    const routeIds = routeDocs.map((r) => r._id);
+
+    const [
+      schools,
+      routes,
+      kids,
+      parents,
+      drivers,
+      teachers,
+      buses,
+      stops,
+      activeTrips,
+      scheduledTrips,
+      school,
+      addedKids,
+      addedTeachers,
+      addedBuses,
+      addedRoutes,
+      addedStops,
+      addedDrivers,
+      todayTrips,
+      announcements,
+      alerts,
+      unread,
+    ] = await Promise.all([
+      schoolId ? School.countDocuments({ _id: schoolId }) : School.countDocuments(),
+      Route.countDocuments(filter),
+      Kid.countDocuments({ ...filter, active: true }),
+      User.countDocuments({ role: 'parent', active: true, ...filter }),
+      User.countDocuments({ role: 'driver', active: true, ...filter }),
+      User.countDocuments({ role: 'teacher', active: true, ...filter }),
+      Bus.countDocuments({ ...filter, active: true }),
+      routeIds.length ? Stop.countDocuments({ routeId: { $in: routeIds } }) : 0,
+      Trip.countDocuments({ ...filter, status: 'active' }),
+      Trip.countDocuments({ ...filter, status: 'scheduled' }),
+      schoolId ? School.findById(schoolId).select('name logoUrl') : School.findOne().select('name logoUrl'),
+      Kid.countDocuments({ ...filter, createdAt: { $gte: sinceMonth } }),
+      User.countDocuments({ role: 'teacher', ...filter, createdAt: { $gte: sinceMonth } }),
+      Bus.countDocuments({ ...filter, createdAt: { $gte: sinceMonth } }),
+      Route.countDocuments({ ...filter, createdAt: { $gte: sinceMonth } }),
+      routeIds.length ? Stop.countDocuments({ routeId: { $in: routeIds }, createdAt: { $gte: sinceMonth } }) : 0,
+      User.countDocuments({ role: 'driver', ...filter, createdAt: { $gte: sinceMonth } }),
+      Trip.find({
+        ...filter,
+        $or: [
+          { serviceDate: { $gte: start, $lte: end } },
+          { scheduledFor: { $gte: start, $lte: end } },
+          { status: 'active' },
+        ],
+      })
+        .populate('routeId', 'name')
+        .populate('busId', 'plate label')
+        .populate('driverId', 'name')
+        .populate('scheduleId', 'scheduledTime')
+        .select('status startedAt endedAt scheduledFor serviceDate period direction kidIds busId driverId routeId scheduleId latestLocation tripCode'),
+      Announcement.find({ ...filter, active: { $ne: false }, archived: { $ne: true } })
+        .sort({ publishedAt: -1, createdAt: -1 })
+        .limit(4)
+        .select('title publishedAt createdAt category icon'),
+      Notification.find({ userId: req.user.id, archived: { $ne: true } })
+        .sort({ createdAt: -1 })
+        .limit(8)
+        .select('title body type createdAt important read'),
+      Notification.countDocuments({ userId: req.user.id, read: { $ne: true }, archived: { $ne: true } }),
+    ]);
+
+    const tripIds = todayTrips.map((t) => t._id);
+    const events = tripIds.length
+      ? await TripEvent.find({ tripId: { $in: tripIds } }).select('tripId kidId type')
+      : [];
+
+    const kidSet = new Set();
+    const picked = new Set();
+    const absent = new Set();
+    for (const t of todayTrips) {
+      for (const id of t.kidIds || []) kidSet.add(String(id._id || id));
+    }
+    for (const e of events) {
+      if (!e.kidId) continue;
+      const id = String(e.kidId);
+      if (e.type === 'picked_up') picked.add(id);
+      if (e.type === 'not_picked_up') absent.add(id);
+    }
+    const checkTotal = kidSet.size;
+    const checkPicked = [...picked].filter((id) => kidSet.has(id)).length;
+    const checkAbsent = [...absent].filter((id) => kidSet.has(id) && !picked.has(id)).length;
+    const checkPending = Math.max(0, checkTotal - checkPicked - checkAbsent);
+
+    let onTime = 0;
+    let delayed = 0;
+    let notStarted = 0;
+    let completed = 0;
+    let cancelled = 0;
+    let inProgress = 0;
+    for (const trip of todayTrips) {
+      if (trip.status === 'cancelled') {
+        cancelled += 1;
+        continue;
+      }
+      if (trip.status === 'completed') {
+        completed += 1;
+        continue;
+      }
+      if (trip.status === 'scheduled') {
+        notStarted += 1;
+        continue;
+      }
+      if (trip.status === 'active') {
+        inProgress += 1;
+        const scheduled = combineServiceTime(trip.serviceDate, trip.scheduleId?.scheduledTime, trip.scheduledFor);
+        if (!trip.startedAt || !scheduled) {
+          onTime += 1;
+          continue;
+        }
+        const delayMin = (new Date(trip.startedAt) - scheduled) / 60000;
+        if (Number.isFinite(delayMin) && delayMin > 5) delayed += 1;
+        else onTime += 1;
+      }
+    }
+
+    const busesOnRoute = new Set(
+      todayTrips.filter((t) => t.status === 'active').map((t) => String(t.busId?._id || t.busId || '')).filter(Boolean)
+    ).size;
+
+    const upcoming = todayTrips
+      .filter((t) => t.status === 'scheduled')
+      .map((t) => ({
+        trip: t,
+        at: combineServiceTime(t.serviceDate, t.scheduleId?.scheduledTime, t.scheduledFor),
+      }))
+      .filter((x) => x.at)
+      .sort((a, b) => a.at - b.at);
+    const next = upcoming[0] || null;
+    const minutesUntil = next ? Math.round((next.at - Date.now()) / 60000) : null;
 
     return res.json({
       schools,
@@ -89,9 +238,65 @@ router.get('/dashboard', async (req, res) => {
       buses,
       activeTrips,
       scheduledTrips,
+      teachers,
+      stops,
+      school: school ? { name: school.name || '', logoUrl: school.logoUrl || '' } : null,
+      addedThisMonth: {
+        kids: addedKids,
+        teachers: addedTeachers,
+        buses: addedBuses,
+        routes: addedRoutes,
+        stops: addedStops,
+        drivers: addedDrivers,
+      },
+      today: {
+        trips: { completed, inProgress, upcoming: notStarted, cancelled },
+        transport: { onTime, delayed, notStarted, completed, inProgress },
+        busesOnRoute,
+        busTotal: buses,
+        checkins: { picked: checkPicked, pending: checkPending, absent: checkAbsent, total: checkTotal },
+        nextTrip: next
+          ? {
+              routeName: next.trip.routeId?.name || '',
+              driverName: next.trip.driverId?.name || '',
+              plate: next.trip.busId?.plate || next.trip.busId?.label || '',
+              startsAt: next.at,
+              minutesUntil,
+            }
+          : null,
+      },
+      announcements: announcements.map((a) => ({
+        _id: a._id,
+        title: a.title,
+        at: a.publishedAt || a.createdAt,
+        category: a.category || '',
+      })),
+      alerts: alerts.map((n) => ({
+        _id: n._id,
+        title: n.title,
+        body: n.body,
+        type: n.type,
+        important: n.important === true,
+        read: n.read === true,
+        at: n.createdAt,
+      })),
+      unread,
     });
   } catch (err) {
     return res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/inbox', async (req, res) => {
+  try {
+    const unread = await Notification.countDocuments({
+      userId: req.user.id,
+      read: { $ne: true },
+      archived: { $ne: true },
+    });
+    res.json({ unread });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
