@@ -38,6 +38,8 @@ async function emitTripStarted(trip, kids) {
     .populate('kidIds');
 
   io?.to(`trip:${trip._id}`).emit('trip:started', { trip: populated });
+  const driverId = trip.driverId?._id || trip.driverId;
+  if (driverId) io?.to(`user:${driverId}`).emit('trip:started', { trip: populated });
   for (const kid of kids) {
     for (const parentId of kid.parentIds || []) {
       io?.to(`user:${parentId}`).emit('trip:started', { trip: populated, kidId: kid._id });
@@ -361,6 +363,8 @@ router.post('/:id/complete', authenticate, requireRole('driver'), async (req, re
 
     const payload = { tripId: trip._id.toString() };
     io?.to(`trip:${trip._id}`).emit('trip:completed', payload);
+    const driverId = trip.driverId?._id || trip.driverId;
+    if (driverId) io?.to(`user:${driverId}`).emit('trip:completed', payload);
     for (const kid of kids) {
       for (const parentId of kid.parentIds || []) {
         io?.to(`user:${parentId}`).emit('trip:completed', payload);
