@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useOutletContext, useSearchParams } from 'react-router-dom';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { api } from '../../lib/api';
@@ -9,20 +10,63 @@ import {
 } from '../../lib/mapMarkers';
 
 const TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
+const DONUT = {
+  live: '#16a34a',
+  stopped: '#e11d48',
+  stale: '#f97316',
+  no_gps: '#94a3b8',
+};
 
 function fmtTime(v) {
   if (!v) return '—';
   return new Date(v).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-function tripLabel(t) {
-  return t.busId?.label || t.busId?.plate || 'Bus';
+function ago(v) {
+  if (!v) return 'No GPS';
+  const ms = Date.now() - new Date(v).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return 'Just now';
+  if (ms < 20000) return 'Just now';
+  const mins = Math.max(1, Math.round(ms / 60000));
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.round(mins / 60);
+  return `${hrs} hr ago`;
 }
 
-export default function LiveTracking({ endpoint = '/admin/live-tracking' } = {}) {
-  const [buses, setBuses] = useState([]);
-  const [selectedId, setSelectedId] = useState(null);
-  const [error, setError] = useState('');
+function pct(part, total) {
+  if (!total) return '0%';
+  return `${((part / total) * 100).toFixed(1)}%`;
+}
+
+function tripLabel(t) {
+  return t?.busId?.label || t?.busId?.plate || 'Bus';
+}
+
+function directionLabel(value) {
+  if (value === 'to_school') return 'To school';
+  if (value === 'to_home') return 'To home';
+  return '';
+}
+
+function gpsMeta(status) {
+  if (status === 'live') return { key: 'active', label: 'On Route' };
+  if (status === 'stopped') return { key: 'noroute', label: 'Stopped' };
+  if (status === 'stale') return { key: 'inactive', label: 'GPS stale' };
+  return { key: 'muted', label: 'No GPS' };
+}
+
+function donutStyle(items, total) {
+  if (!total) return { background: '#e2e8f0' };
+  let acc = 0;
+  const parts = items.filter((i) => i.count > 0).map((item) => {
+    const start = acc;
+    acc += (item.count / total) * 100;
+    return `${item.color} ${start}% ${acc}%`;
+  });
+  return { background: parts.length ? `conic-gradient(${parts.join(', ')})` : '#e2e8f0' };
+}
+
+function LiveFleetMap({ buses, selectedId, onSelect, className, showLegend }) {
   const mapRef = useRef(null);
   const markersRef = useRef(new Map());
   const containerRef = useRef(null);
@@ -31,22 +75,6 @@ export default function LiveTracking({ endpoint = '/admin/live-tracking' } = {})
   useEffect(() => {
     selectedRef.current = selectedId;
   }, [selectedId]);
-
-  const load = useCallback(async () => {
-    try {
-      const data = await api(endpoint);
-      setBuses(data.buses || []);
-      setError('');
-    } catch (err) {
-      setError(err.message);
-    }
-  }, [endpoint]);
-
-  useEffect(() => {
-    load();
-    const id = setInterval(load, 4000);
-    return () => clearInterval(id);
-  }, [load]);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -60,14 +88,18 @@ export default function LiveTracking({ endpoint = '/admin/live-tracking' } = {})
       zoom: 12.5,
     });
     map.addControl(new mapboxgl.NavigationControl({ visualizePitch: false }), 'top-right');
+    map.addControl(new mapboxgl.FullscreenControl(), 'top-right');
     mapRef.current = map;
 
     const onResize = () => map.resize();
     window.addEventListener('resize', onResize);
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(onResize) : null;
+    ro?.observe(containerRef.current);
     requestAnimationFrame(onResize);
 
     return () => {
       window.removeEventListener('resize', onResize);
+      ro?.disconnect();
       markersRef.current.forEach((m) => m.remove());
       markersRef.current.clear();
       map.remove();
@@ -100,7 +132,7 @@ export default function LiveTracking({ endpoint = '/admin/live-tracking' } = {})
         el.style.cursor = 'pointer';
         el.addEventListener('click', (e) => {
           e.stopPropagation();
-          setSelectedId(id);
+          onSelect(id);
         });
         marker = new mapboxgl.Marker({ element: el, anchor: 'center' })
           .setLngLat([loc.lng, loc.lat])
@@ -128,7 +160,7 @@ export default function LiveTracking({ endpoint = '/admin/live-tracking' } = {})
       coords.forEach((c) => bounds.extend(c));
       map.fitBounds(bounds, { padding: 80, maxZoom: 14.5, duration: 600 });
     }
-  }, [buses]);
+  }, [buses, onSelect]);
 
   useEffect(() => {
     if (!selectedId || !mapRef.current) return;
@@ -142,13 +174,9 @@ export default function LiveTracking({ endpoint = '/admin/live-tracking' } = {})
     }
   }, [selectedId, buses]);
 
-  const selected = buses.find((b) => String(b.trip._id) === selectedId);
-
   return (
-    <div className="live-tracking live-tracking--fullscreen">
-      {error && <div className="alert live-tracking-alert">{error}</div>}
-
-      <div ref={containerRef} className="live-map-full">
+    <div className={`sa-live-map-wrap ${className || ''}`}>
+      <div ref={containerRef} className="sa-live-map-canvas">
         {(!TOKEN || TOKEN.includes('your_mapbox')) && (
           <div className="map-fallback">
             <p>
@@ -157,58 +185,383 @@ export default function LiveTracking({ endpoint = '/admin/live-tracking' } = {})
           </div>
         )}
       </div>
+      {showLegend ? (
+        <ul className="sa-live-legend">
+          <li><i className="is-live" /> On Route (live GPS)</li>
+          <li><i className="is-stopped" /> Stopped</li>
+          <li><i className="is-stale" /> GPS stale</li>
+          <li><i className="is-off" /> No GPS / offline</li>
+        </ul>
+      ) : null}
+    </div>
+  );
+}
 
-      <div className="live-fleet-bar">
-        <div className="live-fleet-head">
-          <strong>Live buses</strong>
-          <span className="muted">{buses.length} active</span>
-        </div>
-        <div className="live-fleet-scroll">
-          {!buses.length && <p className="muted live-fleet-empty">No active trips right now.</p>}
-          {buses.map((item) => {
-            const t = item.trip;
-            const id = String(t._id);
-            const active = id === selectedId;
-            return (
-              <button
-                key={id}
-                type="button"
-                className={`live-card ${active ? 'is-active' : ''}`}
-                onClick={() => setSelectedId(id)}
-              >
-                <strong>{tripLabel(t)}</strong>
-                <span className="muted">
-                  {t.tripCode || '—'} · {t.period || '—'} ·{' '}
-                  {t.direction === 'to_school' ? 'to school' : 'to home'}
-                </span>
-                <span>
-                  {t.driverId?.name || 'Driver'} · {t.routeId?.name || 'Route'}
-                </span>
-                <span className="muted">
-                  GPS {fmtTime(item.lastGpsAt)} · in {item.checkedIn}/{item.studentCount}
-                </span>
-              </button>
-            );
-          })}
-        </div>
+export default function LiveTracking({ endpoint = '/admin/live-tracking' } = {}) {
+  const { globalSearch = '' } = useOutletContext() || {};
+  const [params, setParams] = useSearchParams();
+  const full = params.get('full') === '1';
+  const focusTrip = params.get('trip');
+  const [buses, setBuses] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [alerts, setAlerts] = useState([]);
+  const [activity, setActivity] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
+  const [error, setError] = useState('');
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [statusFilter, setStatusFilter] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
+  const [q, setQ] = useState('');
 
-        {selected && (
-          <div className="live-detail">
-            <h3>{tripLabel(selected.trip)}</h3>
-            <p>
-              <strong>{selected.trip.tripCode}</strong> — {selected.trip.routeId?.name}
-            </p>
-            <p className="muted">
-              Driver {selected.trip.driverId?.name}
-              {selected.trip.driverId?.phone ? ` · ${selected.trip.driverId.phone}` : ''}
-            </p>
-            <p>
-              Started {fmtTime(selected.trip.startedAt)} · Check-in {selected.checkedIn} · Out{' '}
-              {selected.checkedOut}
-            </p>
-          </div>
-        )}
+  const load = useCallback(async () => {
+    try {
+      const data = await api(endpoint);
+      setBuses(data.buses || []);
+      setStats(data.stats || null);
+      setAlerts(data.alerts || []);
+      setActivity(data.activity || []);
+      setError('');
+    } catch (err) {
+      setError(err.message);
+    }
+  }, [endpoint]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  useEffect(() => {
+    if (!autoRefresh) return undefined;
+    const id = setInterval(load, 4000);
+    return () => clearInterval(id);
+  }, [load, autoRefresh]);
+
+  useEffect(() => {
+    if (globalSearch) setQ(globalSearch);
+  }, [globalSearch]);
+
+  useEffect(() => {
+    if (!focusTrip) return;
+    if (buses.some((b) => String(b.trip._id) === focusTrip)) setSelectedId(focusTrip);
+  }, [focusTrip, buses]);
+
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return buses.filter((item) => {
+      if (statusFilter && item.gpsStatus !== statusFilter) return false;
+      if (!needle) return true;
+      const t = item.trip;
+      const hay = [
+        tripLabel(t),
+        t.busId?.plate,
+        t.routeId?.name,
+        t.driverId?.name,
+        item.path,
+        t.tripCode,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return hay.includes(needle);
+    });
+  }, [buses, q, statusFilter]);
+
+  const select = useCallback((id) => setSelectedId(id), []);
+  const year = new Date().getFullYear();
+  const fleet = stats?.fleetTotal || 0;
+  const kpis = [
+    {
+      label: 'Vehicles Online',
+      value: stats?.online ?? 0,
+      hint: fleet ? `${pct(stats?.online ?? 0, fleet)} of ${fleet}` : 'Live GPS',
+      tint: 'purple',
+    },
+    {
+      label: 'On Route',
+      value: stats?.onRoute ?? buses.length,
+      hint: fleet ? `${pct(stats?.onRoute ?? 0, fleet)} of ${fleet}` : 'Active trips',
+      tint: 'green',
+    },
+    {
+      label: 'Arriving Soon',
+      value: '—',
+      hint: 'ETA not tracked',
+      tint: 'orange',
+    },
+    {
+      label: 'Students On Board',
+      value: stats?.studentsOnBoard ?? 0,
+      hint: 'Checked in, not dropped',
+      tint: 'violet',
+    },
+    {
+      label: 'Avg. Speed',
+      value: stats?.avgSpeedKmh != null ? `${stats.avgSpeedKmh} km/h` : '—',
+      hint: stats?.avgSpeedKmh != null ? 'Live GPS' : 'Not tracked',
+      tint: 'sky',
+    },
+  ];
+  const gpsDonut = [
+    { key: 'live', label: 'Live GPS', count: stats?.gps?.live || 0, color: DONUT.live },
+    { key: 'stopped', label: 'Stopped', count: stats?.gps?.stopped || 0, color: DONUT.stopped },
+    { key: 'stale', label: 'GPS stale', count: stats?.gps?.stale || 0, color: DONUT.stale },
+    { key: 'no_gps', label: 'No GPS', count: stats?.gps?.no_gps || 0, color: DONUT.no_gps },
+  ];
+  const donutTotal = gpsDonut.reduce((a, i) => a + i.count, 0);
+  const selected = buses.find((b) => String(b.trip._id) === selectedId);
+
+  const mapBlock = (
+    <LiveFleetMap
+      buses={filtered}
+      selectedId={selectedId}
+      onSelect={select}
+      className={full ? 'is-full' : ''}
+      showLegend
+    />
+  );
+
+  const listBlock = (
+    <article className={`sa-card sa-live-list${full ? ' is-overlay' : ''}`}>
+      <div className="sa-rd-card-head">
+        <h3>Live Vehicles ({filtered.length})</h3>
+        <label className="sa-live-refresh">
+          <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} />
+          Auto refresh: {autoRefresh ? 'On' : 'Off'}
+        </label>
       </div>
+      <div className="sa-live-list-tools">
+        <button type="button" className="sa-btn sa-btn-outline" onClick={() => setShowFilters((v) => !v)}>
+          Filters
+        </button>
+        <Link to="/school-admin/trip-instances" className="sa-text-link">
+          View All
+        </Link>
+      </div>
+      {showFilters && (
+        <div className="sa-tch-more">
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="GPS status">
+            <option value="">All GPS states</option>
+            <option value="live">On Route</option>
+            <option value="stopped">Stopped</option>
+            <option value="stale">GPS stale</option>
+            <option value="no_gps">No GPS</option>
+          </select>
+        </div>
+      )}
+      <div className="sa-table-wrap">
+        <table className="sa-table sa-live-table">
+          <thead>
+            <tr>
+              <th>Vehicle</th>
+              <th>Route</th>
+              <th>Last Update</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((item) => {
+              const t = item.trip;
+              const id = String(t._id);
+              const meta = gpsMeta(item.gpsStatus);
+              return (
+                <tr
+                  key={id}
+                  className={id === selectedId ? 'is-selected' : ''}
+                  onClick={() => setSelectedId(id)}
+                >
+                  <td>
+                    <strong>{tripLabel(t)}</strong>
+                    <small className="sa-stu-phone">{t.busId?.plate || t.tripCode || '—'}</small>
+                  </td>
+                  <td>
+                    <strong>{t.routeId?.name || '—'}</strong>
+                    <small className="sa-stu-phone">{item.path || directionLabel(t.direction) || '—'}</small>
+                  </td>
+                  <td>
+                    {ago(item.lastGpsAt)}
+                    <small className="sa-stu-phone">
+                      {item.speedKmh != null ? `${item.speedKmh} km/h` : 'No speed'}
+                    </small>
+                  </td>
+                  <td>
+                    <span className={`sa-stu-status is-${meta.key}`}>{meta.label}</span>
+                  </td>
+                </tr>
+              );
+            })}
+            {!filtered.length && (
+              <tr>
+                <td colSpan={4} className="sa-stu-empty">
+                  No active trips right now.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      {selected && (
+        <div className="sa-live-selected">
+          <strong>{tripLabel(selected.trip)}</strong>
+          <p>
+            {selected.trip.driverId?.name || 'Driver'}
+            {selected.trip.driverId?.phone ? ` · ${selected.trip.driverId.phone}` : ''}
+          </p>
+          <p className="sa-muted">
+            Started {fmtTime(selected.trip.startedAt)} · On board {selected.checkedIn}/{selected.studentCount}
+          </p>
+        </div>
+      )}
+    </article>
+  );
+
+  if (full) {
+    return (
+      <div className="live-tracking live-tracking--fullscreen">
+        {error && <div className="alert live-tracking-alert">{error}</div>}
+        {mapBlock}
+        <div className="sa-live-full-tools">
+          <Link to="/school-admin/live-tracking" className="sa-btn sa-btn-outline">
+            Back to dashboard
+          </Link>
+        </div>
+        {listBlock}
+      </div>
+    );
+  }
+
+  return (
+    <div className="sa-students sa-live">
+      {error && <div className="alert">{error}</div>}
+
+      <section className="sa-stu-kpis sa-tch-kpis sa-live-kpis" aria-label="Live tracking metrics">
+        {kpis.map((m) => (
+          <article key={m.label} className={`sa-stu-kpi tint-${m.tint}`}>
+            <div>
+              <span>{m.label}</span>
+              <strong>{m.value}</strong>
+              <em>{m.hint}</em>
+            </div>
+            <i className="sa-stu-kpi-icon" aria-hidden="true" />
+          </article>
+        ))}
+      </section>
+
+      <section className="sa-live-mid">
+        <article className="sa-card sa-live-map-card">
+          <div className="sa-rd-card-head">
+            <h3>Live Map</h3>
+            <button
+              type="button"
+              className="sa-text-link"
+              onClick={() => setParams({ full: '1' })}
+            >
+              View Full Map
+            </button>
+          </div>
+          {mapBlock}
+        </article>
+        {listBlock}
+      </section>
+
+      <section className="sa-live-widgets">
+        <article className="sa-card">
+          <h3>GPS Summary</h3>
+          {donutTotal ? (
+            <div className="sa-stops-donut-wrap">
+              <div className="sa-live-donut-ring">
+                <div className="sa-stops-donut" style={donutStyle(gpsDonut, donutTotal)} />
+                <div className="sa-live-donut-center">
+                  <strong>{donutTotal}</strong>
+                  <span>Vehicles</span>
+                </div>
+              </div>
+              <ul className="sa-stops-donut-key">
+                {gpsDonut.map((item) => (
+                  <li key={item.key}>
+                    <i style={{ background: item.color }} />
+                    {item.label}
+                    <strong>{item.count}</strong>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="sa-muted">No active trips right now.</p>
+          )}
+          <p className="sa-muted">On-time / delay ETAs are not stored.</p>
+          <Link to="/school-admin/reports" className="sa-text-link">
+            View Report
+          </Link>
+        </article>
+
+        <article className="sa-card">
+          <h3>Delays &amp; Alerts ({alerts.length})</h3>
+          {alerts.length ? (
+            <ul className="sa-stops-alerts">
+              {alerts.map((a, i) => (
+                <li key={`${a.text}-${i}`} className={`is-${a.tone}`}>
+                  {a.text}
+                  <small className="sa-stu-phone">{ago(a.at)}</small>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="sa-muted">No incident reports on active trips.</p>
+          )}
+          <Link to="/school-admin/incidents" className="sa-text-link">
+            View All Alerts
+          </Link>
+        </article>
+
+        <article className="sa-card">
+          <h3>Speed Overview</h3>
+          {stats?.avgSpeedKmh != null ? (
+            <>
+              <div
+                className="sa-live-gauge"
+                style={{
+                  '--sa-live-gauge': `${Math.min(50, (stats.avgSpeedKmh / 80) * 50)}%`,
+                }}
+              >
+                <span className="sa-live-gauge-arc" />
+              </div>
+              <p className="sa-trips-gauge">
+                <strong>{stats.avgSpeedKmh} km/h</strong>
+                <span>Live GPS average</span>
+              </p>
+            </>
+          ) : (
+            <p className="sa-muted">No live speed readings right now.</p>
+          )}
+          <Link to="/school-admin/reports" className="sa-text-link">
+            View Report
+          </Link>
+        </article>
+
+        <article className="sa-card">
+          <h3>Tracking Activity</h3>
+          {activity.length ? (
+            <ul className="sa-live-activity">
+              {activity.map((a, i) => (
+                <li key={`${a.text}-${i}`} className={`is-${a.tone}`}>
+                  <strong>{a.text}</strong>
+                  <small>{ago(a.at)}</small>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="sa-muted">No live trip events yet.</p>
+          )}
+          <Link to="/school-admin/trip-instances" className="sa-text-link">
+            View Logs
+          </Link>
+        </article>
+      </section>
+
+      <footer className="sa-home-foot">
+        <span>© {year} Transport</span>
+        <span>Transport Management System v1.0.0</span>
+      </footer>
     </div>
   );
 }

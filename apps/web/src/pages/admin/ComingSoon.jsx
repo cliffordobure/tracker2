@@ -1,4 +1,4 @@
-import { useParams } from 'react-router-dom';
+import { Navigate, useParams } from 'react-router-dom';
 
 const copy = {
   classes: 'Classes & houses management is coming next.',
@@ -25,6 +25,13 @@ const titles = {
 
 export default function ComingSoon() {
   const { feature } = useParams();
+  if (feature === 'stops') return <Navigate to="/school-admin/stops" replace />;
+  if (feature === 'reports') return <Navigate to="/school-admin/reports" replace />;
+  if (feature === 'calendar') return <Navigate to="/school-admin/calendar" replace />;
+  if (feature === 'notifications') return <Navigate to="/school-admin/notifications" replace />;
+  if (feature === 'incidents') return <Navigate to="/school-admin/incidents" replace />;
+  if (feature === 'messages') return <Navigate to="/school-admin/messages" replace />;
+  if (feature === 'users') return <Navigate to="/school-admin/users" replace />;
   const slug = feature || 'feature';
   const title =
     titles[slug] || slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());

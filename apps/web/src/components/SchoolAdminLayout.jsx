@@ -1,25 +1,26 @@
 import { useEffect, useMemo, useState } from 'react';
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../lib/api';
+import { getSocket } from '../lib/socket';
 
 const navItems = [
   { to: '/school-admin', label: 'Dashboard', end: true, icon: 'dashboard' },
   { to: '/school-admin/students', label: 'Students', icon: 'students' },
-  { to: '/school-admin/coming-soon/teachers', label: 'Teachers', icon: 'teachers' },
+  { to: '/school-admin/teachers', label: 'Teachers', icon: 'teachers' },
   { to: '/school-admin/drivers', label: 'Drivers', icon: 'drivers' },
   { to: '/school-admin/buses', label: 'Buses / Vehicles', icon: 'buses' },
   { to: '/school-admin/routes', label: 'Routes', icon: 'routes' },
-  { to: '/school-admin/coming-soon/stops', label: 'Stops', icon: 'stops' },
+  { to: '/school-admin/stops', label: 'Stops', icon: 'stops' },
   { to: '/school-admin/trip-instances', label: 'Trips', icon: 'trips' },
   { to: '/school-admin/live-tracking', label: 'Live Tracking', icon: 'live' },
   { to: '/school-admin/coming-soon/attendance', label: 'Attendance', icon: 'attendance' },
-  { to: '/school-admin/coming-soon/reports', label: 'Reports & Analytics', icon: 'reports' },
-  { to: '/school-admin/coming-soon/notifications', label: 'Notifications', icon: 'bell' },
-  { to: '/school-admin/coming-soon/incidents', label: 'Incidents', icon: 'incidents' },
-  { to: '/school-admin/coming-soon/messages', label: 'Messages', icon: 'messages' },
-  { to: '/school-admin/coming-soon/calendar', label: 'Calendar', icon: 'calendar' },
-  { to: '/school-admin/coming-soon/users', label: 'Users & Roles', icon: 'users' },
+  { to: '/school-admin/reports', label: 'Reports & Analytics', icon: 'reports' },
+  { to: '/school-admin/notifications', label: 'Notifications', icon: 'bell' },
+  { to: '/school-admin/incidents', label: 'Incidents', icon: 'incidents' },
+  { to: '/school-admin/messages', label: 'Messages', icon: 'messages' },
+  { to: '/school-admin/calendar', label: 'Calendar', icon: 'calendar' },
+  { to: '/school-admin/users', label: 'Users & Roles', icon: 'users' },
 ];
 
 const extraItems = [
@@ -36,15 +37,23 @@ const extraItems = [
 
 const pageMeta = {
   '/school-admin': { title: 'Dashboard', welcome: true },
-  '/school-admin/school': { title: 'Settings' },
-  '/school-admin/students': { title: 'Students' },
+  '/school-admin/school': { title: 'Settings', crumbs: ['Dashboard', 'Settings'] },
+  '/school-admin/students': { title: 'Students', crumbs: ['Dashboard', 'Students'] },
+  '/school-admin/teachers': { title: 'Teachers', crumbs: ['Dashboard', 'Teachers'] },
   '/school-admin/parents': { title: 'Parents' },
-  '/school-admin/drivers': { title: 'Drivers' },
-  '/school-admin/buses': { title: 'Buses / Vehicles' },
-  '/school-admin/routes': { title: 'Routes' },
+  '/school-admin/drivers': { title: 'Drivers', crumbs: ['Dashboard', 'Drivers'] },
+  '/school-admin/buses': { title: 'Buses / Vehicles', crumbs: ['Dashboard', 'Buses / Vehicles'] },
+  '/school-admin/routes': { title: 'Routes', crumbs: ['Dashboard', 'Routes'] },
+  '/school-admin/stops': { title: 'Stops', crumbs: ['Dashboard', 'Stops'] },
   '/school-admin/trip-scheduling': { title: 'Trip Scheduling' },
-  '/school-admin/trip-instances': { title: 'Trips' },
-  '/school-admin/live-tracking': { title: 'Live Tracking' },
+  '/school-admin/trip-instances': { title: 'Trips', crumbs: ['Dashboard', 'Trips'] },
+  '/school-admin/live-tracking': { title: 'Live Tracking', crumbs: ['Dashboard', 'Live Tracking'] },
+  '/school-admin/reports': { title: 'Reports & Analytics', crumbs: ['Dashboard', 'Reports & Analytics'] },
+  '/school-admin/calendar': { title: 'Calendar', crumbs: ['Dashboard', 'Calendar'] },
+  '/school-admin/notifications': { title: 'Notifications', crumbs: ['Dashboard', 'Notifications'] },
+  '/school-admin/incidents': { title: 'Incidents', crumbs: ['Dashboard', 'Incidents'] },
+  '/school-admin/messages': { title: 'Messages', crumbs: ['Dashboard', 'Messages'] },
+  '/school-admin/users': { title: 'Users & Roles', crumbs: ['Dashboard', 'Users & Roles'] },
   '/school-admin/leave-requests': { title: 'Leave Requests' },
   '/school-admin/noticeboard': { title: 'Noticeboard' },
 };
@@ -177,6 +186,7 @@ export default function SchoolAdminLayout() {
   const { user, logout, toast } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [schoolName, setSchoolName] = useState('School Admin');
@@ -208,7 +218,89 @@ export default function SchoolAdminLayout() {
       .catch(() => {});
   }, [location.pathname]);
 
+  useEffect(() => {
+    const refresh = () => {
+      api('/admin/inbox')
+        .then((d) => setUnread(Number(d.unread) || 0))
+        .catch(() => {});
+    };
+    const s = getSocket();
+    s?.on('notification:new', refresh);
+    window.addEventListener('sa-inbox-refresh', refresh);
+    return () => {
+      s?.off('notification:new', refresh);
+      window.removeEventListener('sa-inbox-refresh', refresh);
+    };
+  }, []);
+
   const meta = useMemo(() => {
+    if (location.pathname.startsWith('/school-admin/students/') && location.pathname !== '/school-admin/students') {
+      return {
+        title: 'Student Details',
+        crumbs: [
+          { label: 'Dashboard', to: '/school-admin' },
+          { label: 'Students', to: '/school-admin/students' },
+          { label: 'Student Details' },
+        ],
+      };
+    }
+    if (location.pathname.startsWith('/school-admin/teachers/') && location.pathname !== '/school-admin/teachers') {
+      return {
+        title: 'Teacher Details',
+        crumbs: [
+          { label: 'Dashboard', to: '/school-admin' },
+          { label: 'Teachers', to: '/school-admin/teachers' },
+          { label: 'Teacher Details' },
+        ],
+      };
+    }
+    if (location.pathname.startsWith('/school-admin/drivers/') && location.pathname !== '/school-admin/drivers') {
+      return {
+        title: 'Driver Details',
+        crumbs: [
+          { label: 'Dashboard', to: '/school-admin' },
+          { label: 'Drivers', to: '/school-admin/drivers' },
+          { label: 'Driver Details' },
+        ],
+      };
+    }
+    if (location.pathname.startsWith('/school-admin/buses/') && location.pathname !== '/school-admin/buses') {
+      return {
+        title: 'Vehicle Details',
+        crumbs: [
+          { label: 'Dashboard', to: '/school-admin' },
+          { label: 'Buses / Vehicles', to: '/school-admin/buses' },
+          { label: 'Vehicle Details' },
+        ],
+      };
+    }
+    if (location.pathname.startsWith('/school-admin/routes/') && location.pathname !== '/school-admin/routes') {
+      return {
+        title: 'Route Details',
+        crumbs: [
+          { label: 'Dashboard', to: '/school-admin' },
+          { label: 'Routes', to: '/school-admin/routes' },
+          { label: 'Route Details' },
+        ],
+      };
+    }
+    if (location.pathname === '/school-admin/reports') {
+      const type = searchParams.get('type');
+      const extra =
+        type === 'fleet'
+          ? 'Fleet Performance'
+          : type === 'safety'
+            ? 'Safety & Compliance'
+            : type === 'attendance'
+              ? 'Student Attendance'
+              : '';
+      return {
+        title: 'Reports & Analytics',
+        crumbs: extra
+          ? ['Dashboard', 'Reports & Analytics', extra]
+          : ['Dashboard', 'Reports & Analytics'],
+      };
+    }
     if (pageMeta[location.pathname]) return pageMeta[location.pathname];
     if (location.pathname.startsWith('/school-admin/coming-soon')) {
       const slug = location.pathname.split('/').pop();
@@ -216,10 +308,30 @@ export default function SchoolAdminLayout() {
       return { title };
     }
     return { title: 'School Admin' };
-  }, [location.pathname]);
+  }, [location.pathname, searchParams]);
 
-  const isLiveMap = location.pathname === '/school-admin/live-tracking';
+  const isLivePage = location.pathname === '/school-admin/live-tracking';
+  const isReports = location.pathname === '/school-admin/reports';
+  const isCalendar = location.pathname === '/school-admin/calendar';
+  const isNotifications = location.pathname === '/school-admin/notifications';
+  const isIncidents = location.pathname === '/school-admin/incidents';
+  const isMessages = location.pathname === '/school-admin/messages';
+  const isUsers = location.pathname === '/school-admin/users';
+  const isSettings = location.pathname === '/school-admin/school';
+  const isLiveMap = isLivePage && searchParams.get('full') === '1';
   const isDashboard = location.pathname === '/school-admin';
+  const isStudents = location.pathname === '/school-admin/students';
+  const isStudentDetails = location.pathname.startsWith('/school-admin/students/');
+  const isTeachers = location.pathname === '/school-admin/teachers';
+  const isTeacherDetails = location.pathname.startsWith('/school-admin/teachers/');
+  const isDrivers = location.pathname === '/school-admin/drivers';
+  const isDriverDetails = location.pathname.startsWith('/school-admin/drivers/');
+  const isBuses = location.pathname === '/school-admin/buses';
+  const isBusDetails = location.pathname.startsWith('/school-admin/buses/');
+  const isRoutes = location.pathname === '/school-admin/routes';
+  const isRouteDetails = location.pathname.startsWith('/school-admin/routes/') && !isRoutes;
+  const isStops = location.pathname === '/school-admin/stops';
+  const isTrips = location.pathname === '/school-admin/trip-instances';
   const dateLabel = new Date().toLocaleDateString(undefined, {
     weekday: 'long',
     day: 'numeric',
@@ -231,6 +343,27 @@ export default function SchoolAdminLayout() {
 
   function onSearch(e) {
     e.preventDefault();
+    if (isStudentDetails) {
+      navigate('/school-admin/students');
+      return;
+    }
+    if (isTeacherDetails) {
+      navigate('/school-admin/teachers');
+      return;
+    }
+    if (isDriverDetails) {
+      navigate('/school-admin/drivers');
+      return;
+    }
+    if (isBusDetails) {
+      navigate('/school-admin/buses');
+      return;
+    }
+    if (isRouteDetails) {
+      navigate('/school-admin/routes');
+      return;
+    }
+    if (isStudents || isTeachers || isDrivers || isBuses || isRoutes || isStops || isTrips || isLivePage || isReports || isCalendar || isNotifications || isIncidents || isMessages || isUsers) return;
     const q = search.trim().toLowerCase();
     if (q.length < 2) return;
     const hit =
@@ -272,6 +405,9 @@ export default function SchoolAdminLayout() {
                 <NavIcon name={item.icon} />
               </span>
               {!collapsed && <span>{item.label}</span>}
+              {item.icon === 'bell' && unread > 0 && (
+                <i className="sa-nav-badge">{unread > 9 ? '9+' : unread}</i>
+              )}
             </NavLink>
           ))}
           {!collapsed && <p className="sa-nav-section-title">More</p>}
@@ -314,6 +450,21 @@ export default function SchoolAdminLayout() {
               {isDashboard && (
                 <p className="sa-page-welcome">Welcome back, {user?.name?.split(' ')[0] || 'Admin'}! Here&apos;s what&apos;s happening today.</p>
               )}
+              {meta.crumbs && (
+                <p className="sa-crumbs">
+                  {meta.crumbs.map((c, i) => {
+                    const label = typeof c === 'string' ? c : c.label;
+                    const to = typeof c === 'string' ? (i === 0 ? '/school-admin' : '') : c.to;
+                    const last = i === meta.crumbs.length - 1;
+                    return (
+                      <span key={label}>
+                        {i > 0 && <span className="sa-crumb-sep">›</span>}
+                        {to && !last ? <Link to={to}>{label}</Link> : <span className={last ? 'is-current' : ''}>{label}</span>}
+                      </span>
+                    );
+                  })}
+                </p>
+              )}
             </div>
           </div>
 
@@ -322,7 +473,31 @@ export default function SchoolAdminLayout() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search anything..."
+              placeholder={
+                isStudentDetails
+                  ? 'Search students, parents...'
+                  : isTeacherDetails
+                    ? 'Search students, teachers, routes...'
+                    : isDriverDetails || isBusDetails || isRouteDetails
+                      ? 'Search students, staff, routes...'
+                      : isStudents
+                        ? 'Search students...'
+                        : isTeachers
+                          ? 'Search teachers...'
+                          : isDrivers
+                            ? 'Search drivers...'
+                            : isBuses
+                              ? 'Search buses...'
+                              : isRoutes
+                                ? 'Search students, staff, routes...'
+                                : isStops
+                                  ? 'Search students, staff, routes...'
+                                  : isTrips
+                                    ? 'Search students, staff, routes...'
+                                    : isLivePage || isReports || isCalendar || isNotifications || isIncidents || isMessages || isUsers || isSettings
+                                      ? 'Search students, staff, routes...'
+                                      : 'Search anything...'
+              }
             />
           </form>
 
@@ -332,7 +507,7 @@ export default function SchoolAdminLayout() {
               type="button"
               className="sa-icon-btn"
               aria-label="Notifications"
-              onClick={() => navigate('/school-admin/coming-soon/notifications')}
+              onClick={() => navigate('/school-admin/notifications')}
             >
               <span aria-hidden="true">🔔</span>
               {unread > 0 && <i>{unread > 9 ? '9+' : unread}</i>}

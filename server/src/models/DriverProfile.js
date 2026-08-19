@@ -8,6 +8,8 @@ const driverProfileSchema = new mongoose.Schema(
     vehicleColor: { type: String, default: '' },
     busId: { type: mongoose.Schema.Types.ObjectId, ref: 'Bus', default: null },
     assignedRouteIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Route' }],
+    licenseNumber: { type: String, default: '', trim: true },
+    licenseExpiry: { type: Date, default: null },
   },
   { timestamps: true }
 );

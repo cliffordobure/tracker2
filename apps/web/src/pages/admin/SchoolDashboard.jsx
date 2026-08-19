@@ -465,7 +465,7 @@ export default function SchoolDashboard() {
               <h3>Recent Alerts</h3>
               <p>Your latest notifications</p>
             </div>
-            <Link to="/school-admin/coming-soon/notifications" className="sa-text-link">
+            <Link to="/school-admin/notifications" className="sa-text-link">
               Inbox
             </Link>
           </header>

@@ -7,13 +7,26 @@ import AdminDashboard from './pages/admin/Dashboard';
 import SchoolDashboard from './pages/admin/SchoolDashboard';
 import Schools from './pages/admin/Schools';
 import RoutesPage from './pages/admin/Routes';
+import RouteDetails from './pages/admin/RouteDetails';
+import StopsPage from './pages/admin/Stops';
 import Parents from './pages/admin/Parents';
 import Drivers from './pages/admin/Drivers';
+import DriverDetails from './pages/admin/DriverDetails';
+import Teachers from './pages/admin/Teachers';
+import TeacherDetails from './pages/admin/TeacherDetails';
 import Kids from './pages/admin/Kids';
+import StudentDetails from './pages/admin/StudentDetails';
 import Buses from './pages/admin/Buses';
+import VehicleDetails from './pages/admin/VehicleDetails';
 import TripScheduling from './pages/admin/TripScheduling';
 import TripInstances from './pages/admin/TripInstances';
 import LiveTracking from './pages/admin/LiveTracking';
+import Reports from './pages/admin/Reports';
+import CalendarPage from './pages/admin/Calendar';
+import Notifications from './pages/admin/Notifications';
+import Incidents from './pages/admin/Incidents';
+import Messages from './pages/admin/Messages';
+import UsersRoles from './pages/admin/UsersRoles';
 import SchoolSettings from './pages/admin/SchoolSettings';
 import LeaveRequests from './pages/admin/LeaveRequests';
 import Noticeboard from './pages/admin/Noticeboard';
@@ -77,13 +90,26 @@ export default function App() {
         <Route index element={<SchoolDashboard />} />
         <Route path="school" element={<SchoolSettings />} />
         <Route path="buses" element={<Buses />} />
+        <Route path="buses/:id" element={<VehicleDetails />} />
         <Route path="routes" element={<RoutesPage />} />
+        <Route path="routes/:id" element={<RouteDetails />} />
+        <Route path="stops" element={<StopsPage />} />
         <Route path="students" element={<Kids />} />
+        <Route path="students/:id" element={<StudentDetails />} />
+        <Route path="teachers" element={<Teachers />} />
+        <Route path="teachers/:id" element={<TeacherDetails />} />
         <Route path="parents" element={<Parents />} />
         <Route path="drivers" element={<Drivers />} />
+        <Route path="drivers/:id" element={<DriverDetails />} />
         <Route path="trip-scheduling" element={<TripScheduling />} />
         <Route path="trip-instances" element={<TripInstances />} />
         <Route path="live-tracking" element={<LiveTracking />} />
+        <Route path="reports" element={<Reports />} />
+        <Route path="calendar" element={<CalendarPage />} />
+        <Route path="notifications" element={<Notifications />} />
+        <Route path="incidents" element={<Incidents />} />
+        <Route path="messages" element={<Messages />} />
+        <Route path="users" element={<UsersRoles />} />
         <Route path="leave-requests" element={<LeaveRequests />} />
         <Route path="noticeboard" element={<Noticeboard />} />
         <Route path="coming-soon/:feature" element={<ComingSoon />} />

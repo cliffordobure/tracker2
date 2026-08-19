@@ -13,6 +13,32 @@ const busSchema = new mongoose.Schema(
     year: { type: Number, default: null },
     safetyFeatures: { type: String, default: '', trim: true },
     active: { type: Boolean, default: true },
+    code: { type: String, default: '', trim: true },
+    photoUrl: { type: String, default: '' },
+    photoPublicId: { type: String, default: '' },
+    vehicleType: {
+      type: String,
+      enum: ['', 'school_bus', 'bus', 'minibus', 'van'],
+      default: '',
+    },
+    fuelType: {
+      type: String,
+      enum: ['', 'diesel', 'petrol', 'hybrid', 'electric'],
+      default: '',
+    },
+    serviceStatus: {
+      type: String,
+      enum: ['active', 'maintenance', 'out_of_service'],
+      default: 'active',
+    },
+    insuranceExpiry: { type: Date, default: null },
+    insuranceProvider: { type: String, default: '', trim: true },
+    insurancePolicyNo: { type: String, default: '', trim: true },
+    nextServiceAt: { type: Date, default: null },
+    lastServiceAt: { type: Date, default: null },
+    chassisNumber: { type: String, default: '', trim: true },
+    engineNumber: { type: String, default: '', trim: true },
+    mileage: { type: Number, default: null, min: 0 },
   },
   { timestamps: true }
 );

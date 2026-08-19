@@ -30,9 +30,15 @@ function createStopElement(stop, { isNext, index }) {
   el.className = `marker-stop ${stop.type === 'school' ? 'is-school' : 'is-home'} ${
     isNext ? 'is-next' : ''
   }`;
+  const num = stop.pinLabel == null ? index + 1 : stop.pinLabel;
+  const name = String(stop.name || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  const color = /^#[0-9a-f]{3,8}$/i.test(String(stop.pinColor || '')) ? stop.pinColor : '';
   el.innerHTML = `
-    <span class="marker-stop-pin"><span class="marker-stop-num">${index + 1}</span></span>
-    <span class="marker-stop-label">${stop.name}</span>
+    <span class="marker-stop-pin"${color ? ` style="background:${color}"` : ''}><span class="marker-stop-num">${num}</span></span>
+    <span class="marker-stop-label">${name}</span>
   `;
   el.title = stop.name;
   return el;

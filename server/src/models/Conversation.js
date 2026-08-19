@@ -18,6 +18,7 @@ const conversationSchema = new mongoose.Schema(
     lastMessageAt: { type: Date, default: Date.now, index: true },
     unreadCount: { type: Number, default: 0, min: 0 },
     driverUnreadCount: { type: Number, default: 0, min: 0 },
+    staffUnreadCount: { type: Number, default: 0, min: 0 },
     archived: { type: Boolean, default: false, index: true },
     sourceKey: { type: String, default: '', index: true },
   },

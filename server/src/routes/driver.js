@@ -2391,6 +2391,7 @@ async function driverSendMessage(convo, driver, body) {
   convo.archived = false;
   convo.driverUnreadCount = 0;
   convo.unreadCount = (convo.unreadCount || 0) + 1;
+  convo.staffUnreadCount = (convo.staffUnreadCount || 0) + 1;
   await convo.save();
   const notifyId = convo.parentId || (String(convo.counterpartUserId) !== String(driver._id) ? convo.counterpartUserId : null);
   if (notifyId) {

@@ -11,6 +11,8 @@ const stopSchema = new mongoose.Schema(
       lng: { type: Number, required: true },
     },
     address: { type: String, default: '', trim: true, maxlength: 200 },
+    area: { type: String, default: '', trim: true, maxlength: 80 },
+    active: { type: Boolean, default: true },
   },
   { timestamps: true }
 );
