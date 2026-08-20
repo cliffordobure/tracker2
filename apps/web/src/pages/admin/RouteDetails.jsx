@@ -16,11 +16,6 @@ const TABS = [
   { id: 'activity', label: 'Activity Log' },
 ];
 
-const TAB_COPY = {
-  notes: 'Staff notes about this route will live here.',
-  activity: 'An activity log of route and stop changes is coming next.',
-};
-
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const PIN_COLORS = ['#5d3fd3', '#0ea5e9', '#16a34a', '#f97316', '#e11d48', '#14b8a6'];
 
@@ -349,12 +344,40 @@ export default function RouteDetails() {
         ))}
       </nav>
 
-      {(tab === 'notes' || tab === 'activity') && (
-        <div className="sa-empty-panel">
-          <div className="sa-empty-icon" aria-hidden="true">◈</div>
-          <h2>Coming Soon</h2>
-          <p>{TAB_COPY[tab]}</p>
-        </div>
+      {tab === 'notes' && (
+        <section className="sa-card sa-sd-tab">
+          <h3>Notes</h3>
+          {route.description ? (
+            <p className="sa-sd-remarks">{route.description}</p>
+          ) : (
+            <p className="sa-muted">No description is stored on this route.</p>
+          )}
+        </section>
+      )}
+
+      {tab === 'activity' && (
+        <section className="sa-card sa-sd-tab">
+          <h3>Activity log</h3>
+          <ul className="sa-activity">
+            <li>
+              <strong>Route updated</strong>
+              <small>{fmtDate(route.updatedAt) || '—'}</small>
+            </li>
+            {(data.recentTrips || []).map((t) => {
+              const meta = tripStatusMeta(t.status);
+              return (
+                <li key={t.id}>
+                  <strong>{meta.label} trip</strong>
+                  <span>{[t.driverName, t.busLabel].filter(Boolean).join(' · ')}</span>
+                  <small>{fmtDate(t.serviceDate || t.scheduledFor || t.startedAt) || '—'}</small>
+                </li>
+              );
+            })}
+          </ul>
+          {!data.recentTrips?.length ? (
+            <p className="sa-muted">No trips recorded for this route yet.</p>
+          ) : null}
+        </section>
       )}
 
       {tab === 'overview' && (

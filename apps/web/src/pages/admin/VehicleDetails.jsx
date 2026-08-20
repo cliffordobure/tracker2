@@ -14,17 +14,6 @@ const TABS = [
   { id: 'activity', label: 'Activity Log' },
 ];
 
-const TAB_COPY = {
-  maintenance: 'Service history and scheduled maintenance will sit here.',
-  documents: 'Logbook, insurance, and inspection files will be uploaded here.',
-  trips: 'A full trip history for this vehicle will be added here.',
-  fuel: 'Fuel and running-cost records are not tracked yet.',
-  insurance: 'Insurance documents and claim history will live here.',
-  assignments: 'Driver and route assignments will be managed from this tab.',
-  notes: 'Staff notes about this vehicle will live here.',
-  activity: 'An activity log of vehicle changes is coming next.',
-};
-
 const TYPE_LABELS = {
   school_bus: 'School Bus',
   bus: 'Bus',
@@ -278,12 +267,193 @@ export default function VehicleDetails() {
         ))}
       </nav>
 
-      {tab !== 'overview' && (
-        <div className="sa-empty-panel">
-          <div className="sa-empty-icon" aria-hidden="true">◈</div>
-          <h2>Coming Soon</h2>
-          <p>{TAB_COPY[tab]}</p>
-        </div>
+      {tab === 'maintenance' && (
+        <section className="sa-card sa-sd-tab">
+          <div className="sa-rd-card-head">
+            <h3>Maintenance</h3>
+            <Link to={`/school-admin/buses?edit=${bus._id}`} className="sa-btn sa-btn-outline">
+              Edit dates
+            </Link>
+          </div>
+          <dl className="sa-sd-dl">
+            <div><dt>Status</dt><dd>{status.label}</dd></div>
+            <div><dt>Last service</dt><dd>{dash(fmtDate(bus.lastServiceAt))}</dd></div>
+            <div>
+              <dt>Next service</dt>
+              <dd>
+                {dash(fmtDate(bus.nextServiceAt))}
+                {daysNote(svcDays, { expiredLabel: 'Overdue', todayLabel: 'Due today', leftLabel: 'service' })}
+              </dd>
+            </div>
+            <div><dt>Mileage</dt><dd>{bus.mileage != null ? `${Number(bus.mileage).toLocaleString()} km` : '—'}</dd></div>
+          </dl>
+          <p className="sa-muted">Individual workshop visits are not stored beyond last and next service dates.</p>
+        </section>
+      )}
+
+      {tab === 'documents' && (
+        <section className="sa-card sa-sd-tab">
+          <h3>Documents</h3>
+          <dl className="sa-sd-dl">
+            <div>
+              <dt>Photo</dt>
+              <dd>
+                {bus.photoUrl ? (
+                  <a href={bus.photoUrl} target="_blank" rel="noreferrer">Open</a>
+                ) : (
+                  '—'
+                )}
+              </dd>
+            </div>
+            <div><dt>Insurance provider</dt><dd>{dash(bus.insuranceProvider)}</dd></div>
+            <div><dt>Policy no.</dt><dd>{dash(bus.insurancePolicyNo)}</dd></div>
+          </dl>
+          <p className="sa-muted">Scanned logbook and inspection files are not stored.</p>
+        </section>
+      )}
+
+      {tab === 'trips' && (
+        <section className="sa-card sa-sd-tab">
+          <div className="sa-rd-card-head">
+            <h3>Trips</h3>
+            <Link to="/school-admin/trip-instances" className="sa-btn sa-btn-outline">
+              All trips
+            </Link>
+          </div>
+          {data.recentTrips?.length ? (
+            <table className="sa-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Route</th>
+                  <th>Driver</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.recentTrips.map((t) => {
+                  const meta = tripStatusMeta(t.status);
+                  return (
+                    <tr key={t.id}>
+                      <td>{fmtDate(t.serviceDate || t.scheduledFor || t.startedAt) || '—'}</td>
+                      <td>{t.routeName || '—'}</td>
+                      <td>{t.driverName || '—'}</td>
+                      <td><em className={`sa-stu-status is-${meta.key}`}>{meta.label}</em></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          ) : (
+            <p className="sa-muted">No trips recorded for this vehicle.</p>
+          )}
+        </section>
+      )}
+
+      {tab === 'fuel' && (
+        <section className="sa-card sa-sd-tab">
+          <h3>Fuel & costs</h3>
+          <dl className="sa-sd-dl">
+            <div><dt>Fuel type</dt><dd>{dash(FUEL_LABELS[bus.fuelType])}</dd></div>
+          </dl>
+          <p className="sa-muted">Fuel litres and running costs are not tracked in this system.</p>
+        </section>
+      )}
+
+      {tab === 'insurance' && (
+        <section className="sa-card sa-sd-tab">
+          <div className="sa-rd-card-head">
+            <h3>Insurance</h3>
+            <Link to={`/school-admin/buses?edit=${bus._id}`} className="sa-btn sa-btn-outline">
+              Edit
+            </Link>
+          </div>
+          <dl className="sa-sd-dl">
+            <div><dt>Provider</dt><dd>{dash(bus.insuranceProvider)}</dd></div>
+            <div><dt>Policy no.</dt><dd>{dash(bus.insurancePolicyNo)}</dd></div>
+            <div>
+              <dt>Expiry</dt>
+              <dd>
+                {dash(fmtDate(bus.insuranceExpiry))}
+                {daysNote(insDays, { expiredLabel: 'Expired', todayLabel: 'Expires today', leftLabel: 'days' })}
+              </dd>
+            </div>
+          </dl>
+          <p className="sa-muted">Claims history is not stored.</p>
+        </section>
+      )}
+
+      {tab === 'assignments' && (
+        <section className="sa-card sa-sd-tab">
+          <div className="sa-rd-card-head">
+            <h3>Assignments</h3>
+            <Link to="/school-admin/drivers" className="sa-btn sa-btn-outline">
+              Drivers
+            </Link>
+          </div>
+          <h4>Drivers</h4>
+          {data.drivers?.length ? (
+            <ul className="sa-td-list">
+              {data.drivers.map((d) => (
+                <li key={d.id}>
+                  <Link to={`/school-admin/drivers/${d.id}`}>{d.name}</Link>
+                  {d.phone ? ` · ${d.phone}` : ''}
+                  {d.licenseNumber ? ` · ${d.licenseNumber}` : ''}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="sa-muted">No driver is assigned to this vehicle.</p>
+          )}
+          <h4>Routes</h4>
+          {data.routes?.length ? (
+            <ul className="sa-td-list">
+              {data.routes.map((r) => (
+                <li key={r.id}>
+                  {r.name ? <Link to={`/school-admin/routes/${r.id}`}>{r.name}</Link> : r.id}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="sa-muted">No routes are linked through assigned drivers.</p>
+          )}
+        </section>
+      )}
+
+      {tab === 'notes' && (
+        <section className="sa-card sa-sd-tab">
+          <h3>Notes</h3>
+          {bus.safetyFeatures ? (
+            <p className="sa-sd-remarks">{bus.safetyFeatures}</p>
+          ) : (
+            <p className="sa-muted">No notes stored on this vehicle.</p>
+          )}
+        </section>
+      )}
+
+      {tab === 'activity' && (
+        <section className="sa-card sa-sd-tab">
+          <h3>Activity log</h3>
+          <ul className="sa-activity">
+            <li>
+              <strong>Vehicle updated</strong>
+              <small>{fmtDate(bus.updatedAt) || '—'}</small>
+            </li>
+            {bus.lastServiceAt ? (
+              <li>
+                <strong>Last service date</strong>
+                <small>{fmtDate(bus.lastServiceAt)}</small>
+              </li>
+            ) : null}
+            {(data.recentTrips || []).slice(0, 12).map((t) => (
+              <li key={t.id}>
+                <strong>{tripStatusMeta(t.status).label} trip</strong>
+                <span>{[t.routeName, t.driverName].filter(Boolean).join(' · ')}</span>
+                <small>{fmtDate(t.serviceDate || t.scheduledFor || t.startedAt) || '—'}</small>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {tab === 'overview' && (

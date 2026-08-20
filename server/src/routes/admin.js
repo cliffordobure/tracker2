@@ -21,15 +21,19 @@ import {
   Conversation,
   Message,
   AcademicTerm,
+  Assignment,
+  Assessment,
 } from '../models/index.js';
 import { authenticate, requireSchoolStaff, requireSuperAdmin } from '../middleware/auth.js';
 import adminTripOps from './adminTripOps.js';
+import adminAcademics from './adminAcademics.js';
 import { createAndEmitNotifications, NOTIFICATION_TYPES } from '../services/notifications.js';
 import { getIO } from '../socket.js';
 
 const router = Router();
 router.use(authenticate, requireSchoolStaff);
 router.use(adminTripOps);
+router.use(adminAcademics);
 
 /** school_admin → their school; super_admin → query/body schoolId or null (all). */
 function resolveSchoolId(req, { required = false } = {}) {
@@ -1677,17 +1681,29 @@ router.get('/buses/:id', async (req, res) => {
       return res.status(403).json({ error: 'Cannot view vehicle from another school' });
     }
 
-    const profiles = await DriverProfile.find({ busId: bus._id }).populate(
-      'userId',
-      'name phone photoUrl employeeId'
-    );
+    const profiles = await DriverProfile.find({ busId: bus._id })
+      .populate('userId', 'name phone photoUrl employeeId')
+      .populate('assignedRouteIds', 'name');
     const drivers = profiles.map(serializeAssignedDriver).filter(Boolean);
+    const routes = [];
+    const seenRoutes = new Set();
+    for (const p of profiles) {
+      for (const r of p.assignedRouteIds || []) {
+        const id = String(r?._id || r || '');
+        if (!id || seenRoutes.has(id)) continue;
+        seenRoutes.add(id);
+        routes.push({
+          id,
+          name: typeof r === 'object' ? r.name || '' : '',
+        });
+      }
+    }
 
     const trips = await Trip.find({ busId: bus._id })
       .populate('routeId', 'name')
       .populate('driverId', 'name')
       .sort({ serviceDate: -1, scheduledFor: -1, startedAt: -1, createdAt: -1 })
-      .limit(5);
+      .limit(40);
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -1703,6 +1719,7 @@ router.get('/buses/:id', async (req, res) => {
       },
       schoolName: bus.schoolId?.name || '',
       drivers,
+      routes,
       recentTrips: trips.map((t) => ({
         id: String(t._id),
         status: t.status,
@@ -2647,16 +2664,39 @@ router.get('/drivers/:id', async (req, res) => {
     friday.setDate(monday.getDate() + 4);
     friday.setHours(23, 59, 59, 999);
 
-    const weekTrips = await Trip.find({
-      driverId: driver._id,
-      $or: [
-        { serviceDate: { $gte: monday, $lte: friday } },
-        { scheduledFor: { $gte: monday, $lte: friday } },
-      ],
-    })
-      .populate('routeId', 'name')
-      .populate('busId', 'plate label')
-      .sort({ scheduledFor: 1, startedAt: 1, createdAt: 1 });
+    const ninety = new Date(monday);
+    ninety.setDate(ninety.getDate() - 90);
+
+    const [weekTrips, trips, schedules, incidentTrips, recentStatus] = await Promise.all([
+      Trip.find({
+        driverId: driver._id,
+        $or: [
+          { serviceDate: { $gte: monday, $lte: friday } },
+          { scheduledFor: { $gte: monday, $lte: friday } },
+        ],
+      })
+        .populate('routeId', 'name')
+        .populate('busId', 'plate label')
+        .sort({ scheduledFor: 1, startedAt: 1, createdAt: 1 }),
+      Trip.find({ driverId: driver._id })
+        .populate('routeId', 'name')
+        .populate('busId', 'plate label')
+        .sort({ serviceDate: -1, scheduledFor: -1, startedAt: -1, createdAt: -1 })
+        .limit(40),
+      TripSchedule.find({ driverId: driver._id, active: { $ne: false } })
+        .populate('routeId', 'name')
+        .populate('busId', 'plate label')
+        .sort({ scheduledTime: 1, name: 1 }),
+      Trip.find({ driverId: driver._id, 'incidents.0': { $exists: true } })
+        .populate('routeId', 'name')
+        .select('incidents tripCode serviceDate scheduledFor routeId')
+        .sort({ serviceDate: -1, createdAt: -1 })
+        .limit(40),
+      Trip.find({
+        driverId: driver._id,
+        $or: [{ serviceDate: { $gte: ninety } }, { scheduledFor: { $gte: ninety } }, { startedAt: { $gte: ninety } }],
+      }).select('status'),
+    ]);
 
     const dateKey = (value) => {
       if (!value) return '';
@@ -2712,6 +2752,26 @@ router.get('/drivers/:id', async (req, res) => {
     const soon = new Date(today);
     soon.setDate(soon.getDate() + 30);
 
+    const incidents = [];
+    for (const t of incidentTrips) {
+      for (const inc of t.incidents || []) {
+        incidents.push({
+          id: String(inc._id || `${t._id}-${inc.occurredAt || ''}`),
+          type: inc.type || 'other',
+          severity: inc.severity || '',
+          details: inc.details || '',
+          occurredAt: inc.occurredAt || t.serviceDate || t.scheduledFor || null,
+          location: inc.nextStopName || '',
+          tripCode: t.tripCode || '',
+          routeName: t.routeId?.name || '',
+        });
+      }
+    }
+    const tripCounts = { completed: 0, cancelled: 0, scheduled: 0, active: 0, total: recentStatus.length };
+    for (const t of recentStatus) {
+      if (tripCounts[t.status] != null) tripCounts[t.status] += 1;
+    }
+
     res.json({
       driver: driver.toSafeJSON(),
       schoolName: driver.schoolId?.name || '',
@@ -2719,6 +2779,22 @@ router.get('/drivers/:id', async (req, res) => {
       licenseStatus: licenseStatusOf(profile?.licenseExpiry, today, soon),
       todaySchedule,
       week,
+      trips: trips.map(serializeTrip),
+      schedules: schedules.map((s) => ({
+        id: String(s._id),
+        name: s.name || '',
+        period: s.period || '',
+        direction: s.direction || '',
+        scheduledTime: s.scheduledTime || '',
+        scheduleType: s.scheduleType || '',
+        routeName: s.routeId?.name || '',
+        busLabel:
+          s.busId && typeof s.busId === 'object'
+            ? [s.busId.plate, s.busId.label].filter(Boolean).join(' · ')
+            : '',
+      })),
+      incidents,
+      tripCounts,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2891,6 +2967,7 @@ router.get('/teachers/:id', async (req, res) => {
     const classes = schoolId
       ? await SchoolClass.find({ schoolId, teacherId: teacher._id, active: { $ne: false } }).sort({ grade: 1, section: 1 })
       : [];
+    const classGrades = [...new Set(classes.map((c) => c.grade).filter(Boolean))];
 
     const subjects = [];
     const seen = new Set();
@@ -2933,10 +3010,21 @@ router.get('/teachers/:id', async (req, res) => {
     const friday = new Date(monday);
     friday.setDate(monday.getDate() + 4);
     friday.setHours(23, 59, 59, 999);
-    const marks = await AttendanceRecord.find({
-      teacherId: teacher._id,
-      date: { $gte: monday, $lte: friday },
-    }).select('date');
+    const [marks, kidsInClasses, assignments, assessments] = await Promise.all([
+      AttendanceRecord.find({ teacherId: teacher._id }).select('date').sort({ date: -1 }).limit(80),
+      classGrades.length
+        ? Kid.find({ schoolId, grade: { $in: classGrades }, active: { $ne: false } }).select('grade')
+        : [],
+      Assignment.find({ schoolId, teacherId: teacher._id, active: { $ne: false } })
+        .sort({ dueDate: -1, createdAt: -1 })
+        .limit(40)
+        .select('title subject grade dueDate status createdAt'),
+      Assessment.find({ schoolId, teacherId: teacher._id, active: { $ne: false } })
+        .populate('kidId', 'name grade')
+        .sort({ date: -1 })
+        .limit(40)
+        .select('title subject score kind date kidId'),
+    ]);
     const markedDays = new Set(
       marks.map((m) => {
         const d = new Date(m.date);
@@ -2955,20 +3043,95 @@ router.get('/teachers/:id', async (req, res) => {
       });
     }
 
+    const byGrade = {};
+    for (const k of kidsInClasses) {
+      const g = k.grade || '';
+      byGrade[g] = (byGrade[g] || 0) + 1;
+    }
+    const dayOrder = { Monday: 0, Tuesday: 1, Wednesday: 2, Thursday: 3, Friday: 4, Saturday: 5 };
+    const timetable = [];
+    const classNotes = [];
+    for (const c of classes) {
+      const className = [c.grade, c.section].filter(Boolean).join(' ') || c.classCode || 'Class';
+      for (const slot of c.timetable || []) {
+        timetable.push({
+          day: slot.day || '',
+          startTime: slot.startTime || '',
+          endTime: slot.endTime || '',
+          subject: slot.subject || '',
+          room: slot.room || c.classroom || '',
+          kind: slot.kind || 'lesson',
+          className,
+        });
+      }
+      for (const n of c.notes || []) {
+        classNotes.push({
+          id: String(n._id || `${c._id}-${n.createdAt || n.date}`),
+          title: n.title || '',
+          body: n.body || '',
+          at: n.date || n.createdAt,
+          className,
+          author: n.teacherName || '',
+        });
+      }
+    }
+    timetable.sort(
+      (a, b) => (dayOrder[a.day] ?? 9) - (dayOrder[b.day] ?? 9) || String(a.startTime).localeCompare(String(b.startTime))
+    );
+    const scoreValues = assessments.map((a) => a.score).filter((n) => Number.isFinite(n));
+    const markedDates = [
+      ...new Set(
+        marks.map((m) => {
+          const d = new Date(m.date);
+          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        })
+      ),
+    ];
+
     res.json({
       teacher: teacher.toSafeJSON(),
       schoolName: teacher.schoolId?.name || '',
       classes: classes.map((c) => ({
         _id: c._id,
+        id: String(c._id),
         grade: c.grade,
         section: c.section,
         classCode: c.classCode,
         classroom: c.classroom,
         role: 'Class Teacher',
+        studentCount: byGrade[c.grade] || 0,
+        subjects: (c.subjects || []).map((s) => s.name).filter(Boolean),
       })),
       subjects,
       schedule,
+      timetable,
       register,
+      registerDays: markedDates,
+      assignments: assignments.map((a) => ({
+        id: String(a._id),
+        title: a.title,
+        subject: a.subject || '',
+        grade: a.grade || '',
+        dueDate: a.dueDate,
+        status: a.status || 'published',
+      })),
+      assessments: assessments.map((a) => ({
+        id: String(a._id),
+        title: a.title,
+        subject: a.subject || '',
+        score: a.score,
+        kind: a.kind,
+        date: a.date,
+        kidName: a.kidId?.name || '—',
+        grade: a.kidId?.grade || '',
+      })),
+      assessmentStats: {
+        total: assessments.length,
+        average: scoreValues.length
+          ? Math.round((scoreValues.reduce((s, n) => s + n, 0) / scoreValues.length) * 10) / 10
+          : null,
+      },
+      notes: classNotes.sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0)),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3142,7 +3305,8 @@ router.get('/kids/:id', async (req, res) => {
     friday.setDate(monday.getDate() + 4);
     friday.setHours(23, 59, 59, 999);
 
-    const [klass, schedules, todayTrips, weekMarks, statement, notes, schoolStop] = await Promise.all([
+    const [klass, schedules, todayTrips, weekMarks, statement, notes, schoolStop, attendanceHistory, tripEvents] =
+      await Promise.all([
       kid.grade
         ? SchoolClass.findOne({ schoolId, grade: kid.grade, active: { $ne: false } }).populate('teacherId', 'name')
         : null,
@@ -3168,9 +3332,24 @@ router.get('/kids/:id', async (req, res) => {
       TeacherNote.find({ kidId: kid._id })
         .populate('teacherId', 'name')
         .sort({ createdAt: -1 })
-        .limit(5)
+        .limit(40)
         .select('title body category createdAt teacherId'),
       routeId ? Stop.findOne({ routeId, type: 'school' }).select('name address') : null,
+      AttendanceRecord.find({ kidId: kid._id })
+        .populate('teacherId', 'name')
+        .sort({ date: -1 })
+        .limit(40),
+      TripEvent.find({ kidId: kid._id })
+        .sort({ at: -1 })
+        .limit(40)
+        .populate({
+          path: 'tripId',
+          select: 'routeId busId direction status serviceDate scheduledFor tripCode',
+          populate: [
+            { path: 'routeId', select: 'name' },
+            { path: 'busId', select: 'plate label' },
+          ],
+        }),
     ]);
 
     const morning = schedules.find((s) => s.period === 'morning' || s.direction === 'to_school') || null;
@@ -3232,6 +3411,15 @@ router.get('/kids/:id', async (req, res) => {
         reference: p.reference || '',
       }));
 
+    const feeLines = statement?.lines || [];
+    const feePayments = (statement?.payments || [])
+      .slice()
+      .sort((a, b) => new Date(b.at) - new Date(a.at));
+    const billed = feeLines.reduce((s, l) => s + (Number(l.total) || 0), 0);
+    const paidStored = feePayments.length
+      ? feePayments.reduce((s, p) => s + (Number(p.amount) || 0), 0)
+      : feeLines.reduce((s, l) => s + (Number(l.paid) || 0), 0);
+
     res.json({
       kid,
       classTeacher: klass?.teacherId?.name || klass?.assistantName || '',
@@ -3253,7 +3441,41 @@ router.get('/kids/:id', async (req, res) => {
         tripActive: liveTrip?.status === 'active',
       },
       attendance,
+      attendanceHistory: attendanceHistory.map((m) => ({
+        id: String(m._id),
+        date: m.date,
+        status: m.status,
+        note: m.note || '',
+        teacherName: m.teacherId?.name || '',
+      })),
       payments,
+      fee: statement
+        ? {
+            termLabel: statement.termLabel || '',
+            year: statement.year,
+            currency: statement.currency || 'KES',
+            nextDueDate: statement.nextDueDate || null,
+            note: statement.note || '',
+            statementUrl: statement.statementUrl || '',
+            lines: feeLines,
+            payments: feePayments,
+            upcoming: statement.upcoming || [],
+            billed,
+            paid: paidStored,
+            balance: Math.max(0, billed - paidStored),
+          }
+        : null,
+      tripEvents: tripEvents.map((e) => ({
+        id: String(e._id),
+        type: e.type,
+        at: e.at,
+        routeName: e.tripId?.routeId?.name || '',
+        busLabel:
+          e.tripId?.busId && typeof e.tripId.busId === 'object'
+            ? [e.tripId.busId.plate, e.tripId.busId.label].filter(Boolean).join(' · ')
+            : '',
+        direction: e.tripId?.direction || '',
+      })),
       notes: notes.map((n) => ({
         _id: n._id,
         title: n.title,
@@ -3265,6 +3487,45 @@ router.get('/kids/:id', async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/kids/:id/notes', async (req, res) => {
+  try {
+    if (!/^[a-f0-9]{24}$/i.test(String(req.params.id || ''))) {
+      return res.status(400).json({ error: 'Invalid student' });
+    }
+    const kid = await Kid.findById(req.params.id);
+    if (!kid) return res.status(404).json({ error: 'Student not found' });
+    if (!assertSchoolAccess(req, kid.schoolId)) {
+      return res.status(403).json({ error: 'Cannot add a note for a student from another school' });
+    }
+    const title = String(req.body.title || '').trim().slice(0, 160);
+    const body = String(req.body.body || '').trim().slice(0, 1000);
+    if (!title || !body) return res.status(400).json({ error: 'Title and note are required' });
+    const category = ['general', 'academic', 'behaviour', 'health', 'urgent'].includes(req.body.category)
+      ? req.body.category
+      : 'general';
+    const note = await TeacherNote.create({
+      schoolId: kid.schoolId,
+      teacherId: req.user.id,
+      kidId: kid._id,
+      category,
+      title,
+      body,
+    });
+    res.status(201).json({
+      note: {
+        _id: note._id,
+        title: note.title,
+        body: note.body,
+        category: note.category,
+        at: note.createdAt,
+        author: req.user.name || '',
+      },
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 

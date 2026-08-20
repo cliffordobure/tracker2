@@ -14,17 +14,6 @@ const TABS = [
   { id: 'activity', label: 'Activity Log' },
 ];
 
-const TAB_COPY = {
-  schedule: 'A full driver timetable will be added here.',
-  trips: 'A complete trip history for this driver will sit here.',
-  documents: 'Licence and safety documents will be uploaded here.',
-  attendance: 'Driver attendance is not tracked in this system yet.',
-  incidents: 'Incident reports linked to this driver will appear here.',
-  performance: 'Driver performance reviews are not enabled yet.',
-  notes: 'Staff notes about this driver will live here.',
-  activity: 'An activity log of profile and trip changes is coming next.',
-};
-
 function dash(value) {
   if (value == null || value === 0) return value === 0 ? '0' : '—';
   const s = String(value).trim();
@@ -281,12 +270,208 @@ export default function DriverDetails() {
         ))}
       </nav>
 
-      {tab !== 'overview' && (
-        <div className="sa-empty-panel">
-          <div className="sa-empty-icon" aria-hidden="true">◈</div>
-          <h2>Coming Soon</h2>
-          <p>{TAB_COPY[tab]}</p>
-        </div>
+      {tab === 'schedule' && (
+        <section className="sa-card sa-sd-tab">
+          <div className="sa-rd-card-head">
+            <h3>Schedules</h3>
+            <Link to="/school-admin/trip-scheduling" className="sa-btn sa-btn-outline">
+              Open scheduling
+            </Link>
+          </div>
+          {data.schedules?.length ? (
+            <table className="sa-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Time</th>
+                  <th>Route</th>
+                  <th>Vehicle</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.schedules.map((s) => (
+                  <tr key={s.id}>
+                    <td>
+                      <strong>{s.name || 'Schedule'}</strong>
+                      <div className="sa-muted">
+                        {[periodLabel(s.period), directionLabel(s.direction)].filter(Boolean).join(' · ') || '—'}
+                      </div>
+                    </td>
+                    <td>{s.scheduledTime || '—'}</td>
+                    <td>{s.routeName || '—'}</td>
+                    <td>{s.busLabel || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="sa-muted">No trip schedules are assigned to this driver.</p>
+          )}
+        </section>
+      )}
+
+      {tab === 'trips' && (
+        <section className="sa-card sa-sd-tab">
+          <div className="sa-rd-card-head">
+            <h3>Trips</h3>
+            <Link to="/school-admin/trip-instances" className="sa-btn sa-btn-outline">
+              All trips
+            </Link>
+          </div>
+          {data.trips?.length ? (
+            <table className="sa-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Route</th>
+                  <th>Vehicle</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.trips.map((t) => {
+                  const meta = tripStatusMeta(t.status);
+                  return (
+                    <tr key={t.id}>
+                      <td>{fmtDate(t.serviceDate || t.scheduledFor || t.startedAt) || '—'}</td>
+                      <td>{t.routeName || '—'}</td>
+                      <td>{t.busLabel || '—'}</td>
+                      <td><em className={`sa-stu-status is-${meta.key}`}>{meta.label}</em></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          ) : (
+            <p className="sa-muted">No trips recorded for this driver.</p>
+          )}
+        </section>
+      )}
+
+      {tab === 'documents' && (
+        <section className="sa-card sa-sd-tab">
+          <h3>Documents</h3>
+          <dl className="sa-sd-dl">
+            <div><dt>License no.</dt><dd>{dash(profile?.licenseNumber)}</dd></div>
+            <div><dt>License expiry</dt><dd>{dash(fmtDate(profile?.licenseExpiry))}</dd></div>
+            <div>
+              <dt>Profile photo</dt>
+              <dd>
+                {driver.photoUrl ? (
+                  <a href={driver.photoUrl} target="_blank" rel="noreferrer">Open</a>
+                ) : (
+                  '—'
+                )}
+              </dd>
+            </div>
+          </dl>
+          <p className="sa-muted">Licence files are not stored beyond the number and expiry on this profile.</p>
+        </section>
+      )}
+
+      {tab === 'attendance' && (
+        <section className="sa-card sa-sd-tab">
+          <h3>Attendance</h3>
+          <p className="sa-muted">Driver attendance is not recorded in this system. Trip days this week are shown instead.</p>
+          <ul className="sa-sd-week">
+            {(data.week || []).map((d) => {
+              const meta = tripStatusMeta(d.status);
+              return (
+                <li key={d.date}>
+                  <span>
+                    {d.weekday}
+                    <small className="sa-stu-phone">
+                      {d.tripCount ? `${d.tripCount} trip${d.tripCount === 1 ? '' : 's'}` : 'No trips'}
+                    </small>
+                  </span>
+                  <em className={`sa-stu-status is-${meta.key}`}>{meta.label}</em>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+
+      {tab === 'incidents' && (
+        <section className="sa-card sa-sd-tab">
+          <div className="sa-rd-card-head">
+            <h3>Incidents</h3>
+            <Link to="/school-admin/incidents" className="sa-btn sa-btn-outline">
+              All incidents
+            </Link>
+          </div>
+          {data.incidents?.length ? (
+            <table className="sa-table">
+              <thead>
+                <tr>
+                  <th>When</th>
+                  <th>Type</th>
+                  <th>Route</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.incidents.map((inc) => (
+                  <tr key={inc.id}>
+                    <td>{fmtDate(inc.occurredAt) || '—'}</td>
+                    <td>
+                      {inc.type}
+                      {inc.severity ? ` · ${inc.severity}` : ''}
+                    </td>
+                    <td>{inc.routeName || inc.tripCode || '—'}</td>
+                    <td>{inc.details}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="sa-muted">No incidents stored on this driver&apos;s trips.</p>
+          )}
+        </section>
+      )}
+
+      {tab === 'performance' && (
+        <section className="sa-card sa-sd-tab">
+          <h3>Trip counts (last 90 days)</h3>
+          <dl className="sa-sd-dl">
+            <div><dt>Total</dt><dd>{data.tripCounts?.total ?? 0}</dd></div>
+            <div><dt>Completed</dt><dd>{data.tripCounts?.completed ?? 0}</dd></div>
+            <div><dt>Cancelled</dt><dd>{data.tripCounts?.cancelled ?? 0}</dd></div>
+            <div><dt>Scheduled</dt><dd>{data.tripCounts?.scheduled ?? 0}</dd></div>
+            <div><dt>In progress</dt><dd>{data.tripCounts?.active ?? 0}</dd></div>
+          </dl>
+          <p className="sa-muted">Ratings and reviews are not stored.</p>
+        </section>
+      )}
+
+      {tab === 'notes' && (
+        <section className="sa-card sa-sd-tab">
+          <h3>Notes</h3>
+          {driver.aboutMe ? (
+            <p className="sa-sd-remarks">{driver.aboutMe}</p>
+          ) : (
+            <p className="sa-muted">No notes stored on this driver profile.</p>
+          )}
+        </section>
+      )}
+
+      {tab === 'activity' && (
+        <section className="sa-card sa-sd-tab">
+          <h3>Activity log</h3>
+          <ul className="sa-activity">
+            <li>
+              <strong>Profile updated</strong>
+              <small>{fmtDate(driver.updatedAt) || '—'}</small>
+            </li>
+            {(data.trips || []).slice(0, 12).map((t) => (
+              <li key={t.id}>
+                <strong>{tripStatusMeta(t.status).label} trip</strong>
+                <span>{[t.routeName, t.busLabel].filter(Boolean).join(' · ')}</span>
+                <small>{fmtDate(t.serviceDate || t.scheduledFor || t.startedAt) || '—'}</small>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {tab === 'overview' && (

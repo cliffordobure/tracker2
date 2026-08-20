@@ -14,7 +14,7 @@ const navItems = [
   { to: '/school-admin/stops', label: 'Stops', icon: 'stops' },
   { to: '/school-admin/trip-instances', label: 'Trips', icon: 'trips' },
   { to: '/school-admin/live-tracking', label: 'Live Tracking', icon: 'live' },
-  { to: '/school-admin/coming-soon/attendance', label: 'Attendance', icon: 'attendance' },
+  { to: '/school-admin/attendance', label: 'Attendance', icon: 'attendance' },
   { to: '/school-admin/reports', label: 'Reports & Analytics', icon: 'reports' },
   { to: '/school-admin/notifications', label: 'Notifications', icon: 'bell' },
   { to: '/school-admin/incidents', label: 'Incidents', icon: 'incidents' },
@@ -28,11 +28,11 @@ const extraItems = [
   { to: '/school-admin/leave-requests', label: 'Leave Requests', icon: 'leave' },
   { to: '/school-admin/noticeboard', label: 'Noticeboard', icon: 'notice' },
   { to: '/school-admin/trip-scheduling', label: 'Trip Scheduling', icon: 'schedule' },
-  { to: '/school-admin/coming-soon/classes', label: 'Classes', icon: 'students' },
-  { to: '/school-admin/coming-soon/subjects', label: 'Subjects', icon: 'reports' },
-  { to: '/school-admin/coming-soon/examinations', label: 'Examinations', icon: 'reports' },
-  { to: '/school-admin/coming-soon/assignments', label: 'Assignments', icon: 'reports' },
-  { to: '/school-admin/coming-soon/bulk-attendance', label: 'Bulk Attendance', icon: 'attendance' },
+  { to: '/school-admin/classes', label: 'Classes', icon: 'students' },
+  { to: '/school-admin/subjects', label: 'Subjects', icon: 'reports' },
+  { to: '/school-admin/examinations', label: 'Examinations', icon: 'reports' },
+  { to: '/school-admin/assignments', label: 'Assignments', icon: 'reports' },
+  { to: '/school-admin/attendance/bulk', label: 'Bulk Attendance', icon: 'attendance' },
 ];
 
 const pageMeta = {
@@ -54,6 +54,12 @@ const pageMeta = {
   '/school-admin/incidents': { title: 'Incidents', crumbs: ['Dashboard', 'Incidents'] },
   '/school-admin/messages': { title: 'Messages', crumbs: ['Dashboard', 'Messages'] },
   '/school-admin/users': { title: 'Users & Roles', crumbs: ['Dashboard', 'Users & Roles'] },
+  '/school-admin/classes': { title: 'Classes', crumbs: ['Dashboard', 'Classes'] },
+  '/school-admin/subjects': { title: 'Subjects', crumbs: ['Dashboard', 'Subjects'] },
+  '/school-admin/examinations': { title: 'Examinations', crumbs: ['Dashboard', 'Examinations'] },
+  '/school-admin/assignments': { title: 'Assignments', crumbs: ['Dashboard', 'Assignments'] },
+  '/school-admin/attendance': { title: 'Attendance', crumbs: ['Dashboard', 'Attendance'] },
+  '/school-admin/attendance/bulk': { title: 'Bulk Attendance', crumbs: ['Dashboard', 'Attendance', 'Bulk Attendance'] },
   '/school-admin/leave-requests': { title: 'Leave Requests' },
   '/school-admin/noticeboard': { title: 'Noticeboard' },
 };
@@ -327,6 +333,14 @@ export default function SchoolAdminLayout() {
   const isMessages =
     location.pathname === '/school-admin/messages' || location.pathname.startsWith('/school-admin/messages/');
   const isUsers = location.pathname === '/school-admin/users';
+  const isAttendance =
+    location.pathname === '/school-admin/attendance' || location.pathname === '/school-admin/attendance/bulk';
+  const isAcademics =
+    location.pathname === '/school-admin/classes' ||
+    location.pathname === '/school-admin/subjects' ||
+    location.pathname === '/school-admin/examinations' ||
+    location.pathname === '/school-admin/assignments' ||
+    isAttendance;
   const isSettings = location.pathname === '/school-admin/school';
   const isLiveMap = isLivePage && searchParams.get('full') === '1';
   const isDashboard = location.pathname === '/school-admin';
@@ -373,7 +387,7 @@ export default function SchoolAdminLayout() {
       navigate('/school-admin/routes');
       return;
     }
-    if (isStudents || isTeachers || isDrivers || isBuses || isRoutes || isStops || isTrips || isLivePage || isReports || isCalendar || isNotifications || isIncidents || isMessages || isUsers) return;
+    if (isStudents || isTeachers || isDrivers || isBuses || isRoutes || isStops || isTrips || isLivePage || isReports || isCalendar || isNotifications || isIncidents || isMessages || isUsers || isAcademics) return;
     const q = search.trim().toLowerCase();
     if (q.length < 2) return;
     const hit =
@@ -512,7 +526,7 @@ export default function SchoolAdminLayout() {
                                     ? 'Search students, staff, routes...'
                                     : isMessages
                                       ? 'Search students, staff, routes, vehicles...'
-                                    : isLivePage || isReports || isCalendar || isNotifications || isIncidents || isUsers || isSettings
+                                    : isLivePage || isReports || isCalendar || isNotifications || isIncidents || isUsers || isSettings || isAcademics
                                       ? 'Search students, staff, routes...'
                                       : 'Search anything...'
               }

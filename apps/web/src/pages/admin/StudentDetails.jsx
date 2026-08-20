@@ -13,16 +13,6 @@ const TABS = [
   { id: 'activity', label: 'Activity Log' },
 ];
 
-const TAB_COPY = {
-  transport: 'Full transport history for this student will be added here.',
-  attendance: 'A full attendance register will sit on this tab.',
-  payments: 'Fee statements and payment history will be managed here.',
-  documents: 'Student documents will be uploaded and reviewed here.',
-  health: 'Health records will be expanded on this tab.',
-  notes: 'Staff notes and follow-ups will live here.',
-  activity: 'An activity log of changes and trip events is coming next.',
-};
-
 function dash(value) {
   if (value == null) return '—';
   const s = String(value).trim();
@@ -107,6 +97,26 @@ function money(amount) {
   return `KES ${n.toLocaleString()}`;
 }
 
+function tripEventLabel(type) {
+  if (type === 'picked_up') return 'Picked up';
+  if (type === 'dropped_off') return 'Dropped off';
+  if (type === 'not_picked_up') return 'Not picked up';
+  return type || 'Trip event';
+}
+
+function fmtStamp(value) {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
 export default function StudentDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -115,6 +125,8 @@ export default function StudentDetails() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('overview');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [noteForm, setNoteForm] = useState({ title: '', body: '', category: 'general' });
+  const [savingNote, setSavingNote] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -172,6 +184,48 @@ export default function StudentDetails() {
       setError(e.message);
     }
   };
+
+  const saveNote = async (e) => {
+    e.preventDefault();
+    setSavingNote(true);
+    setError('');
+    try {
+      await api(`/admin/kids/${kid._id}/notes`, { method: 'POST', body: noteForm });
+      setNoteForm({ title: '', body: '', category: 'general' });
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
+  const activity = useMemo(() => {
+    const items = [];
+    for (const ev of data?.tripEvents || []) {
+      items.push({
+        at: ev.at,
+        title: tripEventLabel(ev.type),
+        detail: [ev.routeName, ev.busLabel].filter(Boolean).join(' · '),
+      });
+    }
+    for (const m of data?.attendanceHistory || []) {
+      items.push({
+        at: m.date,
+        title: `Register: ${attendLabel(m.status)}`,
+        detail: [m.teacherName, m.note].filter(Boolean).join(' · '),
+      });
+    }
+    for (const n of data?.notes || []) {
+      items.push({
+        at: n.at,
+        title: n.title || 'Note',
+        detail: [n.author, n.category].filter(Boolean).join(' · '),
+      });
+    }
+    items.sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
+    return items;
+  }, [data]);
 
   if (loading) {
     return (
@@ -253,12 +307,299 @@ export default function StudentDetails() {
         ))}
       </nav>
 
-      {tab !== 'overview' && (
-        <div className="sa-empty-panel">
-          <div className="sa-empty-icon" aria-hidden="true">◈</div>
-          <h2>Coming Soon</h2>
-          <p>{TAB_COPY[tab]}</p>
-        </div>
+      {tab === 'transport' && (
+        <section className="sa-card sa-sd-tab">
+          <h3>Transport</h3>
+          <dl className="sa-sd-dl">
+            <div><dt>Route</dt><dd>{dash(data.transport?.routeName)}</dd></div>
+            <div><dt>Bus</dt><dd>{dash(data.transport?.busLabel)}</dd></div>
+            <div><dt>Driver</dt><dd>{dash(data.transport?.driverName)}</dd></div>
+            <div>
+              <dt>Pick up</dt>
+              <dd>
+                {dash(data.transport?.pickupStop)}
+                {data.transport?.pickupTime ? <small>Scheduled {data.transport.pickupTime}</small> : null}
+              </dd>
+            </div>
+            <div>
+              <dt>Drop off</dt>
+              <dd>
+                {dash(data.transport?.dropoffStop)}
+                {data.transport?.dropoffTime ? <small>Scheduled {data.transport.dropoffTime}</small> : null}
+              </dd>
+            </div>
+          </dl>
+          <h3>Pickup history</h3>
+          {data.tripEvents?.length ? (
+            <table className="sa-table">
+              <thead>
+                <tr>
+                  <th>When</th>
+                  <th>Event</th>
+                  <th>Route</th>
+                  <th>Bus</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.tripEvents.map((ev) => (
+                  <tr key={ev.id}>
+                    <td>{fmtStamp(ev.at)}</td>
+                    <td>{tripEventLabel(ev.type)}</td>
+                    <td>{dash(ev.routeName)}</td>
+                    <td>{dash(ev.busLabel)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="sa-muted">No pickup or drop-off events stored for this student.</p>
+          )}
+          <Link to="/school-admin/routes" className="sa-text-link">View routes</Link>
+        </section>
+      )}
+
+      {tab === 'attendance' && (
+        <section className="sa-card sa-sd-tab">
+          <div className="sa-rd-card-head">
+            <h3>Attendance</h3>
+            <Link to="/school-admin/attendance" className="sa-btn sa-btn-outline">
+              Class register
+            </Link>
+          </div>
+          {data.attendanceHistory?.length ? (
+            <table className="sa-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Status</th>
+                  <th>Marked by</th>
+                  <th>Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.attendanceHistory.map((m) => (
+                  <tr key={m.id}>
+                    <td>{fmtDate(m.date) || '—'}</td>
+                    <td>
+                      <em className={`sa-stu-status is-${m.status === 'present' ? 'active' : m.status === 'absent' ? 'noroute' : 'inactive'}`}>
+                        {attendLabel(m.status)}
+                      </em>
+                    </td>
+                    <td>{dash(m.teacherName)}</td>
+                    <td>{dash(m.note)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="sa-muted">No class register marks stored for this student.</p>
+          )}
+        </section>
+      )}
+
+      {tab === 'payments' && (
+        <section className="sa-card sa-sd-tab">
+          <h3>Payments</h3>
+          {data.fee ? (
+            <>
+              <dl className="sa-sd-dl">
+                <div><dt>Term</dt><dd>{dash(data.fee.termLabel)}</dd></div>
+                <div><dt>Year</dt><dd>{dash(data.fee.year)}</dd></div>
+                <div><dt>Billed</dt><dd>{money(data.fee.billed)}</dd></div>
+                <div><dt>Paid</dt><dd>{money(data.fee.paid)}</dd></div>
+                <div><dt>Balance</dt><dd>{money(data.fee.balance)}</dd></div>
+                <div><dt>Next due</dt><dd>{dash(fmtDate(data.fee.nextDueDate))}</dd></div>
+              </dl>
+              {data.fee.note ? <p className="sa-sd-remarks">{data.fee.note}</p> : null}
+              {data.fee.lines?.length ? (
+                <table className="sa-table">
+                  <thead>
+                    <tr>
+                      <th>Item</th>
+                      <th>Total</th>
+                      <th>Paid</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.fee.lines.map((line, i) => (
+                      <tr key={`${line.description}-${i}`}>
+                        <td>{line.description}</td>
+                        <td>{money(line.total)}</td>
+                        <td>{money(line.paid)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : null}
+              {data.fee.payments?.length ? (
+                <ul className="sa-sd-pays">
+                  {data.fee.payments.map((p) => (
+                    <li key={p._id}>
+                      <div>
+                        <strong>{p.description}</strong>
+                        <span>{fmtDate(p.at)}{p.method ? ` · ${p.method}` : ''}{p.reference ? ` · ${p.reference}` : ''}</span>
+                      </div>
+                      <em className="sa-stu-status is-active">Paid {money(p.amount)}</em>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="sa-muted">No payment rows stored on this statement.</p>
+              )}
+            </>
+          ) : (
+            <p className="sa-muted">No fee statement is stored for this student.</p>
+          )}
+        </section>
+      )}
+
+      {tab === 'documents' && (
+        <section className="sa-card sa-sd-tab">
+          <h3>Documents</h3>
+          {kid.documents?.length ? (
+            <table className="sa-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Kind</th>
+                  <th>Type</th>
+                </tr>
+              </thead>
+              <tbody>
+                {kid.documents.map((doc, i) => (
+                  <tr key={doc.publicId || doc.url || i}>
+                    <td>
+                      {doc.url ? (
+                        <a href={doc.url} target="_blank" rel="noreferrer">
+                          {doc.originalName || 'Document'}
+                        </a>
+                      ) : (
+                        dash(doc.originalName)
+                      )}
+                    </td>
+                    <td>{dash(doc.kind)}</td>
+                    <td>{dash(doc.mimeType)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="sa-muted">No documents are stored on this student record.</p>
+          )}
+        </section>
+      )}
+
+      {tab === 'health' && (
+        <section className="sa-card sa-sd-tab">
+          <h3>Health</h3>
+          <dl className="sa-sd-dl">
+            <div><dt>Blood group</dt><dd>{dash(kid.bloodGroup)}</dd></div>
+            <div><dt>Allergies</dt><dd>{dash(kid.allergies)}</dd></div>
+            <div><dt>Conditions</dt><dd>{dash(kid.health?.conditions)}</dd></div>
+            <div><dt>Medication</dt><dd>{dash(kid.health?.medication)}</dd></div>
+            <div><dt>Doctor</dt><dd>{dash(kid.health?.doctor)}</dd></div>
+            <div><dt>Hospital</dt><dd>{dash(kid.health?.hospital)}</dd></div>
+            <div><dt>Insurance</dt><dd>{dash(kid.health?.insurance)}</dd></div>
+            <div><dt>Policy no.</dt><dd>{dash(kid.health?.policyNumber)}</dd></div>
+          </dl>
+          {kid.health?.notes ? <p className="sa-sd-remarks">{kid.health.notes}</p> : null}
+          {kid.health?.immunizations?.length ? (
+            <table className="sa-table">
+              <thead>
+                <tr>
+                  <th>Immunization</th>
+                  <th>Date</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {kid.health.immunizations.map((shot, i) => (
+                  <tr key={`${shot.name}-${i}`}>
+                    <td>{shot.name}</td>
+                    <td>{dash(fmtDate(shot.date))}</td>
+                    <td>{dash(shot.status)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="sa-muted">No immunizations stored.</p>
+          )}
+        </section>
+      )}
+
+      {tab === 'notes' && (
+        <section className="sa-card sa-sd-tab">
+          <h3>Notes</h3>
+          <form className="sa-note-form" onSubmit={saveNote}>
+            <label>
+              Title
+              <input
+                required
+                value={noteForm.title}
+                onChange={(e) => setNoteForm({ ...noteForm, title: e.target.value })}
+              />
+            </label>
+            <label>
+              Category
+              <select
+                value={noteForm.category}
+                onChange={(e) => setNoteForm({ ...noteForm, category: e.target.value })}
+              >
+                <option value="general">General</option>
+                <option value="academic">Academic</option>
+                <option value="behaviour">Behaviour</option>
+                <option value="health">Health</option>
+                <option value="urgent">Urgent</option>
+              </select>
+            </label>
+            <label>
+              Note
+              <textarea
+                required
+                rows={3}
+                value={noteForm.body}
+                onChange={(e) => setNoteForm({ ...noteForm, body: e.target.value })}
+              />
+            </label>
+            <button className="sa-btn sa-btn-primary" type="submit" disabled={savingNote}>
+              {savingNote ? 'Saving…' : 'Add note'}
+            </button>
+          </form>
+          {kid.about ? <p className="sa-sd-remarks">{kid.about}</p> : null}
+          {data.notes?.length ? (
+            <ul className="sa-sd-notes-list">
+              {data.notes.map((n) => (
+                <li key={n._id}>
+                  <strong>{n.title}</strong>
+                  <span>{n.body}</span>
+                  <small>{[n.author, n.category, fmtDate(n.at)].filter(Boolean).join(' · ')}</small>
+                </li>
+              ))}
+            </ul>
+          ) : !kid.about ? (
+            <p className="sa-muted">No notes stored yet.</p>
+          ) : null}
+        </section>
+      )}
+
+      {tab === 'activity' && (
+        <section className="sa-card sa-sd-tab">
+          <h3>Activity log</h3>
+          {activity.length ? (
+            <ul className="sa-activity">
+              {activity.map((item, i) => (
+                <li key={`${item.at}-${i}`}>
+                  <strong>{item.title}</strong>
+                  {item.detail ? <span>{item.detail}</span> : null}
+                  <small>{fmtStamp(item.at)}</small>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="sa-muted">No trip events, register marks, or notes stored yet.</p>
+          )}
+        </section>
       )}
 
       {tab === 'overview' && (

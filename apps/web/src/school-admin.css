@@ -3969,7 +3969,63 @@ button.sa-text-link { background: none; border: 0; cursor: pointer; font: inheri
   padding: 0.85rem 1rem;
 }
 .sa-set-counts strong { font-size: 1.25rem; color: #5d3fd3; }
-.sa-settings .map-sm { min-height: 180px; border-radius: 12px; overflow: hidden; }
+.sa-att-marks { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.sa-att-marks button {
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #475569;
+  cursor: pointer;
+}
+.sa-att-marks button.is-on { background: #5d3fd3; border-color: #5d3fd3; color: #fff; }
+.sa-students .sa-stu-search { margin-bottom: 0.75rem; }
+.sa-sd-tab { margin-top: 0.75rem; }
+.sa-sd-tab h3 { margin: 0 0 0.75rem; }
+.sa-sd-tab h4 { margin: 1rem 0 0.4rem; font-size: 0.9rem; }
+.sa-note-form {
+  display: grid;
+  gap: 0.55rem;
+  margin-bottom: 1rem;
+  max-width: 420px;
+}
+.sa-note-form label {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #475569;
+}
+.sa-note-form input,
+.sa-note-form select,
+.sa-note-form textarea {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 0.5rem 0.7rem;
+  font: inherit;
+  color: #0f172a;
+}
+.sa-sd-notes-list,
+.sa-activity {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.7rem;
+}
+.sa-sd-notes-list li,
+.sa-activity li {
+  display: grid;
+  gap: 0.15rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 0.86rem;
+}
+.sa-sd-notes-list small,
+.sa-activity small { color: #64748b; }
 
 @media (max-width: 1200px) {
   .sa-settings-grid { grid-template-columns: 1fr 1fr; }

@@ -30,6 +30,12 @@ import UsersRoles from './pages/admin/UsersRoles';
 import SchoolSettings from './pages/admin/SchoolSettings';
 import LeaveRequests from './pages/admin/LeaveRequests';
 import Noticeboard from './pages/admin/Noticeboard';
+import Classes from './pages/admin/Classes';
+import Subjects from './pages/admin/Subjects';
+import Examinations from './pages/admin/Examinations';
+import AssignmentsAdmin from './pages/admin/AssignmentsAdmin';
+import Attendance from './pages/admin/Attendance';
+import BulkAttendance from './pages/admin/BulkAttendance';
 import ComingSoon from './pages/admin/ComingSoon';
 import DriverHome from './pages/driver/DriverHome';
 import ParentHome from './pages/parent/ParentHome';
@@ -113,6 +119,12 @@ export default function App() {
         <Route path="users" element={<UsersRoles />} />
         <Route path="leave-requests" element={<LeaveRequests />} />
         <Route path="noticeboard" element={<Noticeboard />} />
+        <Route path="classes" element={<Classes />} />
+        <Route path="subjects" element={<Subjects />} />
+        <Route path="examinations" element={<Examinations />} />
+        <Route path="assignments" element={<AssignmentsAdmin />} />
+        <Route path="attendance" element={<Attendance />} />
+        <Route path="attendance/bulk" element={<BulkAttendance />} />
         <Route path="coming-soon/:feature" element={<ComingSoon />} />
         <Route path="dispatch" element={<Navigate to="/school-admin/trip-scheduling" replace />} />
       </Route>

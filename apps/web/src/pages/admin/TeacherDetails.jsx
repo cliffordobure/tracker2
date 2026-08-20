@@ -13,16 +13,6 @@ const TABS = [
   { id: 'activity', label: 'Activity Log' },
 ];
 
-const TAB_COPY = {
-  schedule: 'A full timetable for this teacher will be added here.',
-  classes: 'Class assignments will be managed from this tab.',
-  attendance: 'Teacher attendance history will sit here.',
-  documents: 'Staff documents will be uploaded and reviewed here.',
-  performance: 'Performance reviews are not enabled yet.',
-  notes: 'Staff notes about this teacher will live here.',
-  activity: 'An activity log of profile and class changes is coming next.',
-};
-
 function dash(value) {
   if (value == null || value === 0) return value === 0 ? '0' : '—';
   const s = String(value).trim();
@@ -208,12 +198,227 @@ export default function TeacherDetails() {
         ))}
       </nav>
 
-      {tab !== 'overview' && (
-        <div className="sa-empty-panel">
-          <div className="sa-empty-icon" aria-hidden="true">◈</div>
-          <h2>Coming Soon</h2>
-          <p>{TAB_COPY[tab]}</p>
-        </div>
+      {tab === 'schedule' && (
+        <section className="sa-card sa-sd-tab">
+          <h3>Timetable</h3>
+          {data.timetable?.length ? (
+            <table className="sa-table">
+              <thead>
+                <tr>
+                  <th>Day</th>
+                  <th>Time</th>
+                  <th>Class</th>
+                  <th>Subject</th>
+                  <th>Room</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.timetable.map((s, i) => (
+                  <tr key={`${s.day}-${s.startTime}-${i}`}>
+                    <td>{s.day}</td>
+                    <td>
+                      {s.startTime}
+                      {s.endTime ? ` – ${s.endTime}` : ''}
+                    </td>
+                    <td>{s.className}</td>
+                    <td>{s.kind === 'lesson' ? s.subject || '—' : s.kind}</td>
+                    <td>{s.room || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="sa-muted">No timetable slots are stored on the assigned classes.</p>
+          )}
+        </section>
+      )}
+
+      {tab === 'classes' && (
+        <section className="sa-card sa-sd-tab">
+          <div className="sa-rd-card-head">
+            <h3>Classes</h3>
+            <Link to="/school-admin/classes" className="sa-btn sa-btn-outline">
+              Manage classes
+            </Link>
+          </div>
+          {data.classes?.length ? (
+            <table className="sa-table">
+              <thead>
+                <tr>
+                  <th>Class</th>
+                  <th>Room</th>
+                  <th>Role</th>
+                  <th>Students</th>
+                  <th>Subjects</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.classes.map((c) => (
+                  <tr key={c._id || c.id}>
+                    <td>{[c.grade, c.section].filter(Boolean).join(' ') || c.classCode || '—'}</td>
+                    <td>{c.classroom || '—'}</td>
+                    <td>{c.role}</td>
+                    <td>{c.studentCount ?? 0}</td>
+                    <td>{c.subjects?.length ? c.subjects.join(', ') : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="sa-muted">This teacher is not assigned as a class teacher yet.</p>
+          )}
+        </section>
+      )}
+
+      {tab === 'attendance' && (
+        <section className="sa-card sa-sd-tab">
+          <div className="sa-rd-card-head">
+            <h3>Register days</h3>
+            <Link to="/school-admin/attendance" className="sa-btn sa-btn-outline">
+              Class register
+            </Link>
+          </div>
+          <p className="sa-muted">Days this teacher marked the class register. Staff clock-in is not stored.</p>
+          {data.registerDays?.length ? (
+            <ul className="sa-sd-week">
+              {data.registerDays.map((d) => (
+                <li key={d}>
+                  <span>{fmtDate(d) || d}</span>
+                  <em className="sa-stu-status is-active">Marked</em>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="sa-muted">No register marks stored for this teacher.</p>
+          )}
+        </section>
+      )}
+
+      {tab === 'documents' && (
+        <section className="sa-card sa-sd-tab">
+          <h3>Documents</h3>
+          {teacher.photoUrl ? (
+            <p>
+              <a href={teacher.photoUrl} target="_blank" rel="noreferrer">
+                Profile photo
+              </a>
+            </p>
+          ) : (
+            <p className="sa-muted">No staff documents are stored for this teacher.</p>
+          )}
+        </section>
+      )}
+
+      {tab === 'performance' && (
+        <section className="sa-card sa-sd-tab">
+          <div className="sa-rd-card-head">
+            <h3>Assessments recorded</h3>
+            <Link to="/school-admin/examinations" className="sa-btn sa-btn-outline">
+              Examinations
+            </Link>
+          </div>
+          <dl className="sa-sd-dl">
+            <div><dt>Records</dt><dd>{data.assessmentStats?.total ?? 0}</dd></div>
+            <div>
+              <dt>Average score</dt>
+              <dd>{data.assessmentStats?.average == null ? '—' : data.assessmentStats.average}</dd>
+            </div>
+          </dl>
+          {data.assessments?.length ? (
+            <table className="sa-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Student</th>
+                  <th>Title</th>
+                  <th>Score</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.assessments.map((a) => (
+                  <tr key={a.id}>
+                    <td>{fmtDate(a.date) || '—'}</td>
+                    <td>
+                      {a.kidName}
+                      {a.grade ? <div className="sa-muted">{a.grade}</div> : null}
+                    </td>
+                    <td>{a.title}{a.subject ? ` · ${a.subject}` : ''}</td>
+                    <td>{a.score}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="sa-muted">No assessments stored for this teacher.</p>
+          )}
+          {data.assignments?.length ? (
+            <>
+              <h3>Assignments</h3>
+              <table className="sa-table">
+                <thead>
+                  <tr>
+                    <th>Title</th>
+                    <th>Subject</th>
+                    <th>Due</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.assignments.map((a) => (
+                    <tr key={a.id}>
+                      <td>{a.title}</td>
+                      <td>{a.subject || '—'}</td>
+                      <td>{fmtDate(a.dueDate) || '—'}</td>
+                      <td>{a.status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          ) : null}
+        </section>
+      )}
+
+      {tab === 'notes' && (
+        <section className="sa-card sa-sd-tab">
+          <h3>Notes</h3>
+          {teacher.aboutMe ? <p className="sa-sd-remarks">{teacher.aboutMe}</p> : null}
+          {data.notes?.length ? (
+            <ul className="sa-sd-notes-list">
+              {data.notes.map((n) => (
+                <li key={n.id}>
+                  <strong>{n.title}</strong>
+                  <span>{n.body}</span>
+                  <small>{[n.className, n.author, fmtDate(n.at)].filter(Boolean).join(' · ')}</small>
+                </li>
+              ))}
+            </ul>
+          ) : !teacher.aboutMe ? (
+            <p className="sa-muted">No class notes stored for this teacher.</p>
+          ) : null}
+        </section>
+      )}
+
+      {tab === 'activity' && (
+        <section className="sa-card sa-sd-tab">
+          <h3>Activity log</h3>
+          <ul className="sa-activity">
+            <li>
+              <strong>Profile updated</strong>
+              <small>{fmtDate(teacher.updatedAt) || '—'}</small>
+            </li>
+            <li>
+              <strong>Profile created</strong>
+              <small>{fmtDate(teacher.createdAt) || '—'}</small>
+            </li>
+            {(data.registerDays || []).slice(0, 10).map((d) => (
+              <li key={d}>
+                <strong>Class register marked</strong>
+                <small>{fmtDate(d) || d}</small>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {tab === 'overview' && (
@@ -288,7 +493,7 @@ export default function TeacherDetails() {
                 <Link to={`/school-admin/teachers?edit=${teacher.id}`}>Edit Teacher Profile</Link>
                 <button type="button" onClick={() => setTab('classes')}>Assign to Class</button>
                 <button type="button" onClick={() => setTab('schedule')}>View Timetable</button>
-                <Link to="/school-admin/coming-soon/attendance">Mark Attendance</Link>
+                <Link to="/school-admin/attendance">Mark Attendance</Link>
                 <button type="button" onClick={() => setTab('documents')}>View Documents</button>
                 <button type="button" onClick={() => setTab('notes')}>Add Note</button>
                 <Link to={`/school-admin/messages?to=${teacher.id}&kind=teacher`}>Send Message</Link>
