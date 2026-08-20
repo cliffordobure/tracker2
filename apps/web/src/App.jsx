@@ -109,6 +109,7 @@ export default function App() {
         <Route path="notifications" element={<Notifications />} />
         <Route path="incidents" element={<Incidents />} />
         <Route path="messages" element={<Messages />} />
+        <Route path="messages/:id" element={<Messages />} />
         <Route path="users" element={<UsersRoles />} />
         <Route path="leave-requests" element={<LeaveRequests />} />
         <Route path="noticeboard" element={<Noticeboard />} />

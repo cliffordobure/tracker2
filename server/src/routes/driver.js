@@ -2391,10 +2391,11 @@ async function driverSendMessage(convo, driver, body) {
   convo.archived = false;
   convo.driverUnreadCount = 0;
   convo.unreadCount = (convo.unreadCount || 0) + 1;
-  convo.staffUnreadCount = (convo.staffUnreadCount || 0) + 1;
+  convo.staffUnreadCount = convo.muted ? convo.staffUnreadCount || 0 : (convo.staffUnreadCount || 0) + 1;
   await convo.save();
   const notifyId = convo.parentId || (String(convo.counterpartUserId) !== String(driver._id) ? convo.counterpartUserId : null);
-  if (notifyId) {
+  const skipStaffNotify = convo.muted && notifyId && String(notifyId) === String(convo.counterpartUserId) && !convo.parentId;
+  if (notifyId && !skipStaffNotify) {
     await createAndEmitNotifications(getIO(), [
       {
         userId: notifyId,

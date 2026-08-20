@@ -685,17 +685,39 @@ function asPerson(ref) {
   return ref;
 }
 
+function personPayload(ref, role) {
+  if (!ref?._id) return null;
+  return {
+    _id: ref._id,
+    name: ref.name || '',
+    photoUrl: ref.photoUrl || '',
+    phone: ref.phone || '',
+    role: role || ref.role || '',
+  };
+}
+
+function memberRoleLabel(role) {
+  if (role === 'school_admin' || role === 'super_admin') return 'Admin';
+  if (role === 'driver') return 'Driver';
+  if (role === 'teacher') return 'Teacher';
+  if (role === 'parent') return 'Parent';
+  return role || 'Staff';
+}
+
 function serializeAdminConversation(row) {
   const doc = typeof row.toObject === 'function' ? row.toObject() : row;
   const parent = asPerson(doc.parentId);
   const driver = asPerson(doc.driverId);
   const counterpart = asPerson(doc.counterpartUserId);
+  const createdBy = asPerson(doc.createdByUserId);
+  const members = Array.isArray(doc.memberIds) ? doc.memberIds.map((m) => asPerson(m)).filter(Boolean) : [];
   return {
     _id: doc._id,
     type: doc.type || 'direct',
     title: doc.title,
     roleLabel: doc.roleLabel || '',
     subtitle: doc.subtitle || '',
+    description: doc.description || '',
     avatarKind: doc.avatarKind || 'admin',
     photoUrl: doc.photoUrl || parent?.photoUrl || driver?.photoUrl || counterpart?.photoUrl || '',
     phone: doc.phone || parent?.phone || driver?.phone || counterpart?.phone || '',
@@ -704,21 +726,17 @@ function serializeAdminConversation(row) {
     timeLabel: messageTimeLabel(doc.lastMessageAt),
     unreadCount: doc.staffUnreadCount || 0,
     archived: doc.archived === true,
+    muted: doc.muted === true,
     createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt || doc.lastMessageAt || doc.createdAt,
+    createdBy: createdBy ? personPayload(createdBy, createdBy.role) : null,
     parentId: parent?._id || doc.parentId || null,
     driverId: driver?._id || doc.driverId || null,
     counterpartUserId: counterpart?._id || doc.counterpartUserId || null,
-    parent: parent ? { _id: parent._id, name: parent.name || '', photoUrl: parent.photoUrl || '', phone: parent.phone || '', role: 'parent' } : null,
-    driver: driver ? { _id: driver._id, name: driver.name || '', photoUrl: driver.photoUrl || '', phone: driver.phone || '', role: 'driver' } : null,
-    counterpart: counterpart
-      ? {
-          _id: counterpart._id,
-          name: counterpart.name || '',
-          photoUrl: counterpart.photoUrl || '',
-          phone: counterpart.phone || '',
-          role: counterpart.role || '',
-        }
-      : null,
+    parent: personPayload(parent, 'parent'),
+    driver: personPayload(driver, 'driver'),
+    counterpart: personPayload(counterpart, counterpart?.role),
+    storedMembers: members.map((m) => personPayload(m, m.role)).filter(Boolean),
   };
 }
 
@@ -746,10 +764,12 @@ function populateConversation(q) {
   return q
     .populate('parentId', 'name photoUrl phone role')
     .populate('driverId', 'name photoUrl phone role')
-    .populate('counterpartUserId', 'name photoUrl phone role');
+    .populate('counterpartUserId', 'name photoUrl phone role')
+    .populate('createdByUserId', 'name photoUrl phone role')
+    .populate('memberIds', 'name photoUrl phone role');
 }
 
-function uniqueMembers(convo) {
+function uniqueMembers(convo, currentUser) {
   const map = new Map();
   const add = (person, roleLabel) => {
     if (!person?._id) return;
@@ -759,21 +779,19 @@ function uniqueMembers(convo) {
       _id: person._id,
       name: person.name || '',
       photoUrl: person.photoUrl || '',
-      roleLabel: roleLabel || person.role || '',
+      roleLabel: roleLabel || memberRoleLabel(person.role),
     });
   };
   add(convo.parent, 'Parent');
   add(convo.driver, 'Driver');
-  if (convo.counterpart) {
-    const role =
-      convo.counterpart.role === 'school_admin'
-        ? 'Admin'
-        : convo.counterpart.role === 'driver'
-          ? 'Driver'
-          : convo.counterpart.role === 'teacher'
-            ? 'Teacher'
-            : convo.roleLabel || 'Staff';
-    add(convo.counterpart, role);
+  if (convo.counterpart) add(convo.counterpart, memberRoleLabel(convo.counterpart.role) || convo.roleLabel || 'Staff');
+  if (convo.createdBy) add(convo.createdBy, memberRoleLabel(convo.createdBy.role));
+  for (const m of convo.storedMembers || []) add(m, memberRoleLabel(m.role));
+  if (currentUser?.id) {
+    add(
+      { _id: currentUser.id, name: currentUser.name || 'You', photoUrl: currentUser.photoUrl || '', role: currentUser.role },
+      memberRoleLabel(currentUser.role)
+    );
   }
   return [...map.values()];
 }
@@ -788,6 +806,7 @@ router.get('/messages', async (req, res) => {
     if (tab === 'archived') filter.archived = true;
     else filter.archived = { $ne: true };
     if (tab === 'groups') filter.type = 'group';
+    if (tab === 'unread') filter.staffUnreadCount = { $gt: 0 };
     if (tab === 'parents') filter.parentId = { $ne: null };
     if (tab === 'drivers') filter.driverId = { $ne: null };
 
@@ -796,17 +815,24 @@ router.get('/messages', async (req, res) => {
       filter.$or = [{ title: rx }, { lastMessage: rx }, { roleLabel: rx }, { subtitle: rx }];
     }
 
-    const [rows, parents, drivers, teachers] = await Promise.all([
+    const [rows, parents, drivers, teachers, admins, allCount, unreadCount, groupCount, archivedCount] = await Promise.all([
       populateConversation(Conversation.find(filter).sort({ lastMessageAt: -1 }).limit(120)),
       User.find({ schoolId, role: 'parent', active: { $ne: false } }).select('name photoUrl phone').sort({ name: 1 }).limit(200),
       User.find({ schoolId, role: 'driver', active: { $ne: false } }).select('name photoUrl phone').sort({ name: 1 }).limit(100),
       User.find({ schoolId, role: 'teacher', active: { $ne: false } }).select('name photoUrl phone jobTitle').sort({ name: 1 }).limit(100),
+      User.find({ schoolId, role: 'school_admin', active: { $ne: false } }).select('name photoUrl phone').sort({ name: 1 }).limit(50),
+      Conversation.countDocuments({ schoolId, archived: { $ne: true } }),
+      Conversation.countDocuments({ schoolId, archived: { $ne: true }, staffUnreadCount: { $gt: 0 } }),
+      Conversation.countDocuments({ schoolId, archived: { $ne: true }, type: 'group' }),
+      Conversation.countDocuments({ schoolId, archived: true }),
     ]);
 
     const conversations = rows.map(serializeAdminConversation);
     res.json({
       conversations,
+      counts: { all: allCount, unread: unreadCount, groups: groupCount, archived: archivedCount },
       contacts: [
+        ...admins.map((u) => ({ _id: u._id, name: u.name, photoUrl: u.photoUrl || '', phone: u.phone || '', kind: 'admin', roleLabel: 'Admin' })),
         ...parents.map((u) => ({ _id: u._id, name: u.name, photoUrl: u.photoUrl || '', phone: u.phone || '', kind: 'parent', roleLabel: 'Parent' })),
         ...drivers.map((u) => ({ _id: u._id, name: u.name, photoUrl: u.photoUrl || '', phone: u.phone || '', kind: 'driver', roleLabel: 'Driver' })),
         ...teachers.map((u) => ({
@@ -843,6 +869,8 @@ router.post('/messages', async (req, res) => {
         roleLabel: 'Group',
         avatarKind: 'group',
         counterpartUserId: req.user.id,
+        createdByUserId: req.user.id,
+        memberIds: [req.user.id],
         lastMessage: body || '',
         lastMessageAt: new Date(),
         unreadCount: 0,
@@ -886,6 +914,7 @@ router.post('/messages', async (req, res) => {
         parentId: kind === 'parent' ? contact._id : null,
         driverId: kind === 'driver' ? contact._id : null,
         counterpartUserId: kind === 'teacher' ? contact._id : req.user.id,
+        createdByUserId: req.user.id,
         type: 'direct',
         title: contact.name,
         roleLabel: kind === 'parent' ? 'Parent' : kind === 'driver' ? 'Driver' : contact.jobTitle || 'Teacher',
@@ -945,7 +974,7 @@ router.get('/messages/:id', async (req, res) => {
     res.json({
       conversation: serialized,
       messages: messages.map((m) => serializeAdminChatMessage(m, req.user)),
-      members: uniqueMembers(serialized),
+      members: uniqueMembers(serialized, req.user),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1007,7 +1036,98 @@ router.post('/messages/:id/archive', async (req, res) => {
     if (!convo) return res.status(404).json({ error: 'Conversation not found' });
     convo.archived = req.body?.archived !== false;
     await convo.save();
-    res.json({ conversation: serializeAdminConversation(convo) });
+    const populated = await populateConversation(Conversation.findById(convo._id));
+    res.json({ conversation: serializeAdminConversation(populated) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/messages/:id', async (req, res) => {
+  try {
+    if (!isOid(req.params.id)) return res.status(400).json({ error: 'Invalid conversation' });
+    const schoolId = resolveSchoolId(req);
+    const convo = await Conversation.findOne({ _id: req.params.id, ...(schoolId ? { schoolId } : {}) });
+    if (!convo) return res.status(404).json({ error: 'Conversation not found' });
+    if (req.body.title !== undefined) {
+      const title = String(req.body.title || '').trim().slice(0, 120);
+      if (!title) return res.status(400).json({ error: 'Title is required' });
+      convo.title = title;
+    }
+    if (req.body.description !== undefined) {
+      convo.description = String(req.body.description || '').trim().slice(0, 400);
+    }
+    if (req.body.muted !== undefined) convo.muted = req.body.muted === true;
+    await convo.save();
+    const populated = await populateConversation(Conversation.findById(convo._id));
+    const serialized = serializeAdminConversation(populated);
+    res.json({ conversation: serialized, members: uniqueMembers(serialized, req.user) });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/messages/:id/members', async (req, res) => {
+  try {
+    if (!isOid(req.params.id)) return res.status(400).json({ error: 'Invalid conversation' });
+    const userId = String(req.body?.userId || '');
+    if (!isOid(userId)) return res.status(400).json({ error: 'Choose a person to add' });
+    const schoolId = resolveSchoolId(req);
+    const convo = await Conversation.findOne({ _id: req.params.id, ...(schoolId ? { schoolId } : {}) });
+    if (!convo) return res.status(404).json({ error: 'Conversation not found' });
+    if (convo.type !== 'group') {
+      return res.status(400).json({ error: 'Members can only be added to group conversations' });
+    }
+    const person = await User.findOne({
+      _id: userId,
+      schoolId,
+      role: { $in: ['school_admin', 'teacher', 'driver', 'parent'] },
+      active: { $ne: false },
+    }).select('_id');
+    if (!person) return res.status(404).json({ error: 'User not found' });
+    const already = (convo.memberIds || []).some((id) => String(id) === String(person._id));
+    if (!already) {
+      convo.memberIds = [...(convo.memberIds || []), person._id];
+      await convo.save();
+    }
+    const populated = await populateConversation(Conversation.findById(convo._id));
+    const serialized = serializeAdminConversation(populated);
+    res.json({ conversation: serialized, members: uniqueMembers(serialized, req.user) });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete('/messages/:id/members/:userId', async (req, res) => {
+  try {
+    if (!isOid(req.params.id) || !isOid(req.params.userId)) {
+      return res.status(400).json({ error: 'Invalid conversation or member' });
+    }
+    const schoolId = resolveSchoolId(req);
+    const convo = await Conversation.findOne({ _id: req.params.id, ...(schoolId ? { schoolId } : {}) });
+    if (!convo) return res.status(404).json({ error: 'Conversation not found' });
+    if (convo.type !== 'group') {
+      return res.status(400).json({ error: 'Members can only be removed from group conversations' });
+    }
+    convo.memberIds = (convo.memberIds || []).filter((id) => String(id) !== String(req.params.userId));
+    await convo.save();
+    const populated = await populateConversation(Conversation.findById(convo._id));
+    const serialized = serializeAdminConversation(populated);
+    res.json({ conversation: serialized, members: uniqueMembers(serialized, req.user) });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete('/messages/:id', async (req, res) => {
+  try {
+    if (!isOid(req.params.id)) return res.status(400).json({ error: 'Invalid conversation' });
+    const schoolId = resolveSchoolId(req);
+    const convo = await Conversation.findOne({ _id: req.params.id, ...(schoolId ? { schoolId } : {}) });
+    if (!convo) return res.status(404).json({ error: 'Conversation not found' });
+    await Message.deleteMany({ conversationId: convo._id });
+    await Conversation.deleteOne({ _id: convo._id });
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

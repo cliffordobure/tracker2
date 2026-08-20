@@ -188,7 +188,6 @@ export default function SchoolAdminLayout() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [open, setOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
   const [schoolName, setSchoolName] = useState('School Admin');
   const [schoolLogo, setSchoolLogo] = useState('');
   const [search, setSearch] = useState('');
@@ -301,6 +300,16 @@ export default function SchoolAdminLayout() {
           : ['Dashboard', 'Reports & Analytics'],
       };
     }
+    if (location.pathname.startsWith('/school-admin/messages/') && location.pathname !== '/school-admin/messages') {
+      return {
+        title: 'Message Details',
+        crumbs: [
+          { label: 'Dashboard', to: '/school-admin' },
+          { label: 'Messages', to: '/school-admin/messages' },
+          { label: 'Message Details' },
+        ],
+      };
+    }
     if (pageMeta[location.pathname]) return pageMeta[location.pathname];
     if (location.pathname.startsWith('/school-admin/coming-soon')) {
       const slug = location.pathname.split('/').pop();
@@ -315,7 +324,8 @@ export default function SchoolAdminLayout() {
   const isCalendar = location.pathname === '/school-admin/calendar';
   const isNotifications = location.pathname === '/school-admin/notifications';
   const isIncidents = location.pathname === '/school-admin/incidents';
-  const isMessages = location.pathname === '/school-admin/messages';
+  const isMessages =
+    location.pathname === '/school-admin/messages' || location.pathname.startsWith('/school-admin/messages/');
   const isUsers = location.pathname === '/school-admin/users';
   const isSettings = location.pathname === '/school-admin/school';
   const isLiveMap = isLivePage && searchParams.get('full') === '1';
@@ -376,7 +386,7 @@ export default function SchoolAdminLayout() {
   }
 
   return (
-    <div className={`sa-shell sa-shell--navy${collapsed ? ' is-collapsed' : ''}${isLiveMap ? ' sa-shell--live-map' : ''}`}>
+    <div className={`sa-shell sa-shell--navy sa-shell--drawer${open ? ' is-nav-open' : ''}${isLiveMap ? ' sa-shell--live-map' : ''}`}>
       {open && (
         <button type="button" className="sa-backdrop" aria-label="Close menu" onClick={() => setOpen(false)} />
       )}
@@ -404,35 +414,35 @@ export default function SchoolAdminLayout() {
               <span className="sa-nav-icon" aria-hidden="true">
                 <NavIcon name={item.icon} />
               </span>
-              {!collapsed && <span>{item.label}</span>}
+              <span>{item.label}</span>
               {item.icon === 'bell' && unread > 0 && (
                 <i className="sa-nav-badge">{unread > 9 ? '9+' : unread}</i>
               )}
             </NavLink>
           ))}
-          {!collapsed && <p className="sa-nav-section-title">More</p>}
+          <p className="sa-nav-section-title">More</p>
           {extraItems.map((item) => (
             <NavLink key={item.to} to={item.to} className="sa-nav-link" title={item.label}>
               <span className="sa-nav-icon" aria-hidden="true">
                 <NavIcon name={item.icon} />
               </span>
-              {!collapsed && <span>{item.label}</span>}
+              <span>{item.label}</span>
             </NavLink>
           ))}
           <NavLink to="/school-admin/school" className="sa-nav-link" title="Settings">
             <span className="sa-nav-icon" aria-hidden="true">
               <NavIcon name="settings" />
             </span>
-            {!collapsed && <span>Settings</span>}
+            <span>Settings</span>
           </NavLink>
         </nav>
 
         <div className="sa-sidebar-foot">
-          <button type="button" className="sa-btn sa-btn-ghost" onClick={() => setCollapsed((v) => !v)}>
-            {collapsed ? '»' : 'Collapse'}
+          <button type="button" className="sa-btn sa-btn-ghost" onClick={() => setOpen(false)}>
+            Hide menu
           </button>
           <button type="button" className="sa-btn sa-btn-ghost" onClick={logout}>
-            {collapsed ? 'Out' : 'Sign out'}
+            Sign out
           </button>
         </div>
       </aside>
@@ -440,7 +450,13 @@ export default function SchoolAdminLayout() {
       <div className="sa-main">
         <header className="sa-topbar">
           <div className="sa-topbar-left">
-            <button type="button" className="sa-menu-btn" aria-label="Open menu" onClick={() => { setCollapsed(false); setOpen(true); }}>
+            <button
+              type="button"
+              className="sa-menu-btn"
+              aria-label={open ? 'Hide menu' : 'Open menu'}
+              aria-expanded={open}
+              onClick={() => setOpen((v) => !v)}
+            >
               <span />
               <span />
               <span />
@@ -494,7 +510,9 @@ export default function SchoolAdminLayout() {
                                   ? 'Search students, staff, routes...'
                                   : isTrips
                                     ? 'Search students, staff, routes...'
-                                    : isLivePage || isReports || isCalendar || isNotifications || isIncidents || isMessages || isUsers || isSettings
+                                    : isMessages
+                                      ? 'Search students, staff, routes, vehicles...'
+                                    : isLivePage || isReports || isCalendar || isNotifications || isIncidents || isUsers || isSettings
                                       ? 'Search students, staff, routes...'
                                       : 'Search anything...'
               }
@@ -523,7 +541,7 @@ export default function SchoolAdminLayout() {
         </header>
 
         <div className={`sa-content${isLiveMap ? ' sa-content--map' : ''}`}>
-          <Outlet context={{ globalSearch: search }} />
+          <Outlet context={{ globalSearch: search, schoolName }} />
         </div>
       </div>
 

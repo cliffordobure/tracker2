@@ -6036,7 +6036,7 @@ router.post('/messages', async (req, res) => {
       convo.lastMessage = body;
       convo.lastMessageAt = new Date();
       convo.archived = false;
-      convo.staffUnreadCount = (convo.staffUnreadCount || 0) + 1;
+      convo.staffUnreadCount = convo.muted ? convo.staffUnreadCount || 0 : (convo.staffUnreadCount || 0) + 1;
       if (convo.driverId) {
         convo.driverUnreadCount = (convo.driverUnreadCount || 0) + 1;
       } else if (convo.counterpartUserId) {
@@ -6047,7 +6047,7 @@ router.post('/messages', async (req, res) => {
         }
       }
       await convo.save();
-      if (convo.counterpartUserId) {
+      if (convo.counterpartUserId && !convo.muted) {
         await createAndEmitNotifications(getIO(), [
           {
             userId: convo.counterpartUserId,
@@ -6109,7 +6109,7 @@ router.post('/messages/:id', async (req, res) => {
     convo.lastMessageAt = message.createdAt;
     convo.archived = false;
     convo.unreadCount = 0;
-    convo.staffUnreadCount = (convo.staffUnreadCount || 0) + 1;
+    convo.staffUnreadCount = convo.muted ? convo.staffUnreadCount || 0 : (convo.staffUnreadCount || 0) + 1;
     if (convo.driverId) {
       convo.driverUnreadCount = (convo.driverUnreadCount || 0) + 1;
     } else if (convo.counterpartUserId) {
@@ -6120,7 +6120,7 @@ router.post('/messages/:id', async (req, res) => {
       }
     }
     await convo.save();
-    if (convo.counterpartUserId) {
+    if (convo.counterpartUserId && !convo.muted) {
       await createAndEmitNotifications(getIO(), [
         {
           userId: convo.counterpartUserId,

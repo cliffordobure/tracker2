@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useOutletContext, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
+import { useAuth } from '../../context/AuthContext';
 
 const TABS = [
   { id: 'all', label: 'All' },
-  { id: 'parents', label: 'Parents' },
-  { id: 'drivers', label: 'Drivers' },
+  { id: 'unread', label: 'Unread' },
   { id: 'groups', label: 'Groups' },
   { id: 'archived', label: 'Archived' },
+];
+
+const EXTRA_TABS = [
+  { id: 'parents', label: 'Parents' },
+  { id: 'drivers', label: 'Drivers' },
 ];
 
 const EMOJIS = ['😊', '👍', '✅', '🙏', '🚌'];
@@ -26,15 +31,32 @@ function fmtCreated(value) {
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+function renderBody(text) {
+  const parts = String(text || '').split(/(@[\w.-]+)/g);
+  return parts.map((part, i) =>
+    part.startsWith('@') ? (
+      <em key={`${part}-${i}`} className="sa-msg-mention">
+        {part}
+      </em>
+    ) : (
+      part
+    )
+  );
+}
+
 export default function Messages() {
-  const { globalSearch = '' } = useOutletContext() || {};
+  const { user } = useAuth();
+  const { globalSearch = '', schoolName = '' } = useOutletContext() || {};
+  const { id: routeId } = useParams();
+  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const [tab, setTab] = useState('all');
   const [q, setQ] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
-  const [selectedId, setSelectedId] = useState(params.get('id') || '');
+  const [notice, setNotice] = useState('');
+  const selectedId = routeId || params.get('id') || '';
   const [thread, setThread] = useState(null);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -42,7 +64,13 @@ export default function Messages() {
   const [showTemplates, setShowTemplates] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [attachNote, setAttachNote] = useState(false);
+  const [showAddMember, setShowAddMember] = useState(false);
+  const [showAllMembers, setShowAllMembers] = useState(false);
+  const [editingInfo, setEditingInfo] = useState(false);
+  const [infoForm, setInfoForm] = useState({ title: '', description: '' });
+  const [memberPick, setMemberPick] = useState('');
   const [newForm, setNewForm] = useState({ kind: 'parent', contactId: '', title: '', body: '', type: 'direct' });
+  const infoRef = useRef(null);
   const scroller = useRef(null);
   const year = new Date().getFullYear();
 
@@ -58,7 +86,7 @@ export default function Messages() {
   const loadThread = useCallback(async (id) => {
     if (!id) {
       setThread(null);
-      return;
+      return null;
     }
     const next = await api(`/admin/messages/${id}`);
     setThread(next);
@@ -84,8 +112,15 @@ export default function Messages() {
   }, [params]);
 
   useEffect(() => {
+    if (params.get('id') && !routeId) {
+      navigate(`/school-admin/messages/${params.get('id')}`, { replace: true });
+    }
+  }, [params, routeId, navigate]);
+
+  useEffect(() => {
     if (!selectedId) {
       setThread(null);
+      setEditingInfo(false);
       return undefined;
     }
     loadThread(selectedId).catch((err) => setError(err.message));
@@ -107,9 +142,11 @@ export default function Messages() {
 
   const conversations = data?.conversations || [];
   const contacts = data?.contacts || [];
-  const selected = conversations.find((c) => String(c._id) === selectedId) || thread?.conversation;
+  const counts = data?.counts || { all: 0, unread: 0, groups: 0, archived: 0 };
+  const selected = thread?.conversation || conversations.find((c) => String(c._id) === selectedId);
   const messages = thread?.messages || [];
   const members = thread?.members || [];
+  const visibleMembers = showAllMembers ? members : members.slice(0, 6);
   const groups = useMemo(() => {
     const out = [];
     let last = '';
@@ -123,15 +160,19 @@ export default function Messages() {
     return out;
   }, [messages]);
 
+  const addableContacts = contacts.filter(
+    (c) => !members.some((m) => String(m._id) === String(c._id)) && String(c._id) !== String(user?.id)
+  );
+
   const openConvo = (id) => {
-    setSelectedId(id);
     setParams((prev) => {
       const next = new URLSearchParams(prev);
-      next.set('id', id);
+      next.delete('id');
       next.delete('to');
       next.delete('kind');
       return next;
     });
+    navigate(`/school-admin/messages/${id}`);
   };
 
   const send = async (e) => {
@@ -170,35 +211,123 @@ export default function Messages() {
     }
   };
 
+  const saveInfo = async (e) => {
+    e.preventDefault();
+    if (!selectedId) return;
+    try {
+      const next = await api(`/admin/messages/${selectedId}`, {
+        method: 'PUT',
+        body: { title: infoForm.title, description: infoForm.description },
+      });
+      setThread((prev) =>
+        prev
+          ? { ...prev, conversation: next.conversation, members: next.members || prev.members }
+          : prev
+      );
+      setEditingInfo(false);
+      await loadList();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const toggleMute = async () => {
+    if (!selectedId || !selected) return;
+    try {
+      const next = await api(`/admin/messages/${selectedId}`, {
+        method: 'PUT',
+        body: { muted: !selected.muted },
+      });
+      setThread((prev) =>
+        prev ? { ...prev, conversation: next.conversation, members: next.members || prev.members } : prev
+      );
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const archiveConvo = async (archived = true) => {
+    if (!selectedId) return;
+    try {
+      await api(`/admin/messages/${selectedId}/archive`, { method: 'POST', body: { archived } });
+      setNotice(archived ? 'Conversation archived.' : 'Conversation restored.');
+      await loadList();
+      if (archived) navigate('/school-admin/messages');
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const deleteConvo = async () => {
+    if (!selectedId) return;
+    if (!window.confirm('Delete this conversation and its messages? This cannot be undone.')) return;
+    try {
+      await api(`/admin/messages/${selectedId}`, { method: 'DELETE' });
+      setThread(null);
+      navigate('/school-admin/messages');
+      await loadList();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const addMember = async (e) => {
+    e.preventDefault();
+    if (!memberPick) return;
+    try {
+      const next = await api(`/admin/messages/${selectedId}/members`, {
+        method: 'POST',
+        body: { userId: memberPick },
+      });
+      setThread((prev) =>
+        prev ? { ...prev, conversation: next.conversation, members: next.members || prev.members } : prev
+      );
+      setShowAddMember(false);
+      setMemberPick('');
+      await loadList();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   const filteredContacts = contacts.filter((c) => c.kind === newForm.kind);
 
   return (
     <div className="sa-students sa-msg">
       {error && <div className="alert">{error}</div>}
+      {notice && <div className="alert alert-ok">{notice}</div>}
 
       <section className="sa-msg-board">
         <aside className="sa-card sa-msg-list">
-          <button type="button" className="sa-btn sa-btn-primary sa-msg-new" onClick={() => setShowNew(true)}>
-            + New Message
-          </button>
+          <header className="sa-msg-list-head">
+            <h3>All Conversations</h3>
+            <button type="button" className="sa-icon-btn" aria-label="Filters" onClick={() => setShowFilters((v) => !v)}>
+              ⚙
+            </button>
+          </header>
           <div className="sa-msg-list-tools">
             <label className="sa-stu-search">
               <span aria-hidden="true">⌕</span>
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search conversations..." />
             </label>
-            <button type="button" className="sa-icon-btn" aria-label="Filters" onClick={() => setShowFilters((v) => !v)}>
-              ⚙
-            </button>
           </div>
-          {showFilters && (
-            <div className="sa-msg-tabs">
-              {TABS.map((t) => (
+          <div className="sa-msg-tabs">
+            {TABS.map((t) => (
+              <button key={t.id} type="button" className={tab === t.id ? 'is-on' : ''} onClick={() => setTab(t.id)}>
+                {t.label}
+                {t.id === 'unread' && counts.unread > 0 && <b>{counts.unread > 9 ? '9+' : counts.unread}</b>}
+              </button>
+            ))}
+            {showFilters &&
+              EXTRA_TABS.map((t) => (
                 <button key={t.id} type="button" className={tab === t.id ? 'is-on' : ''} onClick={() => setTab(t.id)}>
                   {t.label}
                 </button>
               ))}
-            </div>
-          )}
+          </div>
+          <button type="button" className="sa-btn sa-btn-primary sa-msg-new" onClick={() => setShowNew(true)}>
+            + New Message
+          </button>
           <ul>
             {conversations.map((c) => (
               <li key={c._id}>
@@ -221,6 +350,9 @@ export default function Messages() {
             ))}
           </ul>
           {!conversations.length && <p className="sa-home-empty">No conversations in this view.</p>}
+          <Link className="sa-msg-view-all" to="/school-admin/messages" onClick={() => setTab('all')}>
+            View all conversations
+          </Link>
         </aside>
 
         <article className="sa-card sa-msg-thread">
@@ -231,12 +363,11 @@ export default function Messages() {
                   {selected.photoUrl ? <img src={selected.photoUrl} alt="" /> : initials(selected.title)}
                 </span>
                 <div>
-                  <strong>{selected.title}</strong>
-                  <p>
-                    {members.length
-                      ? `${members.length} ${members.length === 1 ? 'person' : 'people'} in this thread`
-                      : selected.roleLabel || selected.subtitle || 'Direct message'}
-                  </p>
+                  <strong>
+                    {selected.title}
+                    {members.length ? ` (${members.length} ${members.length === 1 ? 'member' : 'members'})` : ''}
+                  </strong>
+                  <p>{selected.roleLabel || selected.subtitle || (selected.type === 'group' ? 'Group' : 'Direct message')}</p>
                 </div>
                 <div className="sa-msg-head-actions">
                   {selected.phone ? (
@@ -251,6 +382,14 @@ export default function Messages() {
                   <button type="button" className="sa-icon-btn" disabled title="Video calls are not available">
                     🎥
                   </button>
+                  <button
+                    type="button"
+                    className="sa-icon-btn"
+                    aria-label="Conversation info"
+                    onClick={() => infoRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                  >
+                    ⓘ
+                  </button>
                 </div>
               </header>
               <div className="sa-msg-scroll" ref={scroller}>
@@ -262,13 +401,15 @@ export default function Messages() {
                   ) : (
                     <div key={item._id} className={`sa-msg-bubble${item.mine ? ' is-mine' : ''}`}>
                       {!item.mine && (
-                        <span className="sa-msg-ava sm">{initials(item.senderName || selected.title)}</span>
+                        <span className="sa-msg-ava sm">
+                          {initials(item.senderName || selected.title)}
+                        </span>
                       )}
                       <div>
                         <small>
                           {item.mine ? 'You' : item.senderName || selected.title} · {item.timeLabel}
                         </small>
-                        <p>{item.body}</p>
+                        <p>{renderBody(item.body)}</p>
                       </div>
                     </div>
                   )
@@ -292,8 +433,13 @@ export default function Messages() {
                     </button>
                   ))}
                 </div>
-                <button type="submit" className="sa-btn sa-btn-primary" disabled={sending || !draft.trim()}>
-                  Send
+                <button
+                  type="submit"
+                  className="sa-msg-send"
+                  disabled={sending || !draft.trim()}
+                  aria-label="Send"
+                >
+                  ➤
                 </button>
               </form>
             </>
@@ -302,23 +448,95 @@ export default function Messages() {
           )}
         </article>
 
-        <aside className="sa-msg-info">
+        <aside className="sa-msg-info" ref={infoRef}>
           {selected ? (
             <>
               <article className="sa-card">
-                <h3>Conversation info</h3>
-                <strong>{selected.title}</strong>
-                <p className="sa-muted">{selected.subtitle || selected.roleLabel || '—'}</p>
-                <p className="sa-muted">Started {fmtCreated(selected.createdAt)}</p>
-                <p className="sa-muted">Who created the thread is not stored.</p>
+                <header className="sa-msg-info-head">
+                  <h3>Conversation info</h3>
+                  <button
+                    type="button"
+                    className="sa-icon-btn"
+                    aria-label="Edit conversation"
+                    onClick={() => {
+                      setInfoForm({ title: selected.title || '', description: selected.description || '' });
+                      setEditingInfo(true);
+                    }}
+                  >
+                    ✎
+                  </button>
+                </header>
+                <div className="sa-msg-info-hero">
+                  <span className="sa-msg-ava lg">
+                    {selected.photoUrl ? <img src={selected.photoUrl} alt="" /> : initials(selected.title)}
+                  </span>
+                  <strong>{selected.title}</strong>
+                </div>
+                {editingInfo ? (
+                  <form className="sa-set-stack" onSubmit={saveInfo}>
+                    <label>
+                      Name
+                      <input
+                        value={infoForm.title}
+                        onChange={(e) => setInfoForm({ ...infoForm, title: e.target.value })}
+                        required
+                      />
+                    </label>
+                    <label>
+                      Description
+                      <textarea
+                        rows={3}
+                        value={infoForm.description}
+                        onChange={(e) => setInfoForm({ ...infoForm, description: e.target.value })}
+                        placeholder="Optional"
+                      />
+                    </label>
+                    <div className="sa-reports-actions">
+                      <button type="button" className="sa-btn sa-btn-outline" onClick={() => setEditingInfo(false)}>
+                        Cancel
+                      </button>
+                      <button type="submit" className="sa-btn sa-btn-primary">
+                        Save
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <>
+                    <p className="sa-muted">{selected.description || selected.subtitle || selected.roleLabel || '—'}</p>
+                    <dl className="sa-set-info">
+                      <div>
+                        <dt>Created by</dt>
+                        <dd>{selected.createdBy?.name || '—'}</dd>
+                      </div>
+                      <div>
+                        <dt>Created on</dt>
+                        <dd>{fmtCreated(selected.createdAt)}</dd>
+                      </div>
+                      <div>
+                        <dt>Last updated</dt>
+                        <dd>{fmtCreated(selected.updatedAt || selected.lastMessageAt)}</dd>
+                      </div>
+                    </dl>
+                  </>
+                )}
               </article>
+
               <article className="sa-card">
-                <h3>People in this thread</h3>
+                <header className="sa-msg-info-head">
+                  <h3>Members {members.length ? `(${members.length})` : ''}</h3>
+                  {members.length > 6 && (
+                    <button type="button" className="sa-text-link" onClick={() => setShowAllMembers((v) => !v)}>
+                      {showAllMembers ? 'Show less' : 'View all'}
+                    </button>
+                  )}
+                </header>
                 {members.length ? (
                   <ul className="sa-msg-members">
-                    {members.map((m) => (
+                    {visibleMembers.map((m) => (
                       <li key={m._id}>
-                        <span className="sa-msg-ava sm">{m.photoUrl ? <img src={m.photoUrl} alt="" /> : initials(m.name)}</span>
+                        <span className="sa-msg-ava sm">
+                          {m.photoUrl ? <img src={m.photoUrl} alt="" /> : initials(m.name)}
+                        </span>
                         <div>
                           <strong>{m.name}</strong>
                           <small>{m.roleLabel}</small>
@@ -327,18 +545,44 @@ export default function Messages() {
                     ))}
                   </ul>
                 ) : (
-                  <p className="sa-muted">No linked people are stored on this conversation.</p>
+                  <p className="sa-muted">No linked people are stored on this conversation yet.</p>
                 )}
               </article>
+
               <article className="sa-card">
                 <h3>Quick actions</h3>
                 <div className="sa-inc-quick">
-                  <Link to="/school-admin/noticeboard">Create Announcement</Link>
+                  {selected.type === 'group' ? (
+                    <button type="button" onClick={() => setShowAddMember(true)}>
+                      Add members
+                    </button>
+                  ) : (
+                    <button type="button" disabled title="Direct threads have a fixed contact">
+                      Add members
+                    </button>
+                  )}
+                  <label className="sa-msg-mute">
+                    <span>Mute notifications</span>
+                    <input type="checkbox" checked={selected.muted === true} onChange={toggleMute} />
+                  </label>
+                  {selected.archived ? (
+                    <button type="button" onClick={() => archiveConvo(false)}>
+                      Restore conversation
+                    </button>
+                  ) : (
+                    <button type="button" onClick={() => archiveConvo(true)}>
+                      Archive conversation
+                    </button>
+                  )}
+                  <button type="button" className="is-danger" onClick={deleteConvo}>
+                    Delete conversation
+                  </button>
+                  <Link to="/school-admin/noticeboard">Create announcement</Link>
                   <button type="button" onClick={() => setShowTemplates(true)}>
-                    Message Templates
+                    Message templates
                   </button>
                   <button type="button" onClick={() => setShowSettings(true)}>
-                    Message Settings
+                    Message settings
                   </button>
                 </div>
               </article>
@@ -346,7 +590,7 @@ export default function Messages() {
           ) : (
             <article className="sa-card">
               <h3>Conversation info</h3>
-              <p className="sa-muted">Choose a thread to see the people linked to it.</p>
+              <p className="sa-muted">Choose a thread to see details, members, and actions.</p>
             </article>
           )}
         </aside>
@@ -358,12 +602,9 @@ export default function Messages() {
             <h3 id="sa-msg-new">New message</h3>
             <label>
               Type
-              <select
-                value={newForm.type}
-                onChange={(e) => setNewForm({ ...newForm, type: e.target.value })}
-              >
+              <select value={newForm.type} onChange={(e) => setNewForm({ ...newForm, type: e.target.value })}>
                 <option value="direct">Direct</option>
-                <option value="group">Group (name only)</option>
+                <option value="group">Group</option>
               </select>
             </label>
             {newForm.type === 'group' ? (
@@ -379,7 +620,10 @@ export default function Messages() {
               <>
                 <label>
                   Contact type
-                  <select value={newForm.kind} onChange={(e) => setNewForm({ ...newForm, kind: e.target.value, contactId: '' })}>
+                  <select
+                    value={newForm.kind}
+                    onChange={(e) => setNewForm({ ...newForm, kind: e.target.value, contactId: '' })}
+                  >
                     <option value="parent">Parent</option>
                     <option value="driver">Driver</option>
                     <option value="teacher">Teacher</option>
@@ -403,7 +647,7 @@ export default function Messages() {
               </>
             )}
             {newForm.type === 'group' && (
-              <p className="sa-muted">Group member lists are not stored. Only the group name is saved.</p>
+              <p className="sa-muted">You can add members after the group is created.</p>
             )}
             <label>
               Message (optional)
@@ -415,6 +659,34 @@ export default function Messages() {
               </button>
               <button type="submit" className="sa-btn sa-btn-primary" disabled={sending}>
                 Start conversation
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {showAddMember && (
+        <div className="sa-reports-modal" role="dialog">
+          <form className="sa-card" onSubmit={addMember}>
+            <h3>Add members</h3>
+            <label>
+              Person
+              <select value={memberPick} onChange={(e) => setMemberPick(e.target.value)} required>
+                <option value="">Select…</option>
+                {addableContacts.map((c) => (
+                  <option key={c._id} value={c._id}>
+                    {c.name} ({c.roleLabel})
+                  </option>
+                ))}
+              </select>
+            </label>
+            {!addableContacts.length && <p className="sa-muted">Everyone available is already in this group.</p>}
+            <div className="sa-reports-actions">
+              <button type="button" className="sa-btn sa-btn-outline" onClick={() => setShowAddMember(false)}>
+                Cancel
+              </button>
+              <button className="sa-btn sa-btn-primary" type="submit" disabled={!memberPick}>
+                Add
               </button>
             </div>
           </form>
@@ -437,7 +709,7 @@ export default function Messages() {
         <div className="sa-reports-modal" role="dialog">
           <div className="sa-card">
             <h3>Message settings</h3>
-            <p className="sa-muted">Notification and quiet-hour preferences for messaging are not stored yet.</p>
+            <p className="sa-muted">Use Mute on a conversation to silence it. Other message defaults are not stored yet.</p>
             <button type="button" className="sa-btn sa-btn-primary" onClick={() => setShowSettings(false)}>
               Close
             </button>
@@ -458,7 +730,9 @@ export default function Messages() {
       )}
 
       <footer className="sa-home-foot">
-        <span>© {year} Transport</span>
+        <span>
+          © {year} {schoolName || 'School'}. All rights reserved.
+        </span>
         <span>Transport Management System v1.0.0</span>
       </footer>
     </div>
