@@ -13,20 +13,46 @@ import { createAndEmitNotifications } from '../services/notifications.js';
 
 const router = Router();
 
-async function emitTripStarted(trip, kids) {
+function isEveningTrip(trip) {
+  return trip.direction === 'to_home' || trip.period === 'evening' || trip.period === 'afternoon';
+}
+
+function startOfToday() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+async function boardedKidIds(tripId) {
+  const events = await TripEvent.find({ tripId, type: 'picked_up' }).select('kidId');
+  return events.map((e) => e.kidId.toString());
+}
+
+async function emitTripStarted(trip, kids, { eveningBoard = false } = {}) {
   const io = getIO();
   const directionLabel = trip.direction === 'to_school' ? 'morning (to school)' : 'evening (to home)';
     const notifications = [];
   for (const kid of kids) {
     for (const parentId of kid.parentIds || []) {
-      notifications.push({
-        userId: parentId,
-        type: 'trip_started',
-        title: 'Trip started',
-        body: `${kid.name}'s ${directionLabel} trip has started. You can track the driver live.`,
-        tripId: trip._id,
-        kidId: kid._id,
-      });
+      if (eveningBoard) {
+        notifications.push({
+          userId: parentId,
+          type: 'kid_picked_up',
+          title: 'On the evening bus',
+          body: `${kid.name} is on the bus. The evening trip is leaving school — you can track live.`,
+          tripId: trip._id,
+          kidId: kid._id,
+        });
+      } else {
+        notifications.push({
+          userId: parentId,
+          type: 'trip_started',
+          title: 'Trip started',
+          body: `${kid.name}'s ${directionLabel} trip has started. You can track the driver live.`,
+          tripId: trip._id,
+          kidId: kid._id,
+        });
+      }
     }
   }
   const driverId = trip.driverId?._id || trip.driverId;
@@ -73,7 +99,43 @@ async function emitTripStarted(trip, kids) {
       io?.to(`user:${parentId}`).emit('trip:started', { trip: populated, kidId: kid._id });
     }
   }
+
+  if (eveningBoard) {
+    const events = await TripEvent.find({ tripId: trip._id, type: 'picked_up' });
+    for (const kid of kids) {
+      const event = events.find((e) => String(e.kidId) === String(kid._id));
+      const payload = { tripId: trip._id.toString(), kidId: kid._id, event };
+      io?.to(`trip:${trip._id}`).emit('kid:picked_up', payload);
+      for (const parentId of kid.parentIds || []) {
+        io?.to(`user:${parentId}`).emit('kid:picked_up', payload);
+      }
+    }
+  }
   return populated;
+}
+
+async function activateTrip(trip, req) {
+  trip.status = 'active';
+  trip.startedAt = new Date();
+  const startLoc = locationFromBody(req.body) || trip.latestLocation;
+  if (startLoc) trip.startLocation = startLoc;
+  await trip.save();
+
+  const kids = await Kid.find({ _id: { $in: trip.kidIds }, active: true });
+  if (isEveningTrip(trip)) {
+    const boardedIds = new Set(await boardedKidIds(trip._id));
+    const boardedKids = kids.filter((k) => boardedIds.has(String(k._id)));
+    if (!boardedKids.length) {
+      trip.status = 'scheduled';
+      trip.startedAt = undefined;
+      await trip.save();
+      const err = new Error('Check in students at school before starting the evening trip');
+      err.status = 400;
+      throw err;
+    }
+    return emitTripStarted(trip, boardedKids, { eveningBoard: true });
+  }
+  return emitTripStarted(trip, kids);
 }
 
 function locationFromBody(body) {
@@ -128,17 +190,10 @@ router.post('/:id/start', authenticate, requireRole('driver'), async (req, res) 
       return res.status(400).json({ error: `Cannot start trip with status ${trip.status}` });
     }
 
-    trip.status = 'active';
-    trip.startedAt = new Date();
-    const startLoc = locationFromBody(req.body) || trip.latestLocation;
-    if (startLoc) trip.startLocation = startLoc;
-    await trip.save();
-
-    const kids = await Kid.find({ _id: { $in: trip.kidIds }, active: true });
-    const populated = await emitTripStarted(trip, kids);
+    const populated = await activateTrip(trip, req);
     res.json({ trip: populated });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -159,13 +214,7 @@ router.post('/', authenticate, requireRole('driver'), async (req, res) => {
         status: 'scheduled',
       });
       if (!scheduled) return res.status(404).json({ error: 'Scheduled trip not found' });
-      scheduled.status = 'active';
-      scheduled.startedAt = new Date();
-      const startLoc = locationFromBody(req.body) || scheduled.latestLocation;
-      if (startLoc) scheduled.startLocation = startLoc;
-      await scheduled.save();
-      const kids = await Kid.find({ _id: { $in: scheduled.kidIds }, active: true });
-      const populated = await emitTripStarted(scheduled, kids);
+      const populated = await activateTrip(scheduled, req);
       return res.status(200).json({ trip: populated });
     }
 
@@ -184,6 +233,27 @@ router.post('/', authenticate, requireRole('driver'), async (req, res) => {
     const kids = await Kid.find({ routeId, active: true });
     if (!kids.length) {
       return res.status(400).json({ error: 'No kids assigned to this route' });
+    }
+
+    // Evening runs board at school first. Create a scheduled trip so the driver
+    // can check students in, then start once the bus is full.
+    if (direction === 'to_home') {
+      const trip = await Trip.create({
+        routeId,
+        driverId: req.user.id,
+        schoolId: route.schoolId,
+        direction,
+        period: 'evening',
+        status: 'scheduled',
+        kidIds: kids.map((k) => k._id),
+        serviceDate: startOfToday(),
+      });
+      const populated = await Trip.findById(trip._id)
+        .populate('routeId', 'name')
+        .populate('schoolId', 'name location address supportPhone')
+        .populate('busId', 'plate label seats')
+        .populate('kidIds');
+      return res.status(201).json({ trip: populated, boarding: true });
     }
 
     const trip = await Trip.create({
@@ -556,25 +626,4 @@ router.get('/:id', authenticate, async (req, res) => {
       return res.status(403).json({ error: 'Not authorized for this trip' });
     }
 
-    const [events, allStops] = await Promise.all([
-      TripEvent.find({ tripId: trip._id }).sort({ at: 1 }),
-      Stop.find({ routeId: trip.routeId._id || trip.routeId }).sort({ order: 1 }),
-    ]);
-
-    // Only school + home stops for kids on this trip (drop leftover route stops)
-    const homeIds = new Set(
-      (trip.kidIds || [])
-        .map((k) => (k.homeStopId?._id || k.homeStopId)?.toString())
-        .filter(Boolean)
-    );
-    const school = allStops.find((s) => s.type === 'school');
-    const homes = allStops.filter((s) => s.type !== 'school' && homeIds.has(s._id.toString()));
-    const stops = [...(school ? [school] : []), ...homes];
-
-    res.json({ trip, events, stops });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-export default router;
+    const [events, al

@@ -7,6 +7,8 @@ import {
   Assignment,
   TeacherNote,
   DiaryEntry,
+  Conversation,
+  Message,
   Announcement,
   SchoolHoliday,
   Assessment,
@@ -2069,7 +2071,15 @@ router.get('/diary', async (req, res) => {
     ]);
 
     const dates = [...new Set(monthEntries.map((e) => ymd(e.date)))];
-    res.json({ entries, dates });
+    const list = (Array.isArray(entries) ? entries : entries ? [entries] : []).map((e) => {
+      const doc = e.toObject ? e.toObject() : e;
+      const media = Array.isArray(doc.media) ? doc.media : [];
+      const photo = media.find(
+        (m) => m?.url && m.resourceType !== 'raw' && m.resourceType !== 'video',
+      );
+      return { ...doc, photoUrl: photo?.url || media.find((m) => m?.url)?.url || '' };
+    });
+    res.json({ entries: list, dates });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2848,6 +2858,234 @@ router.post('/outings', async (req, res) => {
     res.status(201).json({ outing: serializeOuting(outing), teacherId: teacher?._id });
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+function messageClockLabel(value) {
+  const d = value ? new Date(value) : null;
+  if (!d || Number.isNaN(d.getTime())) return '';
+  const hour = d.getHours() % 12 || 12;
+  const mins = String(d.getMinutes()).padStart(2, '0');
+  const ampm = d.getHours() >= 12 ? 'PM' : 'AM';
+  return `${hour}:${mins} ${ampm}`;
+}
+
+function serializeTeacherConversation(row, parent) {
+  const doc = row.toObject ? row.toObject() : row;
+  return {
+    _id: doc._id,
+    type: doc.type || 'direct',
+    title: parent?.name || doc.title || 'Parent',
+    roleLabel: 'Parent',
+    subtitle: doc.subtitle || '',
+    photoUrl: parent?.photoUrl || doc.photoUrl || '',
+    lastMessage: doc.lastMessage || '',
+    lastMessageAt: doc.lastMessageAt,
+    timeLabel: messageClockLabel(doc.lastMessageAt),
+    unreadCount: doc.staffUnreadCount || 0,
+    parentId: doc.parentId || null,
+  };
+}
+
+function serializeTeacherChatMessage(row, teacherId) {
+  const doc = row.toObject ? row.toObject() : row;
+  const senderId = doc.senderUserId ? String(doc.senderUserId) : '';
+  const mine = senderId ? senderId === String(teacherId) : doc.sender === 'staff';
+  return {
+    _id: doc._id,
+    sender: doc.sender,
+    senderName: doc.senderName || '',
+    body: doc.body,
+    createdAt: doc.createdAt,
+    timeLabel: messageClockLabel(doc.createdAt),
+    mine,
+  };
+}
+
+async function teacherMessageContacts(schoolId) {
+  const kids = await Kid.find({ schoolId, active: true }).select('name parentIds');
+  const byParent = new Map();
+  for (const kid of kids) {
+    for (const pid of kid.parentIds || []) {
+      const id = String(pid);
+      if (!byParent.has(id)) byParent.set(id, []);
+      byParent.get(id).push(kid.name);
+    }
+  }
+  const parents = byParent.size
+    ? await User.find({ _id: { $in: [...byParent.keys()] }, role: 'parent', active: { $ne: false } }).select(
+        'name photoUrl',
+      )
+    : [];
+  return parents.map((p) => ({
+    _id: p._id,
+    name: p.name,
+    photoUrl: p.photoUrl || '',
+    roleLabel: 'Parent',
+    subtitle: (byParent.get(String(p._id)) || []).slice(0, 3).join(', '),
+  }));
+}
+
+router.get('/messages', async (req, res) => {
+  try {
+    const { schoolId } = await teacherContext(req);
+    if (!schoolId) return res.json({ conversations: [], contacts: [] });
+    const [rows, contacts] = await Promise.all([
+      Conversation.find({
+        schoolId,
+        archived: { $ne: true },
+        sourceKey: { $not: /^sample:/ },
+        $or: [{ counterpartUserId: req.user.id }, { createdByUserId: req.user.id }],
+      })
+        .sort({ lastMessageAt: -1 })
+        .limit(80),
+      teacherMessageContacts(schoolId),
+    ]);
+    const parentIds = [...new Set(rows.map((r) => r.parentId).filter(Boolean))];
+    const parents = parentIds.length
+      ? await User.find({ _id: { $in: parentIds } }).select('name photoUrl')
+      : [];
+    const byId = new Map(parents.map((p) => [String(p._id), p]));
+    res.json({
+      conversations: rows.map((r) => serializeTeacherConversation(r, byId.get(String(r.parentId)))),
+      contacts,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/messages', async (req, res) => {
+  try {
+    const { schoolId, teacher } = await teacherContext(req);
+    if (!schoolId) return res.status(400).json({ error: 'No school assigned to this teacher' });
+    const parentId = req.body?.parentId;
+    const body = String(req.body?.body || '').trim();
+    if (!parentId) return res.status(400).json({ error: 'parentId is required' });
+    const parent = await User.findOne({ _id: parentId, role: 'parent', active: { $ne: false } }).select(
+      'name photoUrl',
+    );
+    if (!parent) return res.status(404).json({ error: 'Parent not found' });
+    const linked = await Kid.findOne({ schoolId, parentIds: parentId, active: true }).select('_id');
+    if (!linked) return res.status(403).json({ error: 'Parent is not linked to your school' });
+
+    let convo = await Conversation.findOne({
+      schoolId,
+      parentId,
+      counterpartUserId: req.user.id,
+      type: 'direct',
+      sourceKey: { $not: /^sample:/ },
+    });
+    if (!convo) {
+      convo = await Conversation.create({
+        schoolId,
+        parentId,
+        counterpartUserId: req.user.id,
+        createdByUserId: req.user.id,
+        type: 'direct',
+        title: teacher?.name || 'Teacher',
+        roleLabel: teacher?.jobTitle || 'Teacher',
+        avatarKind: 'teacher',
+        photoUrl: teacher?.photoUrl || '',
+        lastMessage: body,
+        lastMessageAt: new Date(),
+      });
+    }
+    if (body) {
+      await Message.create({
+        conversationId: convo._id,
+        sender: 'staff',
+        senderUserId: req.user.id,
+        senderName: teacher?.name || 'Teacher',
+        body,
+      });
+      convo.lastMessage = body;
+      convo.lastMessageAt = new Date();
+      convo.staffUnreadCount = 0;
+      convo.unreadCount = (convo.unreadCount || 0) + 1;
+      convo.archived = false;
+      await convo.save();
+      await createAndEmitNotifications(getIO(), [
+        {
+          userId: parentId,
+          type: NOTIFICATION_TYPES.MESSAGE,
+          title: teacher?.name || 'Teacher',
+          body,
+        },
+      ]);
+    }
+    res.status(201).json({ conversation: serializeTeacherConversation(convo, parent) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/messages/:id', async (req, res) => {
+  try {
+    const { schoolId } = await teacherContext(req);
+    const convo = await Conversation.findOne({
+      _id: req.params.id,
+      schoolId,
+      $or: [{ counterpartUserId: req.user.id }, { createdByUserId: req.user.id }],
+    });
+    if (!convo) return res.status(404).json({ error: 'Conversation not found' });
+    if (convo.staffUnreadCount) {
+      convo.staffUnreadCount = 0;
+      await convo.save();
+    }
+    const [messages, parent] = await Promise.all([
+      Message.find({ conversationId: convo._id }).sort({ createdAt: 1 }).limit(200),
+      convo.parentId ? User.findById(convo.parentId).select('name photoUrl') : null,
+    ]);
+    res.json({
+      conversation: serializeTeacherConversation(convo, parent),
+      messages: messages.map((m) => serializeTeacherChatMessage(m, req.user.id)),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/messages/:id', async (req, res) => {
+  try {
+    const { schoolId, teacher } = await teacherContext(req);
+    const body = String(req.body?.body || '').trim();
+    if (!body) return res.status(400).json({ error: 'Message cannot be empty' });
+    const convo = await Conversation.findOne({
+      _id: req.params.id,
+      schoolId,
+      $or: [{ counterpartUserId: req.user.id }, { createdByUserId: req.user.id }],
+    });
+    if (!convo) return res.status(404).json({ error: 'Conversation not found' });
+    const message = await Message.create({
+      conversationId: convo._id,
+      sender: 'staff',
+      senderUserId: req.user.id,
+      senderName: teacher?.name || 'Teacher',
+      body,
+    });
+    convo.lastMessage = body;
+    convo.lastMessageAt = message.createdAt;
+    convo.staffUnreadCount = 0;
+    convo.unreadCount = (convo.unreadCount || 0) + 1;
+    convo.archived = false;
+    await convo.save();
+    if (convo.parentId) {
+      await createAndEmitNotifications(getIO(), [
+        {
+          userId: convo.parentId,
+          type: NOTIFICATION_TYPES.MESSAGE,
+          title: teacher?.name || 'Teacher',
+          body,
+        },
+      ]);
+    }
+    res.status(201).json({
+      conversation: serializeTeacherConversation(convo),
+      message: serializeTeacherChatMessage(message, req.user.id),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

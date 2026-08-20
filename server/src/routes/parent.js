@@ -2847,16 +2847,15 @@ router.get('/diary', async (req, res) => {
     const selected =
       kids.find((k) => String(k._id) === String(req.query.kidId || '')) || kids[0];
     const schoolId = selected.schoolId?._id || selected.schoolId;
-    await ensureParentDiarySample(req.user.id, kids);
     const day = startOfDay(req.query.date);
     const { from, to } = monthRange(req.query.month || ymd(day));
     const match = parentDiaryMatch([selected], [schoolId]);
 
     const [entries, monthEntries, assignments, notes, klass, unread] = await Promise.all([
-      DiaryEntry.find({ ...match, date: day })
+      DiaryEntry.find({ ...match, date: { $gte: from, $lte: to } })
         .populate('teacherId', 'name photoUrl')
         .populate('kidIds', 'name grade')
-        .sort({ createdAt: 1 })
+        .sort({ date: -1, createdAt: -1 })
         .limit(80),
       DiaryEntry.find({ ...match, date: { $gte: from, $lte: to } }).select('date'),
       schoolId
@@ -2910,7 +2909,8 @@ router.get('/diary', async (req, res) => {
       };
     });
 
-    const activities = entries.map((e) => {
+    const todays = entries.filter((e) => ymd(e.date) === ymd(day));
+    const activities = todays.map((e) => {
       const clock = e.time || e.createdAt;
       const photo = (e.media || []).find((m) => m?.url && m.resourceType !== 'raw');
       return {
@@ -2925,9 +2925,18 @@ router.get('/diary', async (req, res) => {
       };
     });
 
-    const sample = sampleDiary(selected, day);
     const dates = [...new Set(monthEntries.map((e) => ymd(e.date)))];
     const feed = await buildParentDiaryFeed(kids, req.query);
+    const serializedEntries = entries.map((e) => {
+      const doc = e.toObject ? e.toObject() : e;
+      const attachments = serializeDiaryAttachments(doc);
+      return {
+        ...doc,
+        attachments,
+        photoUrl: attachments.find((m) => m.kind === 'image')?.url || '',
+        teacherName: doc.teacherId?.name || 'Teacher',
+      };
+    });
     res.json({
       date: ymd(day),
       unread,
@@ -2936,12 +2945,12 @@ router.get('/diary', async (req, res) => {
       classTeacher: klass?.teacherId
         ? { name: klass.teacherId.name, photoUrl: klass.teacherId.photoUrl || '', role: 'Class Teacher' }
         : null,
-      entries,
+      entries: serializedEntries,
       dates,
-      homework: homework.length ? homework : sample.homework,
-      notes: serializedNotes.length ? serializedNotes : sample.notes,
-      activities: activities.length ? activities : sample.activities,
-      feed: feed.length ? feed : sampleDiaryFeed(kids),
+      homework,
+      notes: serializedNotes,
+      activities,
+      feed,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -5031,11 +5040,10 @@ async function ensureParentNotifications(userId) {
 
 router.get('/notifications', async (req, res) => {
   try {
-    await ensureParentNotifications(req.user.id);
     const tab = String(req.query.tab || 'all').toLowerCase();
     const q = String(req.query.q || '').trim();
     const category = String(req.query.category || 'all').toLowerCase();
-    const filter = { userId: req.user.id };
+    const filter = { userId: req.user.id, key: { $not: /^sample:/ } };
 
     if (tab === 'archived') filter.archived = true;
     else {
@@ -5937,11 +5945,10 @@ router.get('/messages', async (req, res) => {
   try {
     const kids = await Kid.find({ parentIds: req.user.id, active: true }).select('schoolId grade');
     const schoolId = kids[0]?.schoolId;
-    if (schoolId) await ensureParentConversations(req.user.id, schoolId, kids);
 
     const tab = String(req.query.tab || 'messages').toLowerCase();
     const q = String(req.query.q || '').trim();
-    const filter = { parentId: req.user.id };
+    const filter = { parentId: req.user.id, sourceKey: { $not: /^sample:/ } };
     if (tab === 'groups') filter.type = 'group';
     else if (tab === 'archived') filter.archived = true;
     else {
