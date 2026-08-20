@@ -2516,8 +2516,50 @@ router.delete('/stops/:id', async (req, res) => {
 
 // ——— Parents ———
 router.get('/parents', async (req, res) => {
-  const parents = await User.find({ role: 'parent', ...schoolFilter(req) }).sort({ name: 1 });
-  res.json({ parents: parents.map((p) => p.toSafeJSON()) });
+  try {
+    const filter = { role: 'parent', ...schoolFilter(req) };
+    const parents = await User.find(filter).sort({ name: 1 });
+    const schoolId = resolveSchoolId(req);
+    const kidFilter = schoolId ? { schoolId } : {};
+    const kids = parents.length
+      ? await Kid.find({ ...kidFilter, parentIds: { $in: parents.map((p) => p._id) } })
+          .select('name grade photoUrl parentIds active')
+          .sort({ name: 1 })
+      : [];
+    const sinceMonth = monthStart();
+    let withKids = 0;
+    let addedThisMonth = 0;
+    let active = 0;
+    const rows = parents.map((p) => {
+      const id = String(p._id);
+      const children = kids.filter((k) => (k.parentIds || []).some((pid) => String(pid) === id));
+      if (children.length) withKids += 1;
+      if (p.active !== false) active += 1;
+      if (p.createdAt && p.createdAt >= sinceMonth) addedThisMonth += 1;
+      return {
+        ...p.toSafeJSON(),
+        children: children.map((k) => ({
+          id: String(k._id),
+          name: k.name,
+          grade: k.grade || '',
+          photoUrl: k.photoUrl || '',
+          active: k.active !== false,
+        })),
+      };
+    });
+    res.json({
+      parents: rows,
+      stats: {
+        total: rows.length,
+        active,
+        withKids,
+        withoutKids: rows.length - withKids,
+        addedThisMonth,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.post('/parents', async (req, res) => {
@@ -2527,6 +2569,7 @@ router.post('/parents', async (req, res) => {
     if (!schoolId) return res.status(400).json({ error: 'schoolId is required' });
 
     const { email, password, name, phone } = req.body;
+    if (!name || !email) return res.status(400).json({ error: 'name and email are required' });
     const passwordHash = await bcrypt.hash(password || 'parent123', 10);
     const parent = await User.create({
       email: email.toLowerCase().trim(),
@@ -2550,16 +2593,36 @@ router.put('/parents/:id', async (req, res) => {
       return res.status(403).json({ error: 'Cannot edit parent from another school' });
     }
 
-    const updates = { ...req.body };
-    delete updates.password;
-    delete updates.passwordHash;
-    delete updates.role;
-    delete updates.schoolId;
+    const updates = {};
+    if (req.body.name !== undefined) updates.name = String(req.body.name || '').trim();
+    if (req.body.phone !== undefined) updates.phone = String(req.body.phone || '').trim();
+    if (req.body.active !== undefined) updates.active = req.body.active !== false;
+    if (req.body.email) {
+      const email = String(req.body.email).toLowerCase().trim();
+      const taken = await User.findOne({ email, _id: { $ne: existing._id } });
+      if (taken) return res.status(400).json({ error: 'That email is already in use' });
+      updates.email = email;
+    }
     if (req.body.password) {
       updates.passwordHash = await bcrypt.hash(req.body.password, 10);
     }
     const parent = await User.findByIdAndUpdate(req.params.id, updates, { new: true });
     res.json({ parent: parent.toSafeJSON() });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete('/parents/:id', async (req, res) => {
+  try {
+    const existing = await User.findOne({ _id: req.params.id, role: 'parent' });
+    if (!existing) return res.status(404).json({ error: 'Parent not found' });
+    if (!assertSchoolAccess(req, existing.schoolId)) {
+      return res.status(403).json({ error: 'Cannot delete parent from another school' });
+    }
+    await Kid.updateMany({ parentIds: existing._id }, { $pull: { parentIds: existing._id } });
+    await User.findByIdAndDelete(existing._id);
+    res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

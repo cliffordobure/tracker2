@@ -7,6 +7,7 @@ import { getSocket } from '../lib/socket';
 const navItems = [
   { to: '/school-admin', label: 'Dashboard', end: true, icon: 'dashboard' },
   { to: '/school-admin/students', label: 'Students', icon: 'students' },
+  { to: '/school-admin/parents', label: 'Parents', icon: 'parents' },
   { to: '/school-admin/teachers', label: 'Teachers', icon: 'teachers' },
   { to: '/school-admin/drivers', label: 'Drivers', icon: 'drivers' },
   { to: '/school-admin/buses', label: 'Buses / Vehicles', icon: 'buses' },
@@ -24,7 +25,6 @@ const navItems = [
 ];
 
 const extraItems = [
-  { to: '/school-admin/parents', label: 'Parents', icon: 'parents' },
   { to: '/school-admin/leave-requests', label: 'Leave Requests', icon: 'leave' },
   { to: '/school-admin/noticeboard', label: 'Noticeboard', icon: 'notice' },
   { to: '/school-admin/trip-scheduling', label: 'Trip Scheduling', icon: 'schedule' },
@@ -40,12 +40,12 @@ const pageMeta = {
   '/school-admin/school': { title: 'Settings', crumbs: ['Dashboard', 'Settings'] },
   '/school-admin/students': { title: 'Students', crumbs: ['Dashboard', 'Students'] },
   '/school-admin/teachers': { title: 'Teachers', crumbs: ['Dashboard', 'Teachers'] },
-  '/school-admin/parents': { title: 'Parents' },
+  '/school-admin/parents': { title: 'Parents', crumbs: ['Dashboard', 'Parents'] },
   '/school-admin/drivers': { title: 'Drivers', crumbs: ['Dashboard', 'Drivers'] },
   '/school-admin/buses': { title: 'Buses / Vehicles', crumbs: ['Dashboard', 'Buses / Vehicles'] },
   '/school-admin/routes': { title: 'Routes', crumbs: ['Dashboard', 'Routes'] },
   '/school-admin/stops': { title: 'Stops', crumbs: ['Dashboard', 'Stops'] },
-  '/school-admin/trip-scheduling': { title: 'Trip Scheduling' },
+  '/school-admin/trip-scheduling': { title: 'Trip Scheduling', crumbs: ['Dashboard', 'Trip Scheduling'] },
   '/school-admin/trip-instances': { title: 'Trips', crumbs: ['Dashboard', 'Trips'] },
   '/school-admin/live-tracking': { title: 'Live Tracking', crumbs: ['Dashboard', 'Live Tracking'] },
   '/school-admin/reports': { title: 'Reports & Analytics', crumbs: ['Dashboard', 'Reports & Analytics'] },
@@ -356,6 +356,8 @@ export default function SchoolAdminLayout() {
   const isRouteDetails = location.pathname.startsWith('/school-admin/routes/') && !isRoutes;
   const isStops = location.pathname === '/school-admin/stops';
   const isTrips = location.pathname === '/school-admin/trip-instances';
+  const isParents = location.pathname === '/school-admin/parents';
+  const isScheduling = location.pathname === '/school-admin/trip-scheduling';
   const dateLabel = new Date().toLocaleDateString(undefined, {
     weekday: 'long',
     day: 'numeric',
@@ -387,7 +389,7 @@ export default function SchoolAdminLayout() {
       navigate('/school-admin/routes');
       return;
     }
-    if (isStudents || isTeachers || isDrivers || isBuses || isRoutes || isStops || isTrips || isLivePage || isReports || isCalendar || isNotifications || isIncidents || isMessages || isUsers || isAcademics) return;
+    if (isStudents || isTeachers || isDrivers || isBuses || isRoutes || isStops || isTrips || isLivePage || isReports || isCalendar || isNotifications || isIncidents || isMessages || isUsers || isAcademics || isParents || isScheduling) return;
     const q = search.trim().toLowerCase();
     if (q.length < 2) return;
     const hit =
@@ -526,7 +528,7 @@ export default function SchoolAdminLayout() {
                                     ? 'Search students, staff, routes...'
                                     : isMessages
                                       ? 'Search students, staff, routes, vehicles...'
-                                    : isLivePage || isReports || isCalendar || isNotifications || isIncidents || isUsers || isSettings || isAcademics
+                                    : isLivePage || isReports || isCalendar || isNotifications || isIncidents || isUsers || isSettings || isAcademics || isParents || isScheduling
                                       ? 'Search students, staff, routes...'
                                       : 'Search anything...'
               }

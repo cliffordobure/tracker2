@@ -3981,7 +3981,30 @@ button.sa-text-link { background: none; border: 0; cursor: pointer; font: inheri
   color: #475569;
   cursor: pointer;
 }
-.sa-att-marks button.is-on { background: #5d3fd3; border-color: #5d3fd3; color: #fff; }
+.sa-reports-modal.sa-wide .sa-card {
+  width: min(560px, 100%);
+  max-height: 90vh;
+  overflow: auto;
+}
+.sa-sched-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem;
+  margin-top: 0.85rem;
+}
+.sa-sched-grid .sa-card h3 { margin: 0 0 0.4rem; }
+.sa-sched-kids {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.7rem;
+  max-height: 140px;
+  overflow: auto;
+}
+.sa-ex-form { max-width: none; margin: 0.75rem 0; }
+.chip-row { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+@media (max-width: 900px) {
+  .sa-sched-grid { grid-template-columns: 1fr; }
+}
 .sa-students .sa-stu-search { margin-bottom: 0.75rem; }
 .sa-sd-tab { margin-top: 0.75rem; }
 .sa-sd-tab h3 { margin: 0 0 0.75rem; }

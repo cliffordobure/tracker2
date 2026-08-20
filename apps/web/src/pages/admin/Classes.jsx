@@ -106,7 +106,9 @@ export default function Classes() {
       {error && <div className="alert">{error}</div>}
       {notice && <div className="alert alert-ok">{notice}</div>}
       <div className="sa-users-head">
-        <p className="sa-muted">Classes stored for this school. Student counts come from matching student grades.</p>
+        <p className="sa-muted">
+          Classes match student grades. Grades already on student records are added here automatically.
+        </p>
         <button type="button" className="sa-btn sa-btn-primary" onClick={startCreate}>
           + Add class
         </button>

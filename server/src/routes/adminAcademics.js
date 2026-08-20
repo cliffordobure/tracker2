@@ -84,15 +84,40 @@ async function notifyKidParents(kid, payload) {
   );
 }
 
+async function syncClassesFromStudentGrades(schoolId, kids) {
+  const grades = [...new Set(kids.map((k) => String(k.grade || '').trim()).filter(Boolean))];
+  if (!grades.length) return 0;
+  const existing = await SchoolClass.find({ schoolId, grade: { $in: grades } });
+  const byGrade = new Map(existing.map((c) => [c.grade, c]));
+  let added = 0;
+  for (const grade of grades) {
+    const row = byGrade.get(grade);
+    if (row) {
+      if (row.active === false) {
+        row.active = true;
+        await row.save();
+        added += 1;
+      }
+      continue;
+    }
+    await SchoolClass.create({ schoolId, grade, subjects: [], timetable: [] });
+    added += 1;
+  }
+  return added;
+}
+
 router.get('/classes', async (req, res) => {
   try {
     const schoolId = resolveSchoolId(req);
     if (!schoolId) return res.status(400).json({ error: 'schoolId is required' });
-    const [classes, teachers, kids] = await Promise.all([
-      SchoolClass.find({ schoolId, active: { $ne: false } }).populate('teacherId', 'name').sort({ grade: 1 }),
+    const [teachers, kids] = await Promise.all([
       schoolTeachers(schoolId),
       Kid.find({ schoolId, active: { $ne: false } }).select('grade house section'),
     ]);
+    await syncClassesFromStudentGrades(schoolId, kids);
+    const classes = await SchoolClass.find({ schoolId, active: { $ne: false } })
+      .populate('teacherId', 'name')
+      .sort({ grade: 1 });
     const byGrade = new Map();
     const houses = new Set();
     for (const k of kids) {
@@ -116,9 +141,7 @@ router.get('/classes', async (req, res) => {
       teachers: teachers.map((t) => ({ id: String(t._id), name: t.name, jobTitle: t.jobTitle || '' })),
       grades: [...new Set(kids.map((k) => k.grade).filter(Boolean))].sort(),
       houses: [...houses].sort(),
-      unassigned: kids.filter((k) => k.grade).length
-        ? kids.filter((k) => k.grade && !classes.some((c) => c.grade === k.grade)).length
-        : kids.filter((k) => !k.grade).length,
+      unassigned: kids.filter((k) => !k.grade).length,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
