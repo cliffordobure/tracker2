@@ -17,6 +17,18 @@ const schoolSchema = new mongoose.Schema(
     website: { type: String, default: '', trim: true },
     schoolType: { type: String, default: '', trim: true },
     timezone: { type: String, default: '', trim: true },
+    status: {
+      type: String,
+      enum: ['pending', 'trial', 'active', 'suspended'],
+      default: 'active',
+      index: true,
+    },
+    plan: {
+      type: String,
+      enum: ['trial', 'basic', 'standard', 'premium'],
+      default: 'standard',
+      index: true,
+    },
     settings: {
       dateFormat: { type: String, default: '' },
       currency: { type: String, default: '' },

@@ -3,9 +3,18 @@ import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { homePathForRole } from '../lib/roles';
 
+const PRESETS = [
+  { id: 'super', label: 'Super Admin', email: 'admin@schooltracker.test' },
+  { id: 'school', label: 'School Admin', email: 'schooladmin@schooltracker.test' },
+  { id: 'teacher', label: 'Teacher', email: 'teacher@schooltracker.test' },
+  { id: 'driver', label: 'Driver', email: 'driver@schooltracker.test' },
+  { id: 'parent', label: 'Parent', email: 'parent1@schooltracker.test' },
+];
+
 export default function Login() {
   const { user, login, loading } = useAuth();
   const navigate = useNavigate();
+  const [preset, setPreset] = useState('school');
   const [email, setEmail] = useState('schooladmin@schooltracker.test');
   const [password, setPassword] = useState('password123');
   const [error, setError] = useState('');
@@ -14,6 +23,12 @@ export default function Login() {
   if (!loading && user) {
     return <Navigate to={homePathForRole(user.role)} replace />;
   }
+
+  const pick = (item) => {
+    setPreset(item.id);
+    setEmail(item.email);
+    setPassword('password123');
+  };
 
   const onSubmit = async (e) => {
     e.preventDefault();
@@ -43,6 +58,18 @@ export default function Login() {
         <form className="login-form card-form" onSubmit={onSubmit}>
           <h2>Sign in</h2>
           {error && <div className="alert">{error}</div>}
+          <div className="login-role-row" role="group" aria-label="Demo accounts">
+            {PRESETS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={preset === item.id ? 'is-on' : ''}
+                onClick={() => pick(item)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
           <label>
             Email
             <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required />
@@ -60,8 +87,10 @@ export default function Login() {
             {submitting ? 'Signing in…' : 'Sign in'}
           </button>
           <p className="hint">
-            Demo: admin@ / schooladmin@ / teacher@ / driver@ / parent1@ schooltracker.test —
-            password123
+            Super Admin: <strong>admin@schooltracker.test</strong> / <strong>password123</strong>
+            <br />
+            The dashboard mockup showed the name Super Admin, not the email. Demo password for every
+            seeded role is password123.
           </p>
         </form>
       </div>

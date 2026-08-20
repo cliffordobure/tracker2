@@ -7,6 +7,7 @@ import { Server } from 'socket.io';
 import { initSocket } from './socket.js';
 import authRoutes from './routes/auth.js';
 import adminRoutes from './routes/admin.js';
+import platformRoutes from './routes/platform.js';
 import driverRoutes from './routes/driver.js';
 import parentRoutes from './routes/parent.js';
 import teacherRoutes from './routes/teacher.js';  
@@ -58,6 +59,7 @@ app.get('/health', (_req, res) => {
 });
 
 app.use('/auth', authRoutes);
+app.use('/admin/platform', platformRoutes);
 app.use('/admin', adminRoutes);
 app.use('/driver', driverRoutes);
 app.use('/parent', parentRoutes);
@@ -77,10 +79,23 @@ async function start() {
   await mongoose.connect(mongoUri);
   console.log('Connected to MongoDB');
   // One-time role rename for existing databases
-  const { User } = await import('./models/index.js');
+  const { User, School } = await import('./models/index.js');
   const migrated = await User.updateMany({ role: 'admin' }, { $set: { role: 'super_admin' } });
   if (migrated.modifiedCount) {
     console.log(`Migrated ${migrated.modifiedCount} admin user(s) → super_admin`);
+  }
+  const statusFix = await School.updateMany(
+    { $or: [{ status: { $exists: false } }, { status: null }, { status: '' }] },
+    { $set: { status: 'active' } }
+  );
+  const planFix = await School.updateMany(
+    { $or: [{ plan: { $exists: false } }, { plan: null }, { plan: '' }] },
+    { $set: { plan: 'standard' } }
+  );
+  if (statusFix.modifiedCount || planFix.modifiedCount) {
+    console.log(
+      `Migrated school status/plan (${statusFix.modifiedCount} status, ${planFix.modifiedCount} plan)`
+    );
   }
   server.listen(port, () => {
     console.log(`API listening on http://localhost:${port}`);

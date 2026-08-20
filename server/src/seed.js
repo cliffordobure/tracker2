@@ -72,6 +72,8 @@ async function seed() {
     name: 'Rongai Primary School',
     address: 'Ongata Rongai, Kajiado',
     location: { lat: -1.3965, lng: 36.7542 },
+    status: 'active',
+    plan: 'standard',
   });
 
   const schoolAdmin = await User.create({

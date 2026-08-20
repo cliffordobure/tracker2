@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 const supportTicketSchema = new mongoose.Schema(
   {
     schoolId: { type: mongoose.Schema.Types.ObjectId, ref: 'School', default: null, index: true },
-    parentId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    parentId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
     ticketNo: { type: String, required: true, unique: true, trim: true },
     title: { type: String, required: true, trim: true, maxlength: 160 },
     body: { type: String, default: '', trim: true, maxlength: 2000 },

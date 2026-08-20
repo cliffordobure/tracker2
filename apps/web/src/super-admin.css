@@ -1,0 +1,201 @@
+/* Super Admin platform shell — navy sidebar, light canvas */
+.sa-shell.sa-shell--platform {
+  grid-template-columns: 268px 1fr;
+  height: 100vh;
+  overflow: hidden;
+}
+.sa-shell.sa-shell--platform .sa-sidebar {
+  position: relative;
+  inset: auto;
+  transform: none;
+  width: 268px;
+  height: 100vh;
+}
+.sa-shell--platform .sa-backdrop,
+.sa-shell--platform .sa-bottom-nav {
+  display: none;
+}
+.sa-shell--platform .sa-menu-btn { display: none; }
+.sa-shell--platform .pa-brand-bus {
+  background: #2563eb;
+  color: #fff;
+  border-radius: 999px;
+}
+.sa-shell--platform .sa-nav-link.active {
+  background: linear-gradient(90deg, #3b82f6, #2563eb);
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.35);
+}
+.sa-shell--platform .sa-nav-section { display: grid; gap: 0.04rem; }
+.sa-shell--platform .pa-copy {
+  display: block;
+  margin-top: 0.55rem;
+  color: #64748b;
+  font-size: 0.68rem;
+}
+.sa-shell--platform .pa-search kbd {
+  font-size: 0.68rem;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  border-radius: 6px;
+  padding: 0.1rem 0.35rem;
+  color: #94a3b8;
+}
+.sa-shell--platform .pa-signout {
+  font-size: 0.75rem !important;
+  padding: 0.35rem 0.65rem !important;
+}
+.sa-shell.sa-shell--platform.is-collapsed {
+  grid-template-columns: 76px 1fr;
+}
+.sa-shell.sa-shell--platform.is-collapsed .sa-sidebar { width: 76px; }
+.sa-shell--platform.is-collapsed .sa-nav-link { justify-content: center; padding-inline: 0.4rem; }
+.sa-shell--platform.is-collapsed .sa-nav-section-title { display: none; }
+.sa-shell--platform.is-collapsed .sa-brand { justify-content: center; }
+
+.pa-banner {
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  color: #9a3412;
+  border-radius: 12px;
+  padding: 0.7rem 0.9rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin-bottom: 0.85rem;
+}
+.sa-shell--platform .sa-home-kpi.tint-blue .sa-home-kpi-icon::before { content: '🏫'; }
+.sa-shell--platform .sa-home-kpi.tint-green .sa-home-kpi-icon::before { content: '✅'; }
+.sa-shell--platform .sa-home-kpi.tint-violet .sa-home-kpi-icon::before { content: '👥'; }
+.sa-shell--platform .sa-home-kpi.tint-sky .sa-home-kpi-icon::before { content: '🚌'; }
+.sa-shell--platform .sa-home-kpi.tint-amber .sa-home-kpi-icon::before { content: '🗺️'; }
+.sa-shell--platform .sa-home-kpi.tint-rose .sa-home-kpi-icon::before { content: '💳'; }
+
+.pa-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  text-transform: capitalize;
+  font-weight: 700;
+  font-size: 0.78rem;
+}
+.pa-status i {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #94a3b8;
+}
+.pa-status--active i { background: #16a34a; }
+.pa-status--trial i { background: #2563eb; }
+.pa-status--pending i { background: #ea580c; }
+.pa-status--suspended i { background: #dc2626; }
+.pa-status--open i, .pa-status--sent i { background: #2563eb; }
+.pa-status--resolved i, .pa-status--paid i, .pa-status--done i, .pa-status--operational i { background: #16a34a; }
+.pa-status--closed i, .pa-status--void i, .pa-status--declined i, .pa-status--down i { background: #dc2626; }
+.pa-status--planned i, .pa-status--pending i { background: #ea580c; }
+
+.pa-plan {
+  display: inline-flex;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: capitalize;
+  background: #e2e8f0;
+  color: #334155;
+}
+.pa-plan--premium { background: #ede9fe; color: #6d28d9; }
+.pa-plan--standard { background: #dbeafe; color: #1d4ed8; }
+.pa-plan--basic { background: #e2e8f0; color: #475569; }
+.pa-plan--trial { background: #ffedd5; color: #c2410c; }
+
+.pa-charts {
+  display: grid;
+  grid-template-columns: 0.9fr 1.2fr 0.9fr;
+  gap: 0.85rem;
+}
+.pa-dash-bottom {
+  display: grid;
+  grid-template-columns: 1.6fr 0.9fr;
+  gap: 0.85rem;
+}
+.pa-health-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.85rem; }
+.pa-health-list li {
+  display: grid;
+  gap: 0.25rem;
+}
+.pa-health-list strong { font-size: 0.9rem; }
+.pa-health-list span { color: #64748b; font-size: 0.78rem; }
+.pa-meter {
+  height: 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+.pa-meter i { display: block; height: 100%; background: #2563eb; }
+
+.pa-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.9fr);
+  gap: 1rem;
+  align-items: start;
+}
+.pa-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.pa-row-menu { position: relative; }
+.pa-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-bottom: 0.85rem;
+}
+.pa-toolbar input, .pa-toolbar select {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 0.5rem 0.7rem;
+  background: #fff;
+}
+.pa-map { min-height: 220px; border-radius: 12px; overflow: hidden; }
+
+.sa-shell--platform .sa-table { min-width: 720px; }
+.sa-shell--platform .sa-table tbody tr { cursor: default; }
+
+.pa-role-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.85rem;
+}
+.pa-role-card small { color: #64748b; display: block; margin-top: 0.35rem; }
+
+.login-role-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0 0 0.85rem;
+}
+.login-role-row button {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 999px;
+  padding: 0.28rem 0.65rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.login-role-row button.is-on {
+  background: #5d3fd3;
+  color: #fff;
+  border-color: #5d3fd3;
+}
+
+@media (max-width: 1100px) {
+  .sa-shell.sa-shell--platform { grid-template-columns: 1fr; }
+  .sa-shell.sa-shell--platform .sa-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    transform: translateX(-105%);
+    z-index: 50;
+  }
+  .sa-shell.sa-shell--platform .sa-sidebar.is-open { transform: translateX(0); }
+  .sa-shell.sa-shell--platform .sa-backdrop { display: block; }
+  .sa-shell.sa-shell--platform .sa-menu-btn { display: flex; }
+  .sa-shell.sa-shell--platform.is-collapsed { grid-template-columns: 1fr; }
+  .pa-charts, .pa-dash-bottom, .pa-split { grid-template-columns: 1fr; }
+  .sa-shell--platform .pa-signout { display: none; }
+}

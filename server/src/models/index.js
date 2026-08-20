@@ -33,3 +33,8 @@ export { Conversation } from './Conversation.js';
 export { Message } from './Message.js';
 export { CalendarEvent } from './CalendarEvent.js';
 export { FeeStatement } from './FeeStatement.js';
+export { AuditLog } from './AuditLog.js';
+export { FeatureRequest } from './FeatureRequest.js';
+export { PlatformSettings } from './PlatformSettings.js';
+export { PlatformNotice } from './PlatformNotice.js';
+export { PlatformInvoice } from './PlatformInvoice.js';

@@ -2,10 +2,25 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import Layout from './components/Layout';
 import SchoolAdminLayout from './components/SchoolAdminLayout';
+import SuperAdminLayout from './components/SuperAdminLayout';
 import Login from './pages/Login';
-import AdminDashboard from './pages/admin/Dashboard';
+import SuperDashboard from './pages/super/SuperDashboard';
+import SuperSchools from './pages/super/SuperSchools';
+import SuperAdmins from './pages/super/SuperAdmins';
+import SuperSubscriptions from './pages/super/SuperSubscriptions';
+import SuperPayments from './pages/super/SuperPayments';
+import SuperInvoices from './pages/super/SuperInvoices';
+import SuperUsers from './pages/super/SuperUsers';
+import SuperRoles from './pages/super/SuperRoles';
+import SuperSettings from './pages/super/SuperSettings';
+import SuperAuditLogs from './pages/super/SuperAuditLogs';
+import SuperActivityLogs from './pages/super/SuperActivityLogs';
+import SuperTickets from './pages/super/SuperTickets';
+import SuperAnnouncements from './pages/super/SuperAnnouncements';
+import SuperFeatureRequests from './pages/super/SuperFeatureRequests';
+import SuperHealth from './pages/super/SuperHealth';
+import SuperNotifications from './pages/super/SuperNotifications';
 import SchoolDashboard from './pages/admin/SchoolDashboard';
-import Schools from './pages/admin/Schools';
 import RoutesPage from './pages/admin/Routes';
 import RouteDetails from './pages/admin/RouteDetails';
 import StopsPage from './pages/admin/Stops';
@@ -61,11 +76,6 @@ function Protected({ roles, children }) {
   return children;
 }
 
-const superNav = [
-  { to: '/super-admin', label: 'Dashboard', end: true },
-  { to: '/super-admin/schools', label: 'Schools' },
-];
-
 export default function App() {
   return (
     <Routes>
@@ -78,12 +88,26 @@ export default function App() {
         path="/super-admin"
         element={
           <Protected roles={['super_admin']}>
-            <Layout navItems={superNav} title="Super Admin" />
+            <SuperAdminLayout />
           </Protected>
         }
       >
-        <Route index element={<AdminDashboard />} />
-        <Route path="schools" element={<Schools />} />
+        <Route index element={<SuperDashboard />} />
+        <Route path="schools" element={<SuperSchools />} />
+        <Route path="admins" element={<SuperAdmins />} />
+        <Route path="subscriptions" element={<SuperSubscriptions />} />
+        <Route path="payments" element={<SuperPayments />} />
+        <Route path="invoices" element={<SuperInvoices />} />
+        <Route path="users" element={<SuperUsers />} />
+        <Route path="roles" element={<SuperRoles />} />
+        <Route path="settings" element={<SuperSettings />} />
+        <Route path="audit" element={<SuperAuditLogs />} />
+        <Route path="activity" element={<SuperActivityLogs />} />
+        <Route path="tickets" element={<SuperTickets />} />
+        <Route path="announcements" element={<SuperAnnouncements />} />
+        <Route path="requests" element={<SuperFeatureRequests />} />
+        <Route path="health" element={<SuperHealth />} />
+        <Route path="notifications" element={<SuperNotifications />} />
       </Route>
 
       <Route

@@ -116,6 +116,26 @@ select {
   margin: 1.5rem;
 }
 
+.login-role-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0 0 0.85rem;
+}
+.login-role-row button {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 999px;
+  padding: 0.28rem 0.65rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.login-role-row button.is-on {
+  background: #5d3fd3;
+  color: #fff;
+  border-color: #5d3fd3;
+}
+
 .card-form,
 .panel {
   background: var(--panel);
