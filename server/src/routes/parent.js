@@ -2226,11 +2226,8 @@ function formatClock(value) {
   if (!value) return '';
   if (typeof value === 'string' && /^\d{1,2}:\d{2}$/.test(value.trim())) {
     const [hRaw, mRaw] = value.trim().split(':');
-    let h = Number(hRaw);
-    const m = mRaw;
-    const ampm = h >= 12 ? 'PM' : 'AM';
-    h = h % 12 || 12;
-    return `${h}:${m} ${ampm}`;
+    const h = String(Number(hRaw)).padStart(2, '0');
+    return `${h}:${mRaw}`;
   }
   return formatNairobiClock(value);
 }
@@ -5622,12 +5619,7 @@ async function ensureParentCalendarEvents(schoolId) {
 
 function calendarTimeLabel(startAt, allDay) {
   if (allDay) return 'All Day';
-  const d = new Date(startAt);
-  if (Number.isNaN(d.getTime())) return '';
-  const hour = d.getHours() % 12 || 12;
-  const mins = String(d.getMinutes()).padStart(2, '0');
-  const ampm = d.getHours() >= 12 ? 'PM' : 'AM';
-  return `${hour}:${mins} ${ampm}`;
+  return formatNairobiClock(startAt);
 }
 
 function calendarDateLabel(startAt) {

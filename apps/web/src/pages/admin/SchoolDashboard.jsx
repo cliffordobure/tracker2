@@ -117,7 +117,7 @@ function MiniLiveMap({ buses }) {
     const coords = [];
     for (const item of buses) {
       const trip = item.trip;
-      const loc = trip?.latestLocation || trip?.startLocation;
+      const loc = trip?.latestLocation || trip?.startLocation || item.schoolLocation;
       if (loc?.lat == null || loc?.lng == null) continue;
       const id = String(trip._id);
       seen.add(id);
@@ -322,7 +322,7 @@ export default function SchoolDashboard() {
           <header>
             <div>
               <h3>Live Tracking</h3>
-              <p>Buses currently sending a location</p>
+              <p>Follow today&apos;s buses, including evening check-in at school</p>
             </div>
             <Link to="/school-admin/live-tracking" className="sa-text-link">
               Open map
@@ -371,7 +371,7 @@ export default function SchoolDashboard() {
           <header>
             <div>
               <h3>Today&apos;s Trips</h3>
-              <p>Counts from today&apos;s dispatch</p>
+              <p>Open a trip to follow the bus. Evening trips appear here during school check-in too.</p>
             </div>
             <Link to="/school-admin/trip-instances" className="sa-text-link">
               View trips
@@ -404,9 +404,32 @@ export default function SchoolDashboard() {
                 {next.driverName ? ` · ${next.driverName}` : ''}
                 {next.plate ? ` · ${next.plate}` : ''}
               </p>
+              <Link className="sa-btn sa-btn-primary" to="/school-admin/live-tracking">
+                Open live tracking
+              </Link>
             </div>
           ) : (
             <div className="sa-home-empty sa-home-empty-compact">No upcoming trips left today.</div>
+          )}
+          {(today.openTrips || []).length > 0 && (
+            <ul className="sa-home-open-trips">
+              {(today.openTrips || []).map((t) => (
+                <li key={t._id}>
+                  <div>
+                    <strong>{t.routeName || t.tripCode || 'Trip'}</strong>
+                    <p>
+                      {t.status === 'active' ? 'Live' : 'Boarding / scheduled'}
+                      {t.period ? ` · ${t.period}` : ''}
+                      {t.driverName ? ` · ${t.driverName}` : ''}
+                      {t.expected ? ` · ${t.boarded}/${t.expected} checked in` : ''}
+                    </p>
+                  </div>
+                  <Link className="sa-btn sa-btn-outline" to={`/school-admin/live-tracking?trip=${t._id}`}>
+                    Open live
+                  </Link>
+                </li>
+              ))}
+            </ul>
           )}
         </article>
 

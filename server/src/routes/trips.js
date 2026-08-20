@@ -10,6 +10,7 @@ import {
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { getIO } from '../socket.js';
 import { createAndEmitNotifications } from '../services/notifications.js';
+import { formatClock } from '../lib/clock.js';
 
 const router = Router();
 
@@ -62,10 +63,7 @@ async function emitTripStarted(trip, kids, { eveningBoard = false } = {}) {
     const home = stops.find((s) => s.type !== 'school');
     const fromName = trip.direction === 'to_home' ? school?.name : home?.name;
     const started = trip.startedAt ? new Date(trip.startedAt) : new Date();
-    const hh = started.getHours();
-    const mm = String(started.getMinutes()).padStart(2, '0');
-    const ampm = hh >= 12 ? 'PM' : 'AM';
-    const clock = `${hh % 12 || 12}:${mm} ${ampm}`;
+    const clock = formatClock(started);
     notifications.push({
       userId: driverId,
       type: 'trip_started',
@@ -291,8 +289,15 @@ router.post('/:id/location', authenticate, requireRole('driver'), async (req, re
       return res.status(400).json({ error: 'lat and lng are required numbers' });
     }
 
-    const trip = await Trip.findOne({ _id: req.params.id, driverId: req.user.id, status: 'active' });
-    if (!trip) return res.status(404).json({ error: 'Active trip not found' });
+    const trip = await Trip.findOne({
+      _id: req.params.id,
+      driverId: req.user.id,
+      status: { $in: ['active', 'scheduled'] },
+    });
+    if (!trip) return res.status(404).json({ error: 'Trip not found' });
+    if (trip.status === 'scheduled' && !isEveningTrip(trip)) {
+      return res.status(400).json({ error: 'Start the trip before sharing live location' });
+    }
 
     const at = new Date();
     const ping = { lat, lng, heading, speed, at };
@@ -304,24 +309,25 @@ router.post('/:id/location', authenticate, requireRole('driver'), async (req, re
     const io = getIO();
     io?.to(`trip:${trip._id}`).emit('location:update', payload);
 
-    // Parents whose kids are currently on the bus get live updates on their user room
-    // (works even if the client missed trip:join).
-    const [picked, dropped] = await Promise.all([
-      TripEvent.find({ tripId: trip._id, type: 'picked_up' }).select('kidId'),
-      TripEvent.find({ tripId: trip._id, type: 'dropped_off' }).select('kidId'),
-    ]);
-    const droppedSet = new Set(dropped.map((e) => e.kidId.toString()));
-    const onboardIds = picked
-      .map((e) => e.kidId)
-      .filter((id) => !droppedSet.has(id.toString()));
-    if (onboardIds.length) {
-      const onboardKids = await Kid.find({ _id: { $in: onboardIds } }).select('parentIds');
-      const parentIds = new Set();
-      for (const kid of onboardKids) {
-        for (const parentId of kid.parentIds || []) parentIds.add(parentId.toString());
-      }
-      for (const parentId of parentIds) {
-        io?.to(`user:${parentId}`).emit('location:update', payload);
+    // Parents only get live GPS after the trip is actually started.
+    if (trip.status === 'active') {
+      const [picked, dropped] = await Promise.all([
+        TripEvent.find({ tripId: trip._id, type: 'picked_up' }).select('kidId'),
+        TripEvent.find({ tripId: trip._id, type: 'dropped_off' }).select('kidId'),
+      ]);
+      const droppedSet = new Set(dropped.map((e) => e.kidId.toString()));
+      const onboardIds = picked
+        .map((e) => e.kidId)
+        .filter((id) => !droppedSet.has(id.toString()));
+      if (onboardIds.length) {
+        const onboardKids = await Kid.find({ _id: { $in: onboardIds } }).select('parentIds');
+        const parentIds = new Set();
+        for (const kid of onboardKids) {
+          for (const parentId of kid.parentIds || []) parentIds.add(parentId.toString());
+        }
+        for (const parentId of parentIds) {
+          io?.to(`user:${parentId}`).emit('location:update', payload);
+        }
       }
     }
 

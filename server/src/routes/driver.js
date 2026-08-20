@@ -255,14 +255,7 @@ async function enrichTripsWithStopCounts(trips) {
 }
 
 function formatDriverClock(d) {
-  if (!d) return '';
-  const x = new Date(d);
-  if (Number.isNaN(x.getTime())) return '';
-  let h = x.getHours();
-  const m = String(x.getMinutes()).padStart(2, '0');
-  const ampm = h >= 12 ? 'PM' : 'AM';
-  h = h % 12 || 12;
-  return `${h}:${m} ${ampm}`;
+  return formatClock(d);
 }
 
 function combineServiceTime(serviceDate, scheduledTime, scheduledFor) {

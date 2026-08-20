@@ -1503,7 +1503,20 @@ function gpsStatus(lastGpsAt, speedKmh) {
 router.get('/live-tracking', async (req, res) => {
   try {
     const schoolId = resolveSchoolId(req);
-    const filter = { status: 'active' };
+    const start = startOfDay();
+    const end = endOfDay();
+    const filter = {
+      $or: [
+        { status: 'active' },
+        {
+          status: 'scheduled',
+          $or: [
+            { serviceDate: { $gte: start, $lte: end } },
+            { scheduledFor: { $gte: start, $lte: end } },
+          ],
+        },
+      ],
+    };
     if (schoolId) filter.schoolId = schoolId;
     const busFilter = schoolId ? { schoolId } : {};
 
@@ -1512,7 +1525,7 @@ router.get('/live-tracking', async (req, res) => {
         .populate('routeId', 'name')
         .populate('busId', 'plate label seats')
         .populate('driverId', 'name phone')
-        .populate('schoolId', 'name')
+        .populate('schoolId', 'name location')
         .populate('kidIds', 'name')
         .sort({ startedAt: -1 }),
       Bus.countDocuments(busFilter),
@@ -1588,6 +1601,8 @@ router.get('/live-tracking', async (req, res) => {
       }
       return {
         trip,
+        phase: trip.status === 'scheduled' ? 'boarding' : 'live',
+        schoolLocation: trip.schoolId?.location || null,
         checkedIn,
         checkedOut: dropped.size,
         studentCount: (trip.kidIds || []).length,
@@ -1603,7 +1618,7 @@ router.get('/live-tracking', async (req, res) => {
       buses: enriched,
       stats: {
         fleetTotal,
-        onRoute: trips.length,
+        onRoute: trips.filter((t) => t.status === 'active').length,
         online: statusCounts.live + statusCounts.stopped,
         studentsOnBoard,
         avgSpeedKmh: speedCount ? Math.round(speedSum / speedCount) : null,

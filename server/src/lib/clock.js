@@ -23,13 +23,12 @@ export function toIso(value) {
 }
 
 export function formatClock(value) {
-  const list = parts(value, { hour: 'numeric', minute: '2-digit', hour12: true });
+  const list = parts(value, { hour: '2-digit', minute: '2-digit', hour12: false, hourCycle: 'h23' });
   if (!list) return '';
   const hour = part(list, 'hour');
   const minute = part(list, 'minute');
-  const period = part(list, 'dayPeriod').toUpperCase();
   if (!hour || !minute) return '';
-  return `${hour}:${minute} ${period}`;
+  return `${hour}:${minute}`;
 }
 
 export function formatDateKey(value) {

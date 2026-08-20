@@ -208,7 +208,7 @@ export default function DriverHome() {
   };
 
   useEffect(() => {
-    if (trip?._id && trip.status === 'active') {
+    if (trip?._id && (trip.status === 'active' || (trip.status === 'scheduled' && isEveningTrip(trip)))) {
       startSharing(trip._id);
     }
     return () => {

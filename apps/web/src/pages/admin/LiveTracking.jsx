@@ -48,11 +48,17 @@ function directionLabel(value) {
   return '';
 }
 
-function gpsMeta(status) {
+function gpsMeta(status, phase) {
+  if (phase === 'boarding') return { key: 'muted', label: 'Boarding' };
   if (status === 'live') return { key: 'active', label: 'On Route' };
   if (status === 'stopped') return { key: 'noroute', label: 'Stopped' };
   if (status === 'stale') return { key: 'inactive', label: 'GPS stale' };
   return { key: 'muted', label: 'No GPS' };
+}
+
+function busLocation(item) {
+  const t = item?.trip;
+  return t?.latestLocation || t?.startLocation || item?.schoolLocation || null;
 }
 
 function donutStyle(items, total) {
@@ -116,7 +122,7 @@ function LiveFleetMap({ buses, selectedId, onSelect, className, showLegend }) {
 
     for (const item of buses) {
       const trip = item.trip;
-      const loc = trip.latestLocation || trip.startLocation;
+      const loc = busLocation(item);
       if (loc?.lat == null || loc?.lng == null) continue;
       const id = String(trip._id);
       seen.add(id);
@@ -165,7 +171,7 @@ function LiveFleetMap({ buses, selectedId, onSelect, className, showLegend }) {
   useEffect(() => {
     if (!selectedId || !mapRef.current) return;
     const item = buses.find((b) => String(b.trip._id) === selectedId);
-    const loc = item?.trip?.latestLocation || item?.trip?.startLocation;
+    const loc = busLocation(item);
     if (loc?.lat != null) {
       mapRef.current.easeTo({ center: [loc.lng, loc.lat], zoom: 15.2, duration: 700 });
     }
@@ -190,7 +196,7 @@ function LiveFleetMap({ buses, selectedId, onSelect, className, showLegend }) {
           <li><i className="is-live" /> On Route (live GPS)</li>
           <li><i className="is-stopped" /> Stopped</li>
           <li><i className="is-stale" /> GPS stale</li>
-          <li><i className="is-off" /> No GPS / offline</li>
+          <li><i className="is-off" /> Boarding / no GPS</li>
         </ul>
       ) : null}
     </div>
@@ -362,7 +368,7 @@ export default function LiveTracking({ endpoint = '/admin/live-tracking' } = {})
             {filtered.map((item) => {
               const t = item.trip;
               const id = String(t._id);
-              const meta = gpsMeta(item.gpsStatus);
+              const meta = gpsMeta(item.gpsStatus, item.phase);
               return (
                 <tr
                   key={id}
@@ -392,7 +398,7 @@ export default function LiveTracking({ endpoint = '/admin/live-tracking' } = {})
             {!filtered.length && (
               <tr>
                 <td colSpan={4} className="sa-stu-empty">
-                  No active trips right now.
+                  No active or boarding trips right now.
                 </td>
               </tr>
             )}
@@ -407,7 +413,8 @@ export default function LiveTracking({ endpoint = '/admin/live-tracking' } = {})
             {selected.trip.driverId?.phone ? ` · ${selected.trip.driverId.phone}` : ''}
           </p>
           <p className="sa-muted">
-            Started {fmtTime(selected.trip.startedAt)} · On board {selected.checkedIn}/{selected.studentCount}
+            Started {selected.trip.startedAt ? fmtTime(selected.trip.startedAt) : 'not started'} · On board {selected.checkedIn}/{selected.studentCount}
+            {selected.phase === 'boarding' ? ' · Check-in at school' : ''}
           </p>
         </div>
       )}

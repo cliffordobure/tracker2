@@ -285,6 +285,28 @@ router.get('/dashboard', async (req, res) => {
     const next = upcoming[0] || null;
     const minutesUntil = next ? Math.round((next.at - Date.now()) / 60000) : null;
 
+    const boardedByTrip = {};
+    for (const e of events) {
+      if (e.type !== 'picked_up' || !e.tripId) continue;
+      const key = String(e.tripId);
+      boardedByTrip[key] = (boardedByTrip[key] || 0) + 1;
+    }
+    const openTrips = todayTrips
+      .filter((t) => t.status === 'active' || t.status === 'scheduled')
+      .map((t) => ({
+        _id: t._id,
+        status: t.status,
+        period: t.period || '',
+        direction: t.direction || '',
+        tripCode: t.tripCode || '',
+        routeName: t.routeId?.name || '',
+        driverName: t.driverId?.name || '',
+        plate: t.busId?.plate || t.busId?.label || '',
+        boarded: boardedByTrip[String(t._id)] || 0,
+        expected: (t.kidIds || []).length,
+        hasGps: t.latestLocation?.lat != null,
+      }));
+
     return res.json({
       schools,
       routes,
@@ -320,6 +342,7 @@ router.get('/dashboard', async (req, res) => {
               minutesUntil,
             }
           : null,
+        openTrips,
       },
       announcements: announcements.map((a) => ({
         _id: a._id,
