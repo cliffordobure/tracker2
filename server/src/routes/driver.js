@@ -5,6 +5,7 @@ import { getIO } from '../socket.js';
 import { createAndEmitNotifications } from '../services/notifications.js';
 import { datesForSchedule } from '../services/tripScheduleService.js';
 import { isCloudinaryConfigured } from '../services/cloudinary.js';
+import { formatClock, formatDayClock } from '../lib/clock.js';
 
 const router = Router();
 router.use(authenticate, requireRole('driver'));
@@ -303,9 +304,6 @@ async function routeEnds(routeId, direction) {
 async function boardingForTrip(trip) {
   const kidIds = (trip.kidIds || []).map((k) => (k?._id || k)?.toString()).filter(Boolean);
   const studentCount = kidIds.length;
-  if (trip.status !== 'active') {
-    return { studentCount, studentsOnBoard: 0, pendingCheckouts: 0 };
-  }
   const events = await TripEvent.find({ tripId: trip._id }).select('kidId type');
   const picked = new Set(events.filter((e) => e.type === 'picked_up').map((e) => e.kidId.toString()));
   const dropped = new Set(events.filter((e) => e.type === 'dropped_off').map((e) => e.kidId.toString()));
@@ -1214,7 +1212,11 @@ router.get('/notifications', async (req, res) => {
     const notifications = rows.map((n) => {
       const obj = typeof n.toObject === 'function' ? n.toObject() : n;
       const category = driverNotificationCategory(obj.type);
-      return { ...obj, category };
+      return {
+        ...obj,
+        category,
+        createdAt: obj.createdAt instanceof Date ? obj.createdAt.toISOString() : obj.createdAt,
+      };
     });
     const counts = {
       all: notifications.length,
@@ -2187,30 +2189,11 @@ router.get('/students/:id', async (req, res) => {
 });
 
 function messageTimeLabel(value) {
-  const d = value ? new Date(value) : null;
-  if (!d || Number.isNaN(d.getTime())) return '';
-  const now = new Date();
-  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const startThat = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const diffDays = Math.round((startToday - startThat) / 86400000);
-  if (diffDays === 0) {
-    const hour = d.getHours() % 12 || 12;
-    const mins = String(d.getMinutes()).padStart(2, '0');
-    const ampm = d.getHours() >= 12 ? 'PM' : 'AM';
-    return `${hour}:${mins} ${ampm}`;
-  }
-  if (diffDays === 1) return 'Yesterday';
-  if (diffDays < 7) return `${diffDays} days ago`;
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  return formatDayClock(value);
 }
 
 function messageClockLabel(value) {
-  const d = value ? new Date(value) : null;
-  if (!d || Number.isNaN(d.getTime())) return '';
-  const hour = d.getHours() % 12 || 12;
-  const mins = String(d.getMinutes()).padStart(2, '0');
-  const ampm = d.getHours() >= 12 ? 'PM' : 'AM';
-  return `${hour}:${mins} ${ampm}`;
+  return formatClock(value);
 }
 
 function serializeDriverConversation(row) {

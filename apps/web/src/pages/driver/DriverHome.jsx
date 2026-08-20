@@ -22,6 +22,10 @@ function periodLabel(period, direction) {
   return direction === 'to_school' ? 'morning' : 'evening';
 }
 
+function isEveningTrip(t) {
+  return t?.direction === 'to_home' || t?.period === 'evening';
+}
+
 export default function DriverHome() {
   const { showToast } = useAuth();
   const [routes, setRoutes] = useState([]);
@@ -213,6 +217,15 @@ export default function DriverHome() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trip?._id, trip?.status]);
 
+  const beginBoarding = async (t) => {
+    const detail = await api(`/trips/${t._id}`);
+    setTrip(detail.trip);
+    setEvents(detail.events || []);
+    const tripStops = stopsForTripKids(detail.stops, detail.trip.kidIds || []);
+    setStops(tripStops);
+    showToast('Check in whoever is boarding, then start. The bus does not need to be full.');
+  };
+
   const activateTrip = async (t, direction) => {
     const detail = await api(`/trips/${t._id}`);
     setTrip(detail.trip);
@@ -233,10 +246,15 @@ export default function DriverHome() {
   const startTrip = async (routeId, direction) => {
     setError('');
     try {
-      const { trip: t } = await api('/trips', {
+      const data = await api('/trips', {
         method: 'POST',
         body: { routeId, direction },
       });
+      const t = data.trip;
+      if (data.boarding || t.status === 'scheduled') {
+        await beginBoarding(t);
+        return;
+      }
       await activateTrip(t, direction);
     } catch (err) {
       setError(err.message);
@@ -246,6 +264,10 @@ export default function DriverHome() {
   const startScheduled = async (scheduledTrip) => {
     setError('');
     try {
+      if (isEveningTrip(scheduledTrip)) {
+        await beginBoarding(scheduledTrip);
+        return;
+      }
       const body = driverLocation
         ? { lat: driverLocation.lat, lng: driverLocation.lng }
         : {};
@@ -265,9 +287,32 @@ export default function DriverHome() {
 
   const markPickup = async (kidId) => {
     try {
-      const { event } = await api(`/trips/${trip._id}/kids/${kidId}/pickup`, { method: 'POST' });
-      setEvents((prev) => [...prev, event]);
-      showToast('Marked picked up');
+      const path =
+        trip.status === 'scheduled'
+          ? `/trips/${trip._id}/kids/${kidId}/check-in`
+          : `/trips/${trip._id}/kids/${kidId}/pickup`;
+      const { event } = await api(path, { method: 'POST' });
+      setEvents((prev) => [
+        ...prev.filter((e) => !((e.kidId?._id || e.kidId) === kidId && (e.type === 'picked_up' || e.type === 'not_picked_up'))),
+        event,
+      ]);
+      showToast(trip.status === 'scheduled' ? 'Checked in' : 'Marked picked up');
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const startBoardedTrip = async () => {
+    setError('');
+    try {
+      const body = driverLocation
+        ? { lat: driverLocation.lat, lng: driverLocation.lng }
+        : {};
+      const { trip: t } = await api(`/trips/${trip._id}/start`, {
+        method: 'POST',
+        body,
+      });
+      await activateTrip(t, t.direction);
     } catch (err) {
       setError(err.message);
     }
@@ -311,6 +356,8 @@ export default function DriverHome() {
   }, []);
 
   const kids = trip?.kidIds || [];
+  const boarding = trip?.status === 'scheduled' && isEveningTrip(trip);
+  const boardedCount = kids.filter((kid) => eventFor(kid._id || kid, 'picked_up')).length;
 
   const unreadAlerts = notifications.filter((n) => !n.read).length;
 
@@ -377,7 +424,7 @@ export default function DriverHome() {
                           className="btn btn-primary"
                           onClick={() => startScheduled(st)}
                         >
-                          Start {label} trip
+                          {isEveningTrip(st) ? 'Check in students' : `Start ${label} trip`}
                         </button>
                       </div>
                     );
@@ -426,17 +473,33 @@ export default function DriverHome() {
             <div className="panel">
               <div className="panel-head">
                 <div>
-                  <h2>{trip.routeId?.name || 'Active trip'}</h2>
+                  <h2>{trip.routeId?.name || (boarding ? 'Evening boarding' : 'Active trip')}</h2>
                   <p className="muted">
                     {trip.tripCode ? `${trip.tripCode} · ` : ''}
                     {periodLabel(trip.period, trip.direction)} ·{' '}
                     {trip.direction === 'to_school' ? 'to school' : 'to home'} · {trip.status}
+                    {boarding ? ' · check in at school first' : ''}
                   </p>
                 </div>
                 <div className="row-actions">
-                  <button type="button" className="btn btn-primary" onClick={completeTrip}>
-                    Complete {periodLabel(trip.period, trip.direction)} trip
-                  </button>
+                  {boarding ? (
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      disabled={boardedCount === 0}
+                      onClick={startBoardedTrip}
+                    >
+                      {boardedCount === 0
+                        ? 'Check in students first'
+                        : boardedCount === kids.length
+                          ? 'Start evening trip'
+                          : `Start with ${boardedCount} student${boardedCount === 1 ? '' : 's'}`}
+                    </button>
+                  ) : (
+                    <button type="button" className="btn btn-primary" onClick={completeTrip}>
+                      Complete {periodLabel(trip.period, trip.direction)} trip
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -485,7 +548,7 @@ export default function DriverHome() {
             />
           </div>
           <div className="stack">
-            <h3>Kids on trip</h3>
+            <h3>{boarding ? 'Check in at school' : 'Kids on trip'}</h3>
             <ul className="kid-list">
               {kids.map((kid) => {
                 const id = kid._id || kid;
@@ -497,7 +560,7 @@ export default function DriverHome() {
                     <div>
                       <strong>{name}</strong>
                       <div className="muted">
-                        {dropped ? 'Dropped off' : picked ? 'On board' : 'Waiting'}
+                        {dropped ? 'Dropped off' : picked ? 'On board' : boarding ? 'Waiting at school' : 'Waiting'}
                       </div>
                     </div>
                     <div className="row-actions">
@@ -507,16 +570,18 @@ export default function DriverHome() {
                         disabled={picked}
                         onClick={() => markPickup(id)}
                       >
-                        Pick up
+                        {boarding ? 'Check in' : 'Pick up'}
                       </button>
-                      <button
-                        type="button"
-                        className="btn btn-primary"
-                        disabled={!picked || dropped}
-                        onClick={() => markDropoff(id)}
-                      >
-                        Drop off
-                      </button>
+                      {!boarding && (
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          disabled={!picked || dropped}
+                          onClick={() => markDropoff(id)}
+                        >
+                          Drop off
+                        </button>
+                      )}
                     </div>
                   </li>
                 );

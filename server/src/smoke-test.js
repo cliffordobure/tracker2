@@ -42,14 +42,16 @@ async function main() {
   });
   console.log('trip', trip._id, trip.status, 'kids', trip.kidIds.length);
 
+  const kidId = trip.kidIds[0]._id;
+  await req(`/trips/${trip._id}/kids/${kidId}/check-in`, { method: 'POST', token: driver.token });
+  await req(`/trips/${trip._id}/start`, { method: 'POST', token: driver.token });
+
   await req(`/trips/${trip._id}/location`, {
     method: 'POST',
     token: driver.token,
     body: { lat: -1.39, lng: 36.74 },
   });
 
-  const kidId = trip.kidIds[0]._id;
-  await req(`/trips/${trip._id}/kids/${kidId}/pickup`, { method: 'POST', token: driver.token });
   await req(`/trips/${trip._id}/kids/${kidId}/dropoff`, { method: 'POST', token: driver.token });
   await req(`/trips/${trip._id}/complete`, { method: 'POST', token: driver.token });
 

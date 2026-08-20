@@ -14,7 +14,7 @@ import { createAndEmitNotifications } from '../services/notifications.js';
 const router = Router();
 
 function isEveningTrip(trip) {
-  return trip.direction === 'to_home' || trip.period === 'evening' || trip.period === 'afternoon';
+  return trip?.direction === 'to_home' || trip?.period === 'evening';
 }
 
 function startOfToday() {
@@ -214,6 +214,17 @@ router.post('/', authenticate, requireRole('driver'), async (req, res) => {
         status: 'scheduled',
       });
       if (!scheduled) return res.status(404).json({ error: 'Scheduled trip not found' });
+      if (isEveningTrip(scheduled)) {
+        const boarded = await boardedKidIds(scheduled._id);
+        if (!boarded.length) {
+          const populated = await Trip.findById(scheduled._id)
+            .populate('routeId', 'name')
+            .populate('schoolId', 'name location address supportPhone')
+            .populate('busId', 'plate label seats')
+            .populate('kidIds');
+          return res.status(200).json({ trip: populated, boarding: true });
+        }
+      }
       const populated = await activateTrip(scheduled, req);
       return res.status(200).json({ trip: populated });
     }
@@ -269,7 +280,7 @@ router.post('/', authenticate, requireRole('driver'), async (req, res) => {
     const populated = await emitTripStarted(trip, kids);
     res.status(201).json({ trip: populated });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -315,6 +326,110 @@ router.post('/:id/location', authenticate, requireRole('driver'), async (req, re
     }
 
     res.json({ ok: true, location: ping });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/:id/kids/:kidId/check-in', authenticate, requireRole('driver'), async (req, res) => {
+  try {
+    const trip = await Trip.findOne({
+      _id: req.params.id,
+      driverId: req.user.id,
+      status: { $in: ['scheduled', 'active'] },
+    });
+    if (!trip) return res.status(404).json({ error: 'Trip not found' });
+    if (!isEveningTrip(trip)) {
+      return res.status(400).json({ error: 'Check-in is for evening boarding at school' });
+    }
+
+    const kidId = req.params.kidId;
+    if (!trip.kidIds.some((id) => id.toString() === kidId)) {
+      return res.status(400).json({ error: 'Kid is not on this trip' });
+    }
+
+    const existing = await TripEvent.findOne({ tripId: trip._id, kidId, type: 'picked_up' });
+    if (existing) return res.status(409).json({ error: 'Student is already checked in' });
+
+    await TripEvent.deleteMany({ tripId: trip._id, kidId, type: 'not_picked_up' });
+
+    const location = trip.latestLocation
+      ? { lat: trip.latestLocation.lat, lng: trip.latestLocation.lng }
+      : undefined;
+
+    const event = await TripEvent.create({
+      tripId: trip._id,
+      kidId,
+      type: 'picked_up',
+      at: new Date(),
+      location,
+    });
+
+    const boarded = await boardedKidIds(trip._id);
+    const expected = (trip.kidIds || []).length;
+    const missed = await TripEvent.countDocuments({ tripId: trip._id, type: 'not_picked_up' });
+
+    // Boarding at school stays silent. Parents are only notified after the
+    // driver starts the trip (or if a student boards once the route is already live).
+    if (trip.status === 'active') {
+      const kid = await Kid.findById(kidId);
+      const io = getIO();
+      const notifications = (kid?.parentIds || []).map((parentId) => ({
+        userId: parentId,
+        type: 'kid_picked_up',
+        title: 'On the evening bus',
+        body: `${kid.name} is on the bus. You can track live.`,
+        tripId: trip._id,
+        kidId: kid._id,
+      }));
+      if (notifications.length) await createAndEmitNotifications(io, notifications);
+      const payload = { tripId: trip._id.toString(), kidId, event };
+      io?.to(`trip:${trip._id}`).emit('kid:picked_up', payload);
+      for (const parentId of kid?.parentIds || []) {
+        io?.to(`user:${parentId}`).emit('kid:picked_up', payload);
+      }
+    }
+
+    res.json({
+      event,
+      boarded: boarded.length,
+      expected,
+      missed,
+      remaining: Math.max(0, expected - boarded.length - missed),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/:id/kids/:kidId/check-in/undo', authenticate, requireRole('driver'), async (req, res) => {
+  try {
+    const trip = await Trip.findOne({
+      _id: req.params.id,
+      driverId: req.user.id,
+      status: 'scheduled',
+    });
+    if (!trip) return res.status(404).json({ error: 'Boarding trip not found' });
+    if (!isEveningTrip(trip)) {
+      return res.status(400).json({ error: 'Check-in is for evening boarding at school' });
+    }
+
+    await TripEvent.deleteMany({
+      tripId: trip._id,
+      kidId: req.params.kidId,
+      type: { $in: ['picked_up', 'not_picked_up'] },
+    });
+
+    const boarded = await boardedKidIds(trip._id);
+    const expected = (trip.kidIds || []).length;
+    const missed = await TripEvent.countDocuments({ tripId: trip._id, type: 'not_picked_up' });
+    res.json({
+      ok: true,
+      boarded: boarded.length,
+      expected,
+      missed,
+      remaining: Math.max(0, expected - boarded.length - missed),
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -386,8 +501,15 @@ router.post('/:id/kids/:kidId/pickup', authenticate, requireRole('driver'), asyn
 
 router.post('/:id/kids/:kidId/miss', authenticate, requireRole('driver'), async (req, res) => {
   try {
-    const trip = await Trip.findOne({ _id: req.params.id, driverId: req.user.id, status: 'active' });
-    if (!trip) return res.status(404).json({ error: 'Active trip not found' });
+    const trip = await Trip.findOne({
+      _id: req.params.id,
+      driverId: req.user.id,
+      status: { $in: ['scheduled', 'active'] },
+    });
+    if (!trip) return res.status(404).json({ error: 'Trip not found' });
+    if (trip.status === 'scheduled' && !isEveningTrip(trip)) {
+      return res.status(400).json({ error: 'Start the trip before marking a missed pickup' });
+    }
 
     const kidId = req.params.kidId;
     if (!trip.kidIds.some((id) => id.toString() === kidId)) {
@@ -414,7 +536,7 @@ router.post('/:id/kids/:kidId/miss', authenticate, requireRole('driver'), async 
 
     const kid = await Kid.findById(kidId).populate('homeStopId', 'name');
     const driverId = trip.driverId?._id || trip.driverId;
-    if (driverId && kid) {
+    if (trip.status === 'active' && driverId && kid) {
       const stopName = kid.homeStopId?.name ? String(kid.homeStopId.name) : '';
       await createAndEmitNotifications(getIO(), [
         {
@@ -564,7 +686,11 @@ router.post('/:id/complete', authenticate, requireRole('driver'), async (req, re
     const kids = await Kid.find({ _id: { $in: trip.kidIds } });
     const io = getIO();
     const notifications = [];
-    for (const kid of kids) {
+    const boardedIds = isEveningTrip(trip) ? new Set(await boardedKidIds(trip._id)) : null;
+    const notifyKids = boardedIds
+      ? kids.filter((k) => boardedIds.has(String(k._id)))
+      : kids;
+    for (const kid of notifyKids) {
       for (const parentId of kid.parentIds || []) {
         notifications.push({
           userId: parentId,
@@ -592,7 +718,7 @@ router.post('/:id/complete', authenticate, requireRole('driver'), async (req, re
     const payload = { tripId: trip._id.toString() };
     io?.to(`trip:${trip._id}`).emit('trip:completed', payload);
     if (driverId) io?.to(`user:${driverId}`).emit('trip:completed', payload);
-    for (const kid of kids) {
+    for (const kid of notifyKids) {
       for (const parentId of kid.parentIds || []) {
         io?.to(`user:${parentId}`).emit('trip:completed', payload);
       }
@@ -626,4 +752,25 @@ router.get('/:id', authenticate, async (req, res) => {
       return res.status(403).json({ error: 'Not authorized for this trip' });
     }
 
-    const [events, al
+    const [events, allStops] = await Promise.all([
+      TripEvent.find({ tripId: trip._id }).sort({ at: 1 }),
+      Stop.find({ routeId: trip.routeId._id || trip.routeId }).sort({ order: 1 }),
+    ]);
+
+    // Only school + home stops for kids on this trip (drop leftover route stops)
+    const homeIds = new Set(
+      (trip.kidIds || [])
+        .map((k) => (k.homeStopId?._id || k.homeStopId)?.toString())
+        .filter(Boolean)
+    );
+    const school = allStops.find((s) => s.type === 'school');
+    const homes = allStops.filter((s) => s.type !== 'school' && homeIds.has(s._id.toString()));
+    const stops = [...(school ? [school] : []), ...homes];
+
+    res.json({ trip, events, stops });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+export default router;

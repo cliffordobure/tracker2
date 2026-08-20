@@ -36,6 +36,7 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 import { getVapidPublicKey } from '../services/push.js';
 import { createAndEmitNotifications, NOTIFICATION_TYPES } from '../services/notifications.js';
 import { getIO } from '../socket.js';
+import { formatClock as formatNairobiClock, formatDateKey, formatDateLabel, formatDayClock, calendarGroup, toIso } from '../lib/clock.js';
 
 const router = Router();
 router.use(authenticate, requireRole('parent'));
@@ -1940,6 +1941,13 @@ router.get('/overview', async (req, res) => {
 
     const tripIds = activeTrips.map((t) => t._id);
     const eventsToday = tripIds.length ? await TripEvent.find({ tripId: { $in: tripIds } }) : [];
+    const visibleActiveTrips = activeTrips.filter((t) => {
+      const mine = kids.filter((k) =>
+        (t.kidIds || []).some((id) => String(id?._id || id) === String(k._id))
+      );
+      const tripEvents = eventsToday.filter((e) => String(e.tripId) === String(t._id));
+      return parentMayTrackTrip(t, tripEvents, mine);
+    });
     const checkIns = eventsToday.filter((e) => e.type === 'picked_up' && kidIds.some((id) => String(e.kidId) === String(id))).length;
     let pendingCheckouts = 0;
     for (const kid of kids) {
@@ -1947,7 +1955,7 @@ router.get('/overview', async (req, res) => {
       const picked = eventsToday.some((e) => String(e.kidId) === id && e.type === 'picked_up');
       const dropped = eventsToday.some((e) => String(e.kidId) === id && e.type === 'dropped_off');
       if (picked && !dropped) pendingCheckouts += 1;
-      if (activeTrips.length && !picked && !dropped) pendingCheckouts += 1;
+      if (visibleActiveTrips.length && !picked && !dropped) pendingCheckouts += 1;
     }
 
     const featured = kids[0] || null;
@@ -2050,13 +2058,13 @@ router.get('/overview', async (req, res) => {
       .sort((a, b) => new Date(a.date) - new Date(b.date))
       .slice(0, 6);
 
-    const active = activeTrips[0] || null;
+    const active = visibleActiveTrips[0] || null;
     res.json({
       kids: mappedKids,
       featuredKidId: featured?._id || null,
       progress,
       summary: {
-        tripsToday: activeTrips.length,
+        tripsToday: visibleActiveTrips.length,
         checkIns,
         pendingCheckouts,
         unread,
@@ -2224,13 +2232,7 @@ function formatClock(value) {
     h = h % 12 || 12;
     return `${h}:${m} ${ampm}`;
   }
-  const d = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(d.getTime())) return '';
-  const h24 = d.getHours();
-  const m = String(d.getMinutes()).padStart(2, '0');
-  const ampm = h24 >= 12 ? 'PM' : 'AM';
-  const h = h24 % 12 || 12;
-  return `${h}:${m} ${ampm}`;
+  return formatNairobiClock(value);
 }
 
 function minutesFromClock(value) {
@@ -2690,6 +2692,7 @@ async function buildParentDiaryFeed(kids, query = {}) {
       childId: kidsMeta.childId,
       source: 'diary',
       photoUrl: media.find((m) => m.kind === 'image')?.url || '',
+      comments: serializeDiaryComments(e),
     });
   }
   for (const a of announcements) {
@@ -2927,16 +2930,9 @@ router.get('/diary', async (req, res) => {
 
     const dates = [...new Set(monthEntries.map((e) => ymd(e.date)))];
     const feed = await buildParentDiaryFeed(kids, req.query);
-    const serializedEntries = entries.map((e) => {
-      const doc = e.toObject ? e.toObject() : e;
-      const attachments = serializeDiaryAttachments(doc);
-      return {
-        ...doc,
-        attachments,
-        photoUrl: attachments.find((m) => m.kind === 'image')?.url || '',
-        teacherName: doc.teacherId?.name || 'Teacher',
-      };
-    });
+    const serializedEntries = entries.map((e) =>
+      serializeParentDiary(e, { kids, userId: req.user.id, kidId: selected._id }),
+    );
     res.json({
       date: ymd(day),
       unread,
@@ -2977,6 +2973,9 @@ router.get('/diary/:id', async (req, res) => {
 
 router.post('/diary/:id/comments', async (req, res) => {
   try {
+    if (!/^[a-fA-F0-9]{24}$/.test(String(req.params.id))) {
+      return res.status(404).json({ error: 'Diary entry not found' });
+    }
     const body = String(req.body?.body || '').trim().slice(0, 800);
     if (!body) return res.status(400).json({ error: 'Comment is required' });
     const { entry, kids } = await findParentDiary(req.user.id, req.params.id);
@@ -2991,6 +2990,20 @@ router.post('/diary/:id/comments', async (req, res) => {
       body,
     });
     await entry.save();
+    const teacherId = entry.teacherId?._id || entry.teacherId;
+    if (teacherId) {
+      try {
+        await createAndEmitNotifications(getIO(), [
+          {
+            userId: teacherId,
+            type: 'reminder',
+            title: 'Diary comment',
+            body: `${author?.name || 'A parent'} commented on "${entry.title}": ${body.slice(0, 140)}`,
+            kidId: entry.kidIds?.[0] || null,
+          },
+        ]);
+      } catch (_) {}
+    }
     const detail = await serializeDiaryWithPrevious(entry, {
       kids,
       userId: req.user.id,
@@ -3045,7 +3058,9 @@ router.get('/trips/active', async (req, res) => {
       })
     );
 
-    res.json({ trips: enriched });
+    res.json({
+      trips: enriched.filter((row) => parentMayTrackTrip(row.trip, row.events, row.myKids)),
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -3065,6 +3080,23 @@ function kmBetween(a, b) {
 function etaMinutesFromKm(km) {
   if (km == null || Number.isNaN(km)) return null;
   return Math.max(1, Math.round((km / 22) * 60));
+}
+
+function isEveningTrip(trip) {
+  return trip?.direction === 'to_home' || trip?.period === 'evening';
+}
+
+function parentKidBoardedOnTrip(events, kids) {
+  const ids = new Set((kids || []).map((k) => String(k._id)));
+  return (events || []).some(
+    (e) => e.type === 'picked_up' && ids.has(String(e.kidId?._id || e.kidId))
+  );
+}
+
+function parentMayTrackTrip(trip, events, kids) {
+  if (!isEveningTrip(trip)) return true;
+  if (trip.status === 'scheduled') return false;
+  return parentKidBoardedOnTrip(events, kids);
 }
 
 function busPeriodLabel(trip) {
@@ -3727,6 +3759,7 @@ router.get('/trips', async (req, res) => {
 
     const scheduledBus = trips
       .filter((t) => t.status === 'scheduled')
+      .filter((t) => !isEveningTrip(t))
       .map((t) => {
         const my = kids.find((k) => (t.kidIds || []).some((id) => String(id?._id || id) === String(k._id)));
         return { ...serializeBusTrip(t), permission: null, kid: serializeKidSnippet(my) };
@@ -3734,7 +3767,7 @@ router.get('/trips', async (req, res) => {
     upcoming.push(...scheduledBus);
 
     const activeTrips = trips.filter((t) => t.status === 'active');
-    const live = await Promise.all(
+    const liveRows = await Promise.all(
       activeTrips.map(async (trip) => {
         const myKids = kids.filter((k) => trip.kidIds.some((id) => String(id) === String(k._id)));
         const [events, allStops, profile] = await Promise.all([
@@ -3750,6 +3783,7 @@ router.get('/trips', async (req, res) => {
         );
         const dest = trip.direction === 'to_home' ? homeStop?.location : schoolStop?.location;
         const eta = etaMinutesFromKm(kmBetween(trip.latestLocation, dest));
+        if (!parentMayTrackTrip(trip, events, myKids)) return null;
         const kidStatus = myKids.map((k) => {
           const picked = events.find((e) => String(e.kidId) === String(k._id) && e.type === 'picked_up');
           const dropped = events.find((e) => String(e.kidId) === String(k._id) && e.type === 'dropped_off');
@@ -3778,6 +3812,7 @@ router.get('/trips', async (req, res) => {
         };
       })
     );
+    const live = liveRows.filter(Boolean);
 
     const busHistory = trips
       .filter((t) => t.status === 'completed' || t.status === 'cancelled' || t.status === 'canceled')
@@ -3841,6 +3876,9 @@ router.get('/trips/:id', async (req, res) => {
         DriverProfile.findOne({ userId: trip.driverId?._id || trip.driverId }),
       ]);
       const school = trip.schoolId && typeof trip.schoolId === 'object' ? trip.schoolId : null;
+      if (!parentMayTrackTrip(trip, events, kids)) {
+        return res.status(404).json({ error: 'Trip not found' });
+      }
       return res.json({
         trip: await serializeBusTripDetail(trip, { kids, events, stops, profile, school }),
       });
@@ -3895,6 +3933,9 @@ router.get('/trips/:id/live', async (req, res) => {
     const notifyOnArrival = (user?.preferences?.notifyArrivalTripIds || []).some(
       (tid) => String(tid) === String(trip._id)
     );
+    if (!parentMayTrackTrip(trip, events, kids)) {
+      return res.status(404).json({ error: 'Trip not found' });
+    }
     res.json(serializeParentLiveTracking(trip, { kids, events, stops, profile, school, notifyOnArrival }));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -4899,30 +4940,15 @@ function notificationAuthor(row) {
 }
 
 function notificationTimeLabel(value) {
-  const d = value ? new Date(value) : null;
-  if (!d || Number.isNaN(d.getTime())) return '';
-  const hour = d.getHours() % 12 || 12;
-  const mins = String(d.getMinutes()).padStart(2, '0');
-  const ampm = d.getHours() >= 12 ? 'PM' : 'AM';
-  return `${hour}:${mins} ${ampm}`;
+  return formatClock(value);
 }
 
 function notificationDateLabel(value) {
-  const d = value ? new Date(value) : null;
-  if (!d || Number.isNaN(d.getTime())) return '';
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  return formatDateLabel(value);
 }
 
 function notificationGroup(value) {
-  const d = value ? new Date(value) : null;
-  if (!d || Number.isNaN(d.getTime())) return 'earlier';
-  const now = new Date();
-  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const startThat = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const diff = Math.round((startToday - startThat) / 86400000);
-  if (diff === 0) return 'today';
-  if (diff === 1) return 'yesterday';
-  return 'earlier';
+  return calendarGroup(value);
 }
 
 function serializeParentNotification(row) {
@@ -4941,7 +4967,7 @@ function serializeParentNotification(row) {
     category,
     categoryLabel: notificationCategoryLabel(category),
     authorName: notificationAuthor(doc),
-    createdAt: doc.createdAt,
+    createdAt: toIso(doc.createdAt) || doc.createdAt,
     timeLabel: notificationTimeLabel(doc.createdAt),
     dateLabel: notificationDateLabel(doc.createdAt),
     group: notificationGroup(doc.createdAt),
@@ -5230,44 +5256,19 @@ router.post('/late-pickup-request', async (req, res) => {
 });
 
 function messageTimeLabel(value) {
-  const d = value ? new Date(value) : null;
-  if (!d || Number.isNaN(d.getTime())) return '';
-  const now = new Date();
-  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const startThat = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const diffDays = Math.round((startToday - startThat) / 86400000);
-  if (diffDays === 0) {
-    const hour = d.getHours() % 12 || 12;
-    const mins = String(d.getMinutes()).padStart(2, '0');
-    const ampm = d.getHours() >= 12 ? 'PM' : 'AM';
-    return `${hour}:${mins} ${ampm}`;
-  }
-  if (diffDays === 1) return 'Yesterday';
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  return formatDayClock(value);
 }
 
 function messageClockLabel(value) {
-  const d = value ? new Date(value) : null;
-  if (!d || Number.isNaN(d.getTime())) return '';
-  const hour = d.getHours() % 12 || 12;
-  const mins = String(d.getMinutes()).padStart(2, '0');
-  const ampm = d.getHours() >= 12 ? 'PM' : 'AM';
-  return `${hour}:${mins} ${ampm}`;
+  return formatClock(value);
 }
 
 function messageDateKey(value) {
-  const d = value ? new Date(value) : null;
-  if (!d || Number.isNaN(d.getTime())) return '';
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+  return formatDateKey(value);
 }
 
 function messageDateLabel(value) {
-  const d = value ? new Date(value) : null;
-  if (!d || Number.isNaN(d.getTime())) return '';
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  return formatDateLabel(value);
 }
 
 function serializeConversation(row, extra = {}) {

@@ -1,12 +1,14 @@
 import { Notification, Kid } from '../models/index.js';
 import { sendPushToUser } from './push.js';
 import { NOTIFICATION_TYPES } from '@school-tracker/shared';
+import { toIso } from '../lib/clock.js';
 
 export async function createAndEmitNotifications(io, items) {
   if (!items.length) return [];
 
   const created = await Notification.insertMany(items);
   for (const n of created) {
+    const createdAt = toIso(n.createdAt) || new Date().toISOString();
     const payload = {
       id: n._id.toString(),
       type: n.type,
@@ -15,7 +17,7 @@ export async function createAndEmitNotifications(io, items) {
       tripId: n.tripId?.toString(),
       kidId: n.kidId?.toString(),
       read: n.read,
-      createdAt: n.createdAt,
+      createdAt,
     };
     io?.to(`user:${n.userId}`).emit('notification:new', payload);
     sendPushToUser(n.userId, {
@@ -26,6 +28,7 @@ export async function createAndEmitNotifications(io, items) {
         notificationId: n._id.toString(),
         tripId: n.tripId?.toString() || '',
         kidId: n.kidId?.toString() || '',
+        createdAt,
       },
     }).catch((err) => console.warn('[push] notify error:', err.message));
   }

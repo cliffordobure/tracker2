@@ -22,6 +22,7 @@ import {
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { createAndEmitNotifications, NOTIFICATION_TYPES } from '../services/notifications.js';
 import { getIO } from '../socket.js';
+import { formatClock } from '../lib/clock.js';
 
 const router = Router();
 router.use(authenticate, requireRole('teacher'));
@@ -350,7 +351,7 @@ function serializeTeacherNotification(n) {
     read: n.read === true,
     link: n.link || '',
     kidId: n.kidId || null,
-    createdAt: n.createdAt,
+    createdAt: n.createdAt instanceof Date ? n.createdAt.toISOString() : n.createdAt,
   };
 }
 
@@ -2077,7 +2078,18 @@ router.get('/diary', async (req, res) => {
       const photo = media.find(
         (m) => m?.url && m.resourceType !== 'raw' && m.resourceType !== 'video',
       );
-      return { ...doc, photoUrl: photo?.url || media.find((m) => m?.url)?.url || '' };
+      const comments = (doc.comments || []).map((c) => ({
+        _id: c._id,
+        authorName: c.authorName || 'Parent',
+        authorRole: c.authorRole || 'Parent',
+        body: c.body || '',
+        createdAt: c.createdAt,
+      }));
+      return {
+        ...doc,
+        photoUrl: photo?.url || media.find((m) => m?.url)?.url || '',
+        comments,
+      };
     });
     res.json({ entries: list, dates });
   } catch (err) {
@@ -2862,12 +2874,7 @@ router.post('/outings', async (req, res) => {
 });
 
 function messageClockLabel(value) {
-  const d = value ? new Date(value) : null;
-  if (!d || Number.isNaN(d.getTime())) return '';
-  const hour = d.getHours() % 12 || 12;
-  const mins = String(d.getMinutes()).padStart(2, '0');
-  const ampm = d.getHours() >= 12 ? 'PM' : 'AM';
-  return `${hour}:${mins} ${ampm}`;
+  return formatClock(value);
 }
 
 function serializeTeacherConversation(row, parent) {
