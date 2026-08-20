@@ -3717,8 +3717,8 @@ router.get('/trips', async (req, res) => {
     const [trips, notifications, outings] = await Promise.all([
       kidIds.length
         ? Trip.find({ kidIds: { $in: kidIds } })
-            .populate('routeId', 'name')
-            .populate('schoolId', 'name')
+      .populate('routeId', 'name')
+      .populate('schoolId', 'name')
             .populate('driverId', 'name photoUrl phone')
             .populate('busId', 'plate label seats assistantName assistantPhone')
             .sort({ startedAt: -1, scheduledFor: -1 })

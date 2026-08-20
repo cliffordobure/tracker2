@@ -12,6 +12,7 @@ const TABS = [
   { id: 'security', label: 'Security' },
   { id: 'integrations', label: 'Integrations' },
   { id: 'backup', label: 'Backup & Restore' },
+  { id: 'handover', label: 'Handover & QA' },
 ];
 
 const SCHOOL_TYPES = ['Mixed Day School', 'Day School', 'Boarding School', 'Mixed Boarding School'];
@@ -1033,6 +1034,21 @@ export default function SchoolSettings() {
               <dd>—</dd>
             </div>
           </dl>
+        </article>
+      )}
+
+      {tab === 'handover' && (
+        <article className="sa-card sa-set-narrow">
+          <h3>Handover & QA test paper</h3>
+          <p>
+            Steps 1–52 plus Live Tracking. Developer Yes is filled for items that work in this build.
+            QA can mark Yes and add comments, then download the paper.
+          </p>
+          <p>
+            <Link className="sa-btn sa-btn-primary" to="/school-admin/handover">
+              Open test paper
+            </Link>
+          </p>
         </article>
       )}
 
