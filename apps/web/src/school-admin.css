@@ -4145,7 +4145,36 @@ button.sa-text-link { background: none; border: 0; cursor: pointer; font: inheri
   .sa-qa-hero, .sa-qa-brief, .sa-qa-toolbar { grid-template-columns: 1fr; display: grid; }
 }
 @media print {
-  .sa-sidebar, .sa-topbar, .sa-bottom-nav, .sa-qa-actions, .sa-qa-toolbar { display: none !important; }
-  .sa-qa-table { min-width: 0; }
+  html, body, #root {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+  .sa-sidebar, .sa-topbar, .sa-bottom-nav, .sa-qa-actions, .sa-qa-toolbar, .sa-backdrop, .sa-menu-btn {
+    display: none !important;
+  }
+  .sa-shell, .sa-shell--navy, .sa-shell--platform, .sa-main, .sa-content, .sa-page, .sa-qa {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    position: static !important;
+    transform: none !important;
+    width: 100% !important;
+    max-width: none !important;
+    grid-template-columns: 1fr !important;
+    background: #fff !important;
+    box-shadow: none !important;
+  }
+  .sa-qa-table, .sa-table {
+    min-width: 0 !important;
+    page-break-inside: auto;
+    break-inside: auto;
+  }
+  .sa-qa-table tr, .sa-table tr {
+    page-break-inside: auto;
+    break-inside: auto;
+  }
+  thead { display: table-header-group; }
 }
 

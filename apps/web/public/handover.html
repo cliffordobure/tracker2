@@ -1,0 +1,1122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>School Bus Tracking System — Handover &amp; QA</title>
+  <style>
+    @page { size: A4 portrait; margin: 12mm; }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: auto !important;
+      overflow: visible !important;
+      background: #fff;
+      color: #0f172a;
+      font-family: "Segoe UI", Calibri, Arial, sans-serif;
+      font-size: 10pt;
+      line-height: 1.4;
+    }
+    .sheet { max-width: 210mm; margin: 0 auto; padding: 16px 18px 32px; }
+    .toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      background: #f8fafc;
+      border-bottom: 1px solid #e2e8f0;
+      padding: 10px 18px;
+    }
+    .toolbar button {
+      background: #5d3fd3;
+      color: #fff;
+      border: 0;
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .toolbar span { color: #64748b; font-size: 9.5pt; }
+    h1 { font-size: 20pt; margin: 0 0 4px; color: #5d3fd3; }
+    h2 {
+      font-size: 13pt;
+      margin: 22px 0 8px;
+      padding-bottom: 4px;
+      border-bottom: 2px solid #5d3fd3;
+      page-break-after: avoid;
+      break-after: avoid;
+    }
+    p { margin: 0 0 10px; }
+    .meta { color: #64748b; font-size: 9.5pt; margin-bottom: 14px; }
+    .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 12px 0 16px; }
+    .kpi { border: 1px solid #e2e8f0; padding: 10px 12px; background: #f8fafc; }
+    .kpi strong { display: block; font-size: 18pt; }
+    .kpi span { font-size: 8pt; text-transform: uppercase; letter-spacing: 0.04em; color: #64748b; }
+    .kpi.yes strong { color: #15803d; }
+    .kpi.partial strong { color: #b45309; }
+    .kpi.no strong { color: #b91c1c; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: auto;
+      font-size: 8pt;
+      margin: 0 0 12px;
+      page-break-inside: auto;
+      break-inside: auto;
+    }
+    thead { display: table-header-group; }
+    tfoot { display: table-footer-group; }
+    tr {
+      page-break-inside: auto;
+      break-inside: auto;
+      page-break-after: auto;
+    }
+    th, td {
+      border: 1px solid #cbd5e1;
+      padding: 5px 6px;
+      vertical-align: top;
+      text-align: left;
+      page-break-inside: auto;
+      break-inside: auto;
+    }
+    th { background: #5d3fd3; color: #fff; font-weight: 700; }
+    .pill {
+      display: inline-block;
+      font-size: 7.5pt;
+      font-weight: 800;
+      text-transform: uppercase;
+      padding: 1px 6px;
+      border-radius: 999px;
+    }
+    .pill.yes { background: #dcfce7; color: #166534; }
+    .pill.partial { background: #fef3c7; color: #92400e; }
+    .pill.no { background: #fee2e2; color: #991b1b; }
+    .note-inline { color: #64748b; margin-top: 4px; font-size: 7.5pt; }
+    .sign { margin-top: 28px; display: grid; grid-template-columns: 1fr 1fr; gap: 28px; page-break-inside: avoid; }
+    .line { border-top: 1px solid #94a3b8; margin-top: 36px; padding-top: 6px; font-size: 9pt; color: #475569; }
+    .footer { margin-top: 18px; font-size: 8pt; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 8px; }
+    @media print {
+      .toolbar { display: none !important; }
+      html, body, .sheet {
+        height: auto !important;
+        overflow: visible !important;
+        max-width: none;
+        margin: 0;
+        padding: 0;
+        background: #fff;
+      }
+      a { color: inherit; text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar no-print">
+    <button type="button" onclick="window.print()">Print / Save PDF</button>
+    <span>Use the print dialog → Destination: Save as PDF. Do not use “Microsoft Print to PDF” screenshot mode. Every table row should flow onto the next page.</span>
+  </div>
+  <div class="sheet">
+    <h1>School Bus Tracking System</h1>
+    <p class="meta">Developer Handover &amp; QA Test Paper — Steps 1–52 + Live Tracking<br/>
+    v1.0.0 · 20 Aug 2026 · Public file: <code>/handover.html</code><br/>
+    Super Admin login: admin@schooltracker.test / password123 (not shown on the dashboard mockup)</p>
+
+    <div class="kpis">
+      <div class="kpi"><strong>91</strong><span>Checks in this paper</span></div>
+      <div class="kpi yes"><strong>87</strong><span>Developer Yes</span></div>
+      <div class="kpi partial"><strong>3</strong><span>Partial</span></div>
+      <div class="kpi no"><strong>1</strong><span>Not in this build</span></div>
+    </div>
+
+    <h2>1. Purpose</h2><p>Consolidated handover for Super Admin (admit schools), School Admin, Driver App, scheduling, live tracking and reporting. This paper lives at /handover.html (web public folder). Stack: Node.js/Express, MongoDB, React (Vite web) and Flutter (driver/parent/teacher). Product version v1.0.0.</p>
+<h2>Where to test</h2><p>Super Admin is /super-admin (login admin@schooltracker.test / password123). School admin is the school-admin site (Dashboard, Students, Transport, Live Tracking, Reports, Settings). Mobile driver is the Flutter driver app. Mobile parent is the Flutter parent app. Some checks need both: admin schedules the trip, driver runs it, parent/admin watch live.</p>
+<h2>Super Admin — admit schools</h2><p>Super Admin creates a school (name, map pin, plan) and optional school-admin account. New schools start pending until Approve. Suspend disables that school’s admin login. Dashboard KPIs and health use live database counts (not mock numbers). Platform invoices/payments stay at KES 0 until an invoice is issued and marked paid.</p>
+<h2>Critical trip architecture</h2><p>Recurring Schedule → Trip Instances → Driver execution → GPS → Check-in → Check-out → Complete. Live Tracking while the instance is active or boarding. Reports after execution. Historical completed trips are not rewritten by schedule edits. Evening: parents are not notified until the child is checked in and the trip is started.</p>
+<h2>API boundaries</h2><p>Super Admin /api/admin/platform/*. School admin /api/admin/trip-schedules, /api/admin/trip-instances, /api/admin/reports, /api/admin/live-tracking. Driver /api/driver/trips and /api/trips. Shared JWT auth and role checks on the server.</p>
+<h2>Technology note</h2><p>The reference package described PostgreSQL. This school tracker uses MongoDB with the same functional relationships (school, student, parent, bus, driver, route, stop, schedule, trip instance, attendance, GPS). Super Admin audit logs are stored in AuditLog.</p>
+<h2>Known gaps (do not mark Developer Yes)</h2><p>No Campus module. School-admin has an Enable audit logs flag but no school-level Audit Logs screen (Super Admin does have Audit Logs and Activity Logs). End Trip with students still checked in is Partial — confirm a hard block with QA. Pickup and drop-off use one home stop per student.</p>
+
+    <h2>Remaining gaps</h2>
+    <p>Only these items are not Developer Yes. QA should still re-test the Yes rows.</p>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Area</th>
+          <th>Item</th>
+          <th>Dev</th>
+          <th>Note</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+      <td>s05</td>
+      <td>Step 5</td>
+      <td>Multiple campuses as a first-class Campus module</td>
+      <td><span class="pill no">No</span></td>
+      <td>Classes exist. A dedicated Campuses screen is not in this build.</td>
+    </tr>
+<tr>
+      <td>s40</td>
+      <td>Step 40</td>
+      <td>Dedicated audit log of admin/operational changes</td>
+      <td><span class="pill partial">Partial</span></td>
+      <td>Platform audit works. School-admin change history is not a dedicated screen.</td>
+    </tr>
+<tr>
+      <td>s47</td>
+      <td>Step 47</td>
+      <td>Students assigned to classes (and campus if used)</td>
+      <td><span class="pill partial">Partial</span></td>
+      <td>Class assignment works. Campus as its own entity is not shipped.</td>
+    </tr>
+<tr>
+      <td>s51g</td>
+      <td>Step 51</td>
+      <td>Block end-trip while students still have open check-ins</td>
+      <td><span class="pill partial">Partial</span></td>
+      <td>Pending check-outs are shown. Confirm hard block on End Trip with QA.</td>
+    </tr>
+      </tbody>
+    </table>
+
+    <h2>QA test paper</h2>
+    <p>Developer column is pre-filled for this build. QA marks Yes / No / Blocked after testing and writes a comment. Procedure says whether to use Super Admin, School Admin web, or the mobile app.</p>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Area</th>
+          <th>Test</th>
+          <th>Where</th>
+          <th>Procedure</th>
+          <th>Developer</th>
+          <th>QA</th>
+          <th>Comment</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+    <td>s01</td>
+    <td>Step 1</td>
+    <td>Project foundation: apps (web, mobile, server), env, API, deployable layout</td>
+    <td>Server</td>
+    <td>Confirm web, Flutter apps/mobile, and server start with the project .env. No UI click-path.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s02</td>
+    <td>Step 2</td>
+    <td>Secure login, logout, password handling, role-based home</td>
+    <td>Web + Mobile</td>
+    <td>Web: open /login. Super Admin (admin@schooltracker.test) lands on /super-admin. School admin, driver, parent, teacher each land on their home. Mobile: Flutter login for school roles. Sign out from the shell.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s03</td>
+    <td>Step 3</td>
+    <td>Users &amp; Roles: create and manage school users and roles</td>
+    <td>Web admin</td>
+    <td>School admin → Users &amp; Roles. Create a user, set role, save. Confirm they can log in.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s04</td>
+    <td>Step 4</td>
+    <td>School profile and transport configuration</td>
+    <td>Web admin</td>
+    <td>School admin → Settings → School Profile and Transport Settings. Change a field, Save, reload.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s05</td>
+    <td>Step 5</td>
+    <td>Multiple campuses as a first-class Campus module<div class="note-inline">Classes exist. A dedicated Campuses screen is not in this build.</div></td>
+    <td>Web admin</td>
+    <td>There is no Campuses menu. Classes exist under More → Classes. Record as gap unless a campus screen is added.</td>
+    <td><span class="pill no">No</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s06</td>
+    <td>Step 6</td>
+    <td>Academic year / term fields on school settings</td>
+    <td>Web admin</td>
+    <td>Settings → School Profile. Set year/term dates, Save, reload.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s07</td>
+    <td>Step 7</td>
+    <td>Classes / grades create, view, edit</td>
+    <td>Web admin</td>
+    <td>More → Classes. Create a class, open it, edit name/grade, save.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s08</td>
+    <td>Step 8</td>
+    <td>Student records: create, view, edit</td>
+    <td>Web admin</td>
+    <td>Students. Add a student, open the profile, edit, save. Confirm the list updates.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s09</td>
+    <td>Step 9</td>
+    <td>Parent / guardian records</td>
+    <td>Web admin</td>
+    <td>Parents. Create a parent, attach phone/email, open details, edit.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s10</td>
+    <td>Step 10</td>
+    <td>Student transport profile (home stop, route, pickup/drop-off)</td>
+    <td>Web admin</td>
+    <td>Students → open a student → transport / stop fields. Set home stop and route, save.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s11</td>
+    <td>Step 11</td>
+    <td>Buses: plate, capacity, status</td>
+    <td>Web admin</td>
+    <td>Buses / Vehicles. Add a bus (plate, seats), open details, change status.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s12</td>
+    <td>Step 12</td>
+    <td>Drivers: contact, status, assignments</td>
+    <td>Web admin</td>
+    <td>Drivers. Create/open a driver, set phone and status, save.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s13</td>
+    <td>Step 13</td>
+    <td>Routes: create, edit, activate/deactivate</td>
+    <td>Web admin</td>
+    <td>Routes. Create a route, open it, toggle active, save.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s14</td>
+    <td>Step 14</td>
+    <td>Ordered stops on a route</td>
+    <td>Web admin</td>
+    <td>Routes → open a route (or Stops). Add/reorder pickup stops. Confirm order on the route detail.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s15</td>
+    <td>Step 15</td>
+    <td>Assign students to a route / trip</td>
+    <td>Web admin</td>
+    <td>Trip Scheduling: pick students on the schedule, or assign via student transport profile. Confirm they appear on the generated trip.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s16</td>
+    <td>Step 16</td>
+    <td>Assign driver to route/schedule</td>
+    <td>Web admin</td>
+    <td>Trip Scheduling → Driver. Save. Open Trips and confirm the instance shows that driver.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s17</td>
+    <td>Step 17</td>
+    <td>Assign bus to route/schedule</td>
+    <td>Web admin</td>
+    <td>Trip Scheduling → Bus. Save. Open Trips and confirm the plate on the instance.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s18</td>
+    <td>Step 18</td>
+    <td>Student pickup and drop-off stop (home stop)</td>
+    <td>Web admin</td>
+    <td>Student profile → home stop. Morning pickup uses that stop; evening drop-off uses the same home stop after school boarding.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s19</td>
+    <td>Step 19</td>
+    <td>Admin transport dashboard with operational numbers</td>
+    <td>Web admin</td>
+    <td>Dashboard (school-admin home). Confirm today’s trip counts and open-live links.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s20</td>
+    <td>Step 20</td>
+    <td>Capture GPS during an active (or evening boarding) trip</td>
+    <td>Mobile · driver</td>
+    <td>Driver app: open live for the trip, allow location. Confirm pings continue while driving (and during evening boarding before Start).</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s21</td>
+    <td>Step 21</td>
+    <td>Map of buses and last known position</td>
+    <td>Web admin</td>
+    <td>Live Tracking. Confirm the bus marker moves or shows last GPS. Open trip details from the side panel.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s22</td>
+    <td>Step 22</td>
+    <td>Trip instances with status, route, bus, driver</td>
+    <td>Web admin</td>
+    <td>Trips (Trip Instances). Filter by date/status. Open one instance and check code, route, bus, driver, status.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s23</td>
+    <td>Step 23</td>
+    <td>Driver app for assigned trips</td>
+    <td>Mobile · driver</td>
+    <td>Log in as the assigned driver. Home shows current/next trip. Tabs: Check In/Out, My Route, Trips. Web /driver is a fallback, not the phone app.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s24</td>
+    <td>Step 24</td>
+    <td>Start trip stores start time and GPS</td>
+    <td>Mobile · driver</td>
+    <td>On a scheduled morning trip: View Trip or Start. After start, Admin → Trips should show startedAt and a GPS point. Evening: check in at least one student first, then Start trip.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s25</td>
+    <td>Step 25</td>
+    <td>End trip stores end time and GPS</td>
+    <td>Mobile · driver</td>
+    <td>On the live map Trip tab tap End Trip (or complete from the trip screen). Admin → Trips: status completed, endedAt set.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s26</td>
+    <td>Step 26</td>
+    <td>Manual check-in against the Trip ID</td>
+    <td>Mobile · driver</td>
+    <td>Check In/Out. Morning: at a home stop, list every student at that stop, Mark as Picked Up. Evening boarding: list is at School — mark who boarded. Confirm the same Trip ID in Admin → Trips / Attendance.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s27</td>
+    <td>Step 27</td>
+    <td>Manual check-out against the Trip ID</td>
+    <td>Mobile · driver</td>
+    <td>After an evening trip is started (or morning arrival at school), Check In/Out in check-out mode. Mark dropped off at the stop. Confirm on the same Trip ID.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s28</td>
+    <td>Step 28</td>
+    <td>Student attendance / trip history</td>
+    <td>Web + Mobile</td>
+    <td>Web: Attendance and Reports. Mobile driver: attendance history from Check In/Out. Confirm times match the trip.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s29</td>
+    <td>Step 29</td>
+    <td>Parent sees approved live/status for their child</td>
+    <td>Mobile · parent</td>
+    <td>Parent app: after morning pickup or after evening start with the child checked in, open live tracking. Evening scheduled (not started) must not show live to the parent.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s30</td>
+    <td>Step 30</td>
+    <td>Transport notifications (start, pickup, complete)</td>
+    <td>Mobile · parent</td>
+    <td>Parent notifications. Morning pickup should notify. Evening: no parent message until the child is checked in and the trip is started.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s31</td>
+    <td>Step 31</td>
+    <td>Operational alerts / incidents</td>
+    <td>Web + Mobile</td>
+    <td>Driver: report incident from live/more. Admin: Incidents and Notifications. Confirm the item appears.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s32</td>
+    <td>Step 32</td>
+    <td>Admin controls for buses, drivers, routes, stops, students, trips</td>
+    <td>Web admin</td>
+    <td>Walk Buses, Drivers, Routes, Stops, Students, Trip Scheduling, Trips. Create or edit one record in each.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s33</td>
+    <td>Step 33</td>
+    <td>Student transport and attendance status on a trip</td>
+    <td>Web admin</td>
+    <td>Trips → open instance. Confirm boarded / pending counts. Live Tracking panel also shows check-in/out counts.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s34</td>
+    <td>Step 34</td>
+    <td>Trip history with timestamps, driver, bus, route, GPS</td>
+    <td>Web admin</td>
+    <td>Trips: filter completed. Open a finished instance. Reports → trip instance report for the date range.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s35</td>
+    <td>Step 35</td>
+    <td>Driver assigned and completed trip history</td>
+    <td>Web + Mobile</td>
+    <td>Web: Drivers → open driver → trip history. Mobile: driver Trips tab / history.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s36</td>
+    <td>Step 36</td>
+    <td>Parent notified after evening check-in + start (not before start)</td>
+    <td>Mobile · driver then parent</td>
+    <td>Evening: driver Open live · check in, mark students, then Start trip. Parent should get “on the evening bus” only after start, only for boarded kids.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s37</td>
+    <td>Step 37</td>
+    <td>Backend APIs for core transport entities</td>
+    <td>Server</td>
+    <td>Smoke: login, load dashboard, trips, live-tracking, driver today. Failures show as API errors in the UI.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s38</td>
+    <td>Step 38</td>
+    <td>Database entities and relationships<div class="note-inline">MongoDB models, not PostgreSQL tables.</div></td>
+    <td>Server</td>
+    <td>Create a schedule with bus, driver, students; generate instances. Confirm related records stay linked.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s39</td>
+    <td>Step 39</td>
+    <td>Server-side auth and role-protected endpoints</td>
+    <td>Web + Mobile</td>
+    <td>Open an admin URL while logged in as parent — redirect. Driver cannot open school-admin. Logged-out user hits /login.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s40</td>
+    <td>Step 40</td>
+    <td>Dedicated audit log of admin/operational changes<div class="note-inline">Platform audit works. School-admin change history is not a dedicated screen.</div></td>
+    <td>Web · Super Admin</td>
+    <td>Super Admin → Audit Logs and Activity Logs show live platform changes (admit school, plan, invoices). School Settings still only has an Enable audit logs flag — no school-level history screen.</td>
+    <td><span class="pill partial">Partial</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s41</td>
+    <td>Step 41</td>
+    <td>Admin reports for trips, students, drivers, buses, routes</td>
+    <td>Web admin</td>
+    <td>Reports &amp; Analytics. Open executive cards and at least one trip/attendance report.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s42</td>
+    <td>Step 42</td>
+    <td>Search and filter on admin transport lists</td>
+    <td>Web admin</td>
+    <td>Students, Drivers, Buses, Routes, Trips: use the top search and status/date filters.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s43</td>
+    <td>Step 43</td>
+    <td>Validation, API errors, operator feedback</td>
+    <td>Web + Mobile</td>
+    <td>Submit an empty required form on admin. On driver, start an evening trip with zero check-ins — error, not a silent start.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s44</td>
+    <td>Step 44</td>
+    <td>Integrated Admin + Driver + GPS + attendance + routes<div class="note-inline">Covered in this school’s live runs. Formal automated suite is still for QA.</div></td>
+    <td>Web + Mobile</td>
+    <td>Admin creates today’s trip → driver runs it with GPS and check-in → admin Live Tracking and Reports show the same Trip ID.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s45</td>
+    <td>Step 45</td>
+    <td>Env, database and deploy configuration present</td>
+    <td>Server</td>
+    <td>Confirm .env (API, Mapbox, Mongo) on server and dart defines / API URL on mobile.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s46</td>
+    <td>Step 46</td>
+    <td>Core system and driver app foundation in place</td>
+    <td>Web + Mobile</td>
+    <td>Admin dashboard loads. Driver Home, Check In/Out, and live map load for an assigned driver.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s47</td>
+    <td>Step 47</td>
+    <td>Students assigned to classes (and campus if used)<div class="note-inline">Class assignment works. Campus as its own entity is not shipped.</div></td>
+    <td>Web admin</td>
+    <td>Students / Classes: assign a student to a class. There is no Campus module to assign.</td>
+    <td><span class="pill partial">Partial</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s48</td>
+    <td>Step 48</td>
+    <td>Routes, ordered stops, bus and driver assignment</td>
+    <td>Web admin</td>
+    <td>Routes + Stops + Trip Scheduling. Build one full chain: route → stops → bus → driver → students.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s49</td>
+    <td>Step 49</td>
+    <td>Students linked to parents for visibility</td>
+    <td>Web admin</td>
+    <td>Student profile: attach parent. Parent login on mobile should list that child.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s50a</td>
+    <td>Step 50</td>
+    <td>Schedule types: ONE_TIME, EVERY_DAY, WEEKDAYS, CUSTOM_DAYS</td>
+    <td>Web admin</td>
+    <td>More → Trip Scheduling. Create one of each type, Save, confirm instances on Trips.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s50b</td>
+    <td>Step 50</td>
+    <td>Each date generates its own Trip Instance / Trip ID</td>
+    <td>Web admin</td>
+    <td>Weekday schedule → Trips list shows a different trip code per day.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s50c</td>
+    <td>Step 50</td>
+    <td>Morning / afternoon / evening, direction, bus, driver, route, students, time</td>
+    <td>Web admin</td>
+    <td>Trip Scheduling form: period, direction (home→school / school→home), time, bus, driver, students. Save.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s50d</td>
+    <td>Step 50</td>
+    <td>Multiple morning and afternoon trips for the same bus when conflicts pass</td>
+    <td>Web admin</td>
+    <td>Two morning schedules, same bus, different times. Both instances generate. Overlapping same period should be blocked.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s50e</td>
+    <td>Step 50</td>
+    <td>Edit scope: this trip only / this and future / entire series</td>
+    <td>Web admin</td>
+    <td>Trip Scheduling: edit a series, choose scope (this / future / entire), save. Check Trips for what changed.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s50f</td>
+    <td>Step 50</td>
+    <td>Date exceptions cancel or override a generated trip</td>
+    <td>Web admin</td>
+    <td>Trip Scheduling → exceptions on a schedule. SKIP a date or override bus/driver. Confirm Trips for that date.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s50g</td>
+    <td>Step 50</td>
+    <td>Holiday exclusions cancel generated trips</td>
+    <td>Web admin</td>
+    <td>Trip Scheduling → holidays. Add a holiday date. That day’s scheduled instances should cancel.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s50h</td>
+    <td>Step 50</td>
+    <td>Driver and bus overlap / period conflict protection</td>
+    <td>Web admin</td>
+    <td>Assign the same driver (or bus) to two trips in the same period/time. Save should error with the conflicting trip code.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s50i</td>
+    <td>Step 50</td>
+    <td>Completed history not silently rewritten by series edits</td>
+    <td>Web admin</td>
+    <td>Complete a past instance, then edit the recurring schedule. That completed trip must keep its old times/status.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s51a</td>
+    <td>Step 51</td>
+    <td>Today’s trips lists assigned instances</td>
+    <td>Mobile · driver</td>
+    <td>Driver Home and Trips tab. Every assigned instance for today is listed (not a generic morning flag).</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s51b</td>
+    <td>Step 51</td>
+    <td>Driver starts/ends the correct Trip ID (morning / afternoon / evening)</td>
+    <td>Mobile · driver</td>
+    <td>Start the morning instance, complete it, then start the evening instance. Admin Trips must show two different IDs.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s51c</td>
+    <td>Step 51</td>
+    <td>Cancelled, completed, or already-active trips cannot be started</td>
+    <td>Mobile · driver</td>
+    <td>Try Start on a completed or cancelled card. Try starting a second trip while one is active. Expect a clear error or resume of the active trip.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s51d</td>
+    <td>Step 51</td>
+    <td>Only the assigned driver can operate the trip</td>
+    <td>Mobile · driver</td>
+    <td>Log in as a different driver. The trip must not appear as operable. Admin can still view it on web.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s51e</td>
+    <td>Step 51</td>
+    <td>Check-in / check-out stored on that Trip ID</td>
+    <td>Mobile · driver</td>
+    <td>Check in student A on trip 1. Complete. On trip 2 the same student starts pending again. Admin attendance is per Trip ID.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s51f</td>
+    <td>Step 51</td>
+    <td>Evening: board at school as a full list, then start; parents notified after start</td>
+    <td>Mobile · driver</td>
+    <td>Home → Open live · check in. Check In/Out shows School and every student, not one home stop at a time. Mark who boarded (X if not coming). Start trip. Parents of boarded kids get notified.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s51g</td>
+    <td>Step 51</td>
+    <td>Block end-trip while students still have open check-ins<div class="note-inline">Pending check-outs are shown. Confirm hard block on End Trip with QA.</div></td>
+    <td>Mobile · driver</td>
+    <td>With students still on the bus, tap End Trip. Confirm whether the app blocks or only warns. Pending check-outs show on Home overview.</td>
+    <td><span class="pill partial">Partial</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s51h</td>
+    <td>Step 51</td>
+    <td>Start/end GPS stored when the device allows location</td>
+    <td>Mobile · driver</td>
+    <td>Allow location. Start and end a trip. Admin trip detail / live history shows coordinates.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s52a</td>
+    <td>Step 52</td>
+    <td>Executive dashboard: scheduled, completed, in progress, cancelled, duration, delay, attendance</td>
+    <td>Web admin</td>
+    <td>Reports &amp; Analytics home. Check the summary cards against Trips for the same date range.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s52b</td>
+    <td>Step 52</td>
+    <td>Trip instance report with ID, date, type, direction, bus, driver, route, times, status</td>
+    <td>Web admin</td>
+    <td>Reports → trip instance table. Spot-check one row against Trips.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s52c</td>
+    <td>Step 52</td>
+    <td>Student attendance per Trip ID with check-in/out times</td>
+    <td>Web admin</td>
+    <td>Reports / Attendance for a finished trip. Times should match driver check-in/out.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s52d</td>
+    <td>Step 52</td>
+    <td>Driver, bus and route performance views</td>
+    <td>Web admin</td>
+    <td>Reports: open driver, bus, and route sections. Numbers should match completed trips.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s52e</td>
+    <td>Step 52</td>
+    <td>Schedule exceptions visible with trips</td>
+    <td>Web admin</td>
+    <td>Trips list / scheduling exceptions. A skipped holiday date should not look like a normal completed run.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s52f</td>
+    <td>Step 52</td>
+    <td>CSV export for major reports</td>
+    <td>Web admin</td>
+    <td>Reports → export CSV. Open the file and confirm Trip IDs and counts.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>s52g</td>
+    <td>Step 52</td>
+    <td>Reports are read-only</td>
+    <td>Web admin</td>
+    <td>On Reports, there is no edit/save that changes a trip. After viewing, Trips status is unchanged.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>lt1</td>
+    <td>Live Tracking</td>
+    <td>Top-level Live Tracking menu, separate from scheduling and reports</td>
+    <td>Web admin</td>
+    <td>Left nav → Live Tracking. Not inside Trip Scheduling or Reports.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>lt2</td>
+    <td>Live Tracking</td>
+    <td>Buses on in-progress (and boarding) instances on a live map</td>
+    <td>Web admin</td>
+    <td>With a driver on live/boarding, open Live Tracking. The bus is on the map. Completed buses are absent.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>lt3</td>
+    <td>Live Tracking</td>
+    <td>Bus plate, driver, trip ID, type, direction, route</td>
+    <td>Web admin</td>
+    <td>Select the bus on Live Tracking. Side panel shows plate, driver, trip code, period/direction, route.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>lt4</td>
+    <td>Live Tracking</td>
+    <td>Start time, last GPS, trip status, check-in/out counts</td>
+    <td>Web admin</td>
+    <td>Same panel: start/boarding time, last update, status, student counts.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>lt5</td>
+    <td>Live Tracking</td>
+    <td>Select a bus / open current trip details</td>
+    <td>Web admin</td>
+    <td>Click the bus or Open live / trip link. Trip instance or map focus updates.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>lt6</td>
+    <td>Live Tracking</td>
+    <td>GPS refreshes; last known position if a ping is late</td>
+    <td>Web admin</td>
+    <td>Watch the marker while the driver moves. Pause the driver app briefly — last pin remains until a new ping.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>lt7</td>
+    <td>Live Tracking</td>
+    <td>Completed trips leave the live map and stay in history/reports</td>
+    <td>Web admin</td>
+    <td>End the trip on the driver app. Live Tracking drops the bus. Trips + Reports still have the instance.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>nav1</td>
+    <td>Navigation</td>
+    <td>Dashboard, Students, Parents, Classes, Transport, Live Tracking, Reports, Notifications, Users, Settings</td>
+    <td>Web admin</td>
+    <td>Walk the left sidebar. Open each item once.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>nav2</td>
+    <td>Navigation</td>
+    <td>Transport: Buses, Drivers, Routes, Stops, Trip Scheduling, Trip Instances</td>
+    <td>Web admin</td>
+    <td>Buses, Drivers, Routes, Stops, More → Trip Scheduling, Trips.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>sa1</td>
+    <td>Super Admin</td>
+    <td>Login as platform Super Admin</td>
+    <td>Web · Super Admin</td>
+    <td>Login admin@schooltracker.test / password123. Lands on Super Admin Dashboard with live school/user/bus/route counts.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>sa2</td>
+    <td>Super Admin</td>
+    <td>Admit a school with map pin, plan, and school admin</td>
+    <td>Web · Super Admin</td>
+    <td>Schools → Admit a school. Set name, pin on the map, plan, pending status, admin name/email/password. Save. School appears in the table.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>sa3</td>
+    <td>Super Admin</td>
+    <td>Approve pending school; suspend / reinstate</td>
+    <td>Web · Super Admin</td>
+    <td>Approve a pending school — school admin can then sign in. Suspend — that admin cannot sign in. Reinstate restores access.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>sa4</td>
+    <td>Super Admin</td>
+    <td>Change subscription plan</td>
+    <td>Web · Super Admin</td>
+    <td>Schools or Subscriptions: change plan (trial/basic/standard/premium). Dashboard donut updates from live counts.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>sa5</td>
+    <td>Super Admin</td>
+    <td>Issue invoice and mark paid</td>
+    <td>Web · Super Admin</td>
+    <td>Invoices → create for a school → Mark paid. Payments lists it. Dashboard Monthly Revenue uses paid invoices this month (KES 0 until then).</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>sa6</td>
+    <td>Super Admin</td>
+    <td>Users and built-in roles</td>
+    <td>Web · Super Admin</td>
+    <td>Users: search, filter role, disable/enable. Roles &amp; Permissions lists the five built-in roles with live counts (cannot invent a new role without a code change).</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>sa7</td>
+    <td>Super Admin</td>
+    <td>Audit Logs, Activity Logs, System Settings, Health</td>
+    <td>Web · Super Admin</td>
+    <td>Admit a school then open Audit Logs. Activity Logs mix audits and new users/schools. Settings saves platform name. Health shows API, DB ping, heap, sockets — not a fake 4 TB disk.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>sa8</td>
+    <td>Super Admin</td>
+    <td>Support tickets, announcements, feature requests</td>
+    <td>Web · Super Admin</td>
+    <td>Create a ticket and change status. Publish an announcement (fans out to active/trial school noticeboards). Log a feature request and set planned/done.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+<tr>
+    <td>sa9</td>
+    <td>Super Admin</td>
+    <td>Nav matches platform shell (not under School Settings)</td>
+    <td>Web · Super Admin</td>
+    <td>Sidebar: Dashboard, Schools, Admins, Subscriptions, Payments, Invoices, Users, Roles, Settings, Audit, Activity, Tickets, Announcements, Feature Requests, System Health.</td>
+    <td><span class="pill yes">Yes</span></td>
+    <td></td>
+    <td></td>
+  </tr>
+      </tbody>
+    </table>
+
+    <div class="sign">
+      <div class="line">QA engineer name / date / sign-off</div>
+      <div class="line">School / platform admin sign-off / date</div>
+    </div>
+    <p class="footer">SchoolKids Tracker · Transport Management System v1.0.0 · 20 Aug 2026 · 91 checks (87 Yes, 3 Partial, 1 No)</p>
+  </div>
+</body>
+</html>

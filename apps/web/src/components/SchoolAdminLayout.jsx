@@ -33,7 +33,6 @@ const extraItems = [
   { to: '/school-admin/examinations', label: 'Examinations', icon: 'reports' },
   { to: '/school-admin/assignments', label: 'Assignments', icon: 'reports' },
   { to: '/school-admin/attendance/bulk', label: 'Bulk Attendance', icon: 'attendance' },
-  { to: '/school-admin/handover', label: 'Handover & QA', icon: 'reports' },
 ];
 
 const pageMeta = {
@@ -61,7 +60,6 @@ const pageMeta = {
   '/school-admin/assignments': { title: 'Assignments', crumbs: ['Dashboard', 'Assignments'] },
   '/school-admin/attendance': { title: 'Attendance', crumbs: ['Dashboard', 'Attendance'] },
   '/school-admin/attendance/bulk': { title: 'Bulk Attendance', crumbs: ['Dashboard', 'Attendance', 'Bulk Attendance'] },
-  '/school-admin/handover': { title: 'Handover & QA', crumbs: ['Dashboard', 'Settings', 'Handover & QA'] },
   '/school-admin/leave-requests': { title: 'Leave Requests' },
   '/school-admin/noticeboard': { title: 'Noticeboard' },
 };
@@ -447,6 +445,12 @@ export default function SchoolAdminLayout() {
               <span>{item.label}</span>
             </NavLink>
           ))}
+          <a className="sa-nav-link" href="/handover.html" target="_blank" rel="noreferrer" title="Handover & QA">
+            <span className="sa-nav-icon" aria-hidden="true">
+              <NavIcon name="reports" />
+            </span>
+            <span>Handover &amp; QA</span>
+          </a>
           <NavLink to="/school-admin/school" className="sa-nav-link" title="Settings">
             <span className="sa-nav-icon" aria-hidden="true">
               <NavIcon name="settings" />

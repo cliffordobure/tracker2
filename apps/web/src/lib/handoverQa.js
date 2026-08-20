@@ -8,23 +8,31 @@ export const HANDOVER_DATE = '20 Aug 2026';
 export const HANDOVER_SECTIONS = [
   {
     heading: '1. Purpose',
-    body: 'Consolidated handover for Admin, Driver App, scheduling, live tracking and reporting. Use this paper with the live school-admin console. Stack in this project: Node.js/Express, MongoDB, React (web) and Flutter (driver/parent apps).',
+    body: 'Consolidated handover for Super Admin (admit schools), School Admin, Driver App, scheduling, live tracking and reporting. This paper lives at /handover.html (web public folder). Stack: Node.js/Express, MongoDB, React (Vite web) and Flutter (driver/parent/teacher). Product version v1.0.0.',
   },
   {
     heading: 'Where to test',
-    body: 'Web admin is the school-admin site (Dashboard, Students, Transport, Live Tracking, Reports, Settings). Mobile driver is the Flutter driver app (Home, Check In/Out, My Route, Trips, live map). Mobile parent is the Flutter parent app. Some checks need both: admin schedules the trip, driver runs it, parent/admin watch live.',
+    body: 'Super Admin is /super-admin (login admin@schooltracker.test / password123). School admin is the school-admin site (Dashboard, Students, Transport, Live Tracking, Reports, Settings). Mobile driver is the Flutter driver app. Mobile parent is the Flutter parent app. Some checks need both: admin schedules the trip, driver runs it, parent/admin watch live.',
   },
   {
-    heading: '5. Critical trip architecture',
-    body: 'Recurring Schedule → Trip Instances → Driver execution → GPS → Check-in → Check-out → Complete. Live Tracking while the instance is active or boarding. Reports after execution. Historical completed trips are not rewritten by schedule edits.',
+    heading: 'Super Admin — admit schools',
+    body: 'Super Admin creates a school (name, map pin, plan) and optional school-admin account. New schools start pending until Approve. Suspend disables that school’s admin login. Dashboard KPIs and health use live database counts (not mock numbers). Platform invoices/payments stay at KES 0 until an invoice is issued and marked paid.',
   },
   {
-    heading: '10. API boundaries (this project)',
-    body: 'Admin scheduling /api/admin/trip-schedules and /api/admin/trip-instances. Driver /api/driver/trips and /api/trips. Reports /api/admin/reports. Live tracking /api/admin/live-tracking. Shared JWT auth and role checks on the server.',
+    heading: 'Critical trip architecture',
+    body: 'Recurring Schedule → Trip Instances → Driver execution → GPS → Check-in → Check-out → Complete. Live Tracking while the instance is active or boarding. Reports after execution. Historical completed trips are not rewritten by schedule edits. Evening: parents are not notified until the child is checked in and the trip is started.',
   },
   {
-    heading: '11. Technology note',
-    body: 'The reference package described PostgreSQL. This school tracker uses MongoDB with the same functional relationships (school, student, parent, bus, driver, route, stop, schedule, trip instance, attendance, GPS).',
+    heading: 'API boundaries',
+    body: 'Super Admin /api/admin/platform/*. School admin /api/admin/trip-schedules, /api/admin/trip-instances, /api/admin/reports, /api/admin/live-tracking. Driver /api/driver/trips and /api/trips. Shared JWT auth and role checks on the server.',
+  },
+  {
+    heading: 'Technology note',
+    body: 'The reference package described PostgreSQL. This school tracker uses MongoDB with the same functional relationships (school, student, parent, bus, driver, route, stop, schedule, trip instance, attendance, GPS). Super Admin audit logs are stored in AuditLog.',
+  },
+  {
+    heading: 'Known gaps (do not mark Developer Yes)',
+    body: 'No Campus module. School-admin has an Enable audit logs flag but no school-level Audit Logs screen (Super Admin does have Audit Logs and Activity Logs). End Trip with students still checked in is Partial — confirm a hard block with QA. Pickup and drop-off use one home stop per student.',
   },
 ];
 
@@ -34,7 +42,7 @@ function row(id, area, test, developer, where, procedure, note = '') {
 
 export const QA_ROWS = [
   row('s01', 'Step 1', 'Project foundation: apps (web, mobile, server), env, API, deployable layout', 'Yes', 'Server', 'Confirm web, Flutter apps/mobile, and server start with the project .env. No UI click-path.'),
-  row('s02', 'Step 2', 'Secure login, logout, password handling, role-based home', 'Yes', 'Web + Mobile', 'Web: open /login as school admin, driver, parent, teacher — each lands on its home. Mobile: same accounts on the Flutter login. Sign out from Settings / More.'),
+  row('s02', 'Step 2', 'Secure login, logout, password handling, role-based home', 'Yes', 'Web + Mobile', 'Web: open /login. Super Admin (admin@schooltracker.test) lands on /super-admin. School admin, driver, parent, teacher each land on their home. Mobile: Flutter login for school roles. Sign out from the shell.'),
   row('s03', 'Step 3', 'Users & Roles: create and manage school users and roles', 'Yes', 'Web admin', 'School admin → Users & Roles. Create a user, set role, save. Confirm they can log in.'),
   row('s04', 'Step 4', 'School profile and transport configuration', 'Yes', 'Web admin', 'School admin → Settings → School Profile and Transport Settings. Change a field, Save, reload.'),
   row('s05', 'Step 5', 'Multiple campuses as a first-class Campus module', 'No', 'Web admin', 'There is no Campuses menu. Classes exist under More → Classes. Record as gap unless a campus screen is added.', 'Classes exist. A dedicated Campuses screen is not in this build.'),
@@ -72,7 +80,7 @@ export const QA_ROWS = [
   row('s37', 'Step 37', 'Backend APIs for core transport entities', 'Yes', 'Server', 'Smoke: login, load dashboard, trips, live-tracking, driver today. Failures show as API errors in the UI.'),
   row('s38', 'Step 38', 'Database entities and relationships', 'Yes', 'Server', 'Create a schedule with bus, driver, students; generate instances. Confirm related records stay linked.', 'MongoDB models, not PostgreSQL tables.'),
   row('s39', 'Step 39', 'Server-side auth and role-protected endpoints', 'Yes', 'Web + Mobile', 'Open an admin URL while logged in as parent — redirect. Driver cannot open school-admin. Logged-out user hits /login.'),
-  row('s40', 'Step 40', 'Dedicated audit log of admin/operational changes', 'No', 'Web admin', 'Settings → System has Enable audit logs. There is no Audit Logs page with a change history yet.', 'Settings has an Enable audit logs flag. A full activity log screen is not recorded yet.'),
+  row('s40', 'Step 40', 'Dedicated audit log of admin/operational changes', 'Partial', 'Web · Super Admin', 'Super Admin → Audit Logs and Activity Logs show live platform changes (admit school, plan, invoices). School Settings still only has an Enable audit logs flag — no school-level history screen.', 'Platform audit works. School-admin change history is not a dedicated screen.'),
   row('s41', 'Step 41', 'Admin reports for trips, students, drivers, buses, routes', 'Yes', 'Web admin', 'Reports & Analytics. Open executive cards and at least one trip/attendance report.'),
   row('s42', 'Step 42', 'Search and filter on admin transport lists', 'Yes', 'Web admin', 'Students, Drivers, Buses, Routes, Trips: use the top search and status/date filters.'),
   row('s43', 'Step 43', 'Validation, API errors, operator feedback', 'Yes', 'Web + Mobile', 'Submit an empty required form on admin. On driver, start an evening trip with zero check-ins — error, not a silent start.'),
@@ -115,4 +123,13 @@ export const QA_ROWS = [
   row('lt7', 'Live Tracking', 'Completed trips leave the live map and stay in history/reports', 'Yes', 'Web admin', 'End the trip on the driver app. Live Tracking drops the bus. Trips + Reports still have the instance.'),
   row('nav1', 'Navigation', 'Dashboard, Students, Parents, Classes, Transport, Live Tracking, Reports, Notifications, Users, Settings', 'Yes', 'Web admin', 'Walk the left sidebar. Open each item once.'),
   row('nav2', 'Navigation', 'Transport: Buses, Drivers, Routes, Stops, Trip Scheduling, Trip Instances', 'Yes', 'Web admin', 'Buses, Drivers, Routes, Stops, More → Trip Scheduling, Trips.'),
+  row('sa1', 'Super Admin', 'Login as platform Super Admin', 'Yes', 'Web · Super Admin', 'Login admin@schooltracker.test / password123. Lands on Super Admin Dashboard with live school/user/bus/route counts.'),
+  row('sa2', 'Super Admin', 'Admit a school with map pin, plan, and school admin', 'Yes', 'Web · Super Admin', 'Schools → Admit a school. Set name, pin on the map, plan, pending status, admin name/email/password. Save. School appears in the table.'),
+  row('sa3', 'Super Admin', 'Approve pending school; suspend / reinstate', 'Yes', 'Web · Super Admin', 'Approve a pending school — school admin can then sign in. Suspend — that admin cannot sign in. Reinstate restores access.'),
+  row('sa4', 'Super Admin', 'Change subscription plan', 'Yes', 'Web · Super Admin', 'Schools or Subscriptions: change plan (trial/basic/standard/premium). Dashboard donut updates from live counts.'),
+  row('sa5', 'Super Admin', 'Issue invoice and mark paid', 'Yes', 'Web · Super Admin', 'Invoices → create for a school → Mark paid. Payments lists it. Dashboard Monthly Revenue uses paid invoices this month (KES 0 until then).'),
+  row('sa6', 'Super Admin', 'Users and built-in roles', 'Yes', 'Web · Super Admin', 'Users: search, filter role, disable/enable. Roles & Permissions lists the five built-in roles with live counts (cannot invent a new role without a code change).'),
+  row('sa7', 'Super Admin', 'Audit Logs, Activity Logs, System Settings, Health', 'Yes', 'Web · Super Admin', 'Admit a school then open Audit Logs. Activity Logs mix audits and new users/schools. Settings saves platform name. Health shows API, DB ping, heap, sockets — not a fake 4 TB disk.'),
+  row('sa8', 'Super Admin', 'Support tickets, announcements, feature requests', 'Yes', 'Web · Super Admin', 'Create a ticket and change status. Publish an announcement (fans out to active/trial school noticeboards). Log a feature request and set planned/done.'),
+  row('sa9', 'Super Admin', 'Nav matches platform shell (not under School Settings)', 'Yes', 'Web · Super Admin', 'Sidebar: Dashboard, Schools, Admins, Subscriptions, Payments, Invoices, Users, Roles, Settings, Audit, Activity, Tickets, Announcements, Feature Requests, System Health.'),
 ];

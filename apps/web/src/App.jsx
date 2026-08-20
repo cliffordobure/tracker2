@@ -51,7 +51,6 @@ import Examinations from './pages/admin/Examinations';
 import AssignmentsAdmin from './pages/admin/AssignmentsAdmin';
 import Attendance from './pages/admin/Attendance';
 import BulkAttendance from './pages/admin/BulkAttendance';
-import HandoverQA from './pages/admin/HandoverQA';
 import ComingSoon from './pages/admin/ComingSoon';
 import DriverHome from './pages/driver/DriverHome';
 import ParentHome from './pages/parent/ParentHome';
@@ -150,7 +149,7 @@ export default function App() {
         <Route path="assignments" element={<AssignmentsAdmin />} />
         <Route path="attendance" element={<Attendance />} />
         <Route path="attendance/bulk" element={<BulkAttendance />} />
-        <Route path="handover" element={<HandoverQA />} />
+        <Route path="handover" element={<PublicHandoverRedirect />} />
         <Route path="coming-soon/:feature" element={<ComingSoon />} />
         <Route path="dispatch" element={<Navigate to="/school-admin/trip-scheduling" replace />} />
       </Route>
@@ -199,6 +198,13 @@ export default function App() {
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
+}
+
+function PublicHandoverRedirect() {
+  if (typeof window !== 'undefined') {
+    window.location.replace('/handover.html');
+  }
+  return <div className="loading-screen">Opening handover…</div>;
 }
 
 function HomeRedirect() {

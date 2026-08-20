@@ -255,6 +255,12 @@ export default function SuperAdminLayout() {
               ))}
             </div>
           ))}
+          <a className="sa-nav-link" href="/handover.html" target="_blank" rel="noreferrer" title="Handover & QA">
+            <span className="sa-nav-icon">
+              <NavIcon name="audit" />
+            </span>
+            {!collapsed && <span>Handover &amp; QA</span>}
+          </a>
         </nav>
 
         <div className="sa-sidebar-foot">
