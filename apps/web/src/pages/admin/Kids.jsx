@@ -90,6 +90,7 @@ export default function Kids() {
   const [routes, setRoutes] = useState([]);
   const [parents, setParents] = useState([]);
   const [school, setSchool] = useState(null);
+  const [schoolClasses, setSchoolClasses] = useState([]);
   const [mode, setMode] = useState('create');
   const [panel, setPanel] = useState(null);
   const [viewing, setViewing] = useState(null);
@@ -124,17 +125,19 @@ export default function Kids() {
   const [photo, setPhoto] = useState(null);
 
   const load = async () => {
-    const [k, r, p, s] = await Promise.all([
+    const [k, r, p, s, cls] = await Promise.all([
       api('/admin/kids'),
       api('/admin/routes'),
       api('/admin/parents'),
       api('/admin/schools'),
+      api('/admin/classes').catch(() => ({ classes: [] })),
     ]);
     setKids(k.kids || []);
     setStats(k.stats || null);
     setRoutes(r.routes || []);
     setParents(p.parents || []);
     setSchool(s.schools[0] || null);
+    setSchoolClasses(cls.classes || []);
     setRouteId((id) => id || r.routes[0]?._id || '');
     if (s.schools[0]?.location) {
       setBoarding((b) => ({
@@ -349,10 +352,21 @@ export default function Kids() {
   };
   const canSaveEdit = () => Boolean(name.trim() && routeId && boarding.lat != null && boarding.lng != null);
 
-  const grades = useMemo(
-    () => [...new Set(kids.map((k) => k.grade).filter(Boolean))].sort(),
-    [kids]
-  );
+  const grades = useMemo(() => {
+    const fromClasses = schoolClasses.map((c) => c.grade).filter(Boolean);
+    const fromKids = kids.map((k) => k.grade).filter(Boolean);
+    return [...new Set([...fromClasses, ...fromKids])].sort();
+  }, [kids, schoolClasses]);
+
+  const sectionOptions = useMemo(() => {
+    if (!grade) return [];
+    const fromClass = schoolClasses
+      .filter((c) => c.grade === grade)
+      .map((c) => c.section)
+      .filter(Boolean);
+    const fromKids = kids.filter((k) => k.grade === grade).map((k) => k.section).filter(Boolean);
+    return [...new Set([...fromClass, ...fromKids])].sort();
+  }, [grade, kids, schoolClasses]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -792,13 +806,61 @@ export default function Kids() {
               <div className="sa-stu-form-row">
                 <label className="sa-field">
                   <span>Class / grade</span>
-                  <input value={grade} onChange={(e) => setGrade(e.target.value)} placeholder="e.g. Grade 5" />
+                  <select
+                    value={grade}
+                    onChange={(e) => {
+                      const nextGrade = e.target.value;
+                      setGrade(nextGrade);
+                      const klass = schoolClasses.find((c) => c.grade === nextGrade);
+                      if (klass?.section) {
+                        setSection(klass.section);
+                        return;
+                      }
+                      const kidSections = [
+                        ...new Set(
+                          kids
+                            .filter((k) => k.grade === nextGrade)
+                            .map((k) => k.section)
+                            .filter(Boolean)
+                        ),
+                      ].sort();
+                      setSection(kidSections[0] || '');
+                    }}
+                  >
+                    <option value="">Select class</option>
+                    {grade && !schoolClasses.some((c) => c.grade === grade) ? (
+                      <option value={grade}>{grade}</option>
+                    ) : null}
+                    {schoolClasses.map((c) => (
+                      <option key={c.id} value={c.grade}>
+                        {c.grade}
+                        {c.classCode ? ` (${c.classCode})` : ''}
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <label className="sa-field">
                   <span>Section</span>
-                  <input value={section} onChange={(e) => setSection(e.target.value)} placeholder="e.g. A" />
+                  <select
+                    value={section}
+                    disabled={!grade}
+                    onChange={(e) => setSection(e.target.value)}
+                  >
+                    <option value="">{grade ? 'Select section' : 'Select class first'}</option>
+                    {section && !sectionOptions.includes(section) ? (
+                      <option value={section}>{section}</option>
+                    ) : null}
+                    {sectionOptions.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
                 </label>
               </div>
+              {!schoolClasses.length ? (
+                <p className="hint">No classes found. Add classes under Classes before assigning students.</p>
+              ) : null}
               <div className="sa-stu-form-row">
                 <label className="sa-field">
                   <span>Gender</span>
