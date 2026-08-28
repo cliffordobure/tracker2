@@ -2,6 +2,21 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  AlignmentType,
+  BorderStyle,
+  Document,
+  HeadingLevel,
+  Packer,
+  Paragraph,
+  ShadingType,
+  Table,
+  TableCell,
+  TableRow,
+  TextRun,
+  VerticalAlign,
+  WidthType,
+} from 'docx';
+import {
   HANDOVER_DATE,
   HANDOVER_SECTIONS,
   HANDOVER_SUBTITLE,
@@ -12,6 +27,12 @@ import {
 
 const root = dirname(fileURLToPath(import.meta.url));
 const outPath = join(root, '../public/handover.html');
+const docxPath = join(root, '../public/handover.docx');
+const DOCX_FILENAME = 'School-Bus-Tracker-Handover.docx';
+
+const PURPLE = '5D3FD3';
+const BORDER = { style: BorderStyle.SINGLE, size: 1, color: 'CBD5E1' };
+const CELL_BORDERS = { top: BORDER, bottom: BORDER, left: BORDER, right: BORDER };
 
 function esc(value) {
   return String(value ?? '')
@@ -60,6 +81,142 @@ const qaRows = QA_ROWS.map(
   </tr>`
 ).join('\n');
 
+function docCell(text, { header = false, bold = false, size = 16 } = {}) {
+  return new TableCell({
+    borders: CELL_BORDERS,
+    verticalAlign: VerticalAlign.TOP,
+    shading: header ? { fill: PURPLE, type: ShadingType.CLEAR } : undefined,
+    children: [
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: String(text ?? ''),
+            bold: header || bold,
+            color: header ? 'FFFFFF' : undefined,
+            size,
+          }),
+        ],
+      }),
+    ],
+  });
+}
+
+function docTable(headers, rows, cellSize = 14) {
+  return new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    rows: [
+      new TableRow({ children: headers.map((h) => docCell(h, { header: true, size: 15 })) }),
+      ...rows.map((cells) => new TableRow({ children: cells.map((c) => docCell(c, { size: cellSize })) })),
+    ],
+  });
+}
+
+function docHeading(text) {
+  return new Paragraph({
+    heading: HeadingLevel.HEADING_2,
+    spacing: { before: 280, after: 120 },
+    children: [new TextRun({ text, bold: true, color: PURPLE, size: 26 })],
+  });
+}
+
+function docBody(text) {
+  return new Paragraph({
+    spacing: { after: 120 },
+    children: [new TextRun({ text, size: 20 })],
+  });
+}
+
+async function writeDocx() {
+  const gapTableRows = gaps.map((r) => [
+    r.id,
+    r.area,
+    r.test,
+    r.developer,
+    r.note || r.procedure || '',
+  ]);
+  const qaTableRows = QA_ROWS.map((r) => [
+    r.id,
+    r.area,
+    `${r.test}${r.note ? `\n${r.note}` : ''}`,
+    r.where,
+    r.procedure,
+    r.developer,
+    '',
+    '',
+  ]);
+
+  const doc = new Document({
+    creator: 'SchoolKids Tracker',
+    title: `${HANDOVER_TITLE} — Handover & QA`,
+    description: HANDOVER_SUBTITLE,
+    sections: [
+      {
+        properties: {
+          page: {
+            margin: { top: 720, right: 720, bottom: 720, left: 720 },
+          },
+        },
+        children: [
+          new Paragraph({
+            heading: HeadingLevel.TITLE,
+            children: [new TextRun({ text: HANDOVER_TITLE, bold: true, color: PURPLE, size: 40 })],
+          }),
+          new Paragraph({
+            spacing: { after: 160 },
+            children: [
+              new TextRun({ text: HANDOVER_SUBTITLE, size: 22, color: '64748B' }),
+            ],
+          }),
+          docBody(
+            `${HANDOVER_VERSION} · ${HANDOVER_DATE}\nSuper Admin login: admin@schooltracker.test / password123`
+          ),
+          new Paragraph({
+            spacing: { before: 120, after: 200 },
+            children: [
+              new TextRun({ text: `${QA_ROWS.length} checks`, bold: true, size: 22 }),
+              new TextRun({ text: `  ·  ${yes} Developer Yes  ·  ${partial} Partial  ·  ${no} Not in build`, size: 22 }),
+            ],
+          }),
+          ...HANDOVER_SECTIONS.flatMap((s) => [docHeading(s.heading), docBody(s.body)]),
+          docHeading('Remaining gaps'),
+          docBody('Only these items are not Developer Yes. QA should still re-test the Yes rows.'),
+          docTable(['ID', 'Area', 'Item', 'Dev', 'Note'], gapTableRows),
+          docHeading('QA test paper'),
+          docBody(
+            'Developer column is pre-filled for this build. QA marks Yes / No / Blocked after testing and writes a comment.'
+          ),
+          docTable(
+            ['ID', 'Area', 'Test', 'Where', 'Procedure', 'Developer', 'QA', 'Comment'],
+            qaTableRows,
+            12
+          ),
+          new Paragraph({ spacing: { before: 360 } }),
+          new Paragraph({
+            children: [
+              new TextRun({ text: 'QA engineer name / date / sign-off', size: 20 }),
+              new TextRun({ text: '\t\t\t\tSchool / platform admin sign-off / date', size: 20 }),
+            ],
+          }),
+          new Paragraph({
+            spacing: { before: 280 },
+            alignment: AlignmentType.CENTER,
+            children: [
+              new TextRun({
+                text: `SchoolKids Tracker · Transport Management System ${HANDOVER_VERSION} · ${HANDOVER_DATE}`,
+                size: 16,
+                color: '64748B',
+              }),
+            ],
+          }),
+        ],
+      },
+    ],
+  });
+
+  const buffer = await Packer.toBuffer(doc);
+  await writeFile(docxPath, buffer);
+}
+
 const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -93,7 +250,7 @@ const html = `<!DOCTYPE html>
       border-bottom: 1px solid #e2e8f0;
       padding: 10px 18px;
     }
-    .toolbar button {
+    .toolbar button, .toolbar a.btn {
       background: #5d3fd3;
       color: #fff;
       border: 0;
@@ -101,6 +258,14 @@ const html = `<!DOCTYPE html>
       padding: 8px 14px;
       font-weight: 700;
       cursor: pointer;
+      text-decoration: none;
+      font-size: inherit;
+      display: inline-block;
+    }
+    .toolbar a.btn.secondary {
+      background: #fff;
+      color: #5d3fd3;
+      border: 1px solid #c4b5fd;
     }
     .toolbar span { color: #64748b; font-size: 9.5pt; }
     h1 { font-size: 20pt; margin: 0 0 4px; color: #5d3fd3; }
@@ -178,7 +343,8 @@ const html = `<!DOCTYPE html>
 <body>
   <div class="toolbar no-print">
     <button type="button" onclick="window.print()">Print / Save PDF</button>
-    <span>Use the print dialog → Destination: Save as PDF. Do not use “Microsoft Print to PDF” screenshot mode. Every table row should flow onto the next page.</span>
+    <a class="btn secondary" href="/handover.docx" download="${esc(DOCX_FILENAME)}">Download Word (.docx)</a>
+    <span>Word download opens in Microsoft Word or Google Docs. Use Print for PDF.</span>
   </div>
   <div class="sheet">
     <h1>${esc(HANDOVER_TITLE)}</h1>
@@ -244,4 +410,6 @@ const html = `<!DOCTYPE html>
 
 await mkdir(dirname(outPath), { recursive: true });
 await writeFile(outPath, html, 'utf8');
+await writeDocx();
 console.log(`Wrote ${outPath} (${QA_ROWS.length} rows)`);
+console.log(`Wrote ${docxPath}`);

@@ -9,12 +9,16 @@ import { getIO } from '../socket.js';
 import { EDIT_SCOPES } from '@school-tracker/shared';
 
 function parseDateInput(dateInput) {
-  if (dateInput instanceof Date) return new Date(dateInput);
+  if (dateInput == null || dateInput === '') return new Date();
+  if (dateInput instanceof Date) {
+    return Number.isNaN(dateInput.getTime()) ? new Date() : new Date(dateInput);
+  }
   if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
     const [y, m, d] = dateInput.split('-').map(Number);
     return new Date(y, m - 1, d);
   }
-  return new Date(dateInput);
+  const d = new Date(dateInput);
+  return Number.isNaN(d.getTime()) ? new Date() : d;
 }
 
 export function startOfDay(dateInput) {
@@ -37,9 +41,10 @@ export function dateKey(d) {
 /** Combine serviceDate + HH:mm into a local Date for scheduledFor. */
 export function scheduledForFrom(serviceDate, scheduledTime = '06:30') {
   const d = startOfDay(serviceDate);
+  if (Number.isNaN(d.getTime())) return null;
   const [hh, mm] = String(scheduledTime || '06:30').split(':').map(Number);
   d.setHours(Number.isFinite(hh) ? hh : 6, Number.isFinite(mm) ? mm : 30, 0, 0);
-  return d;
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 function matchesScheduleDay(schedule, date) {

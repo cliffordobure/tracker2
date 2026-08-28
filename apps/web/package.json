@@ -5,12 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "node scripts/write-handover.mjs && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
     "handover": "node scripts/write-handover.mjs"
   },
   "dependencies": {
+    "docx": "^9.7.1",
     "mapbox-gl": "^3.28.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
