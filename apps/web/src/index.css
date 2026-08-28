@@ -511,6 +511,96 @@ th {
 
 .loc-search-field input {
   flex: 1;
+  min-width: 0;
+}
+
+.loc-search-btn {
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 10px;
+  padding: 0.5rem 0.85rem;
+  background: #5d3fd3;
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.loc-search-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.map-picker-wrap {
+  position: relative;
+}
+
+.map-picker-expand {
+  position: absolute;
+  right: 0.65rem;
+  bottom: 0.65rem;
+  z-index: 2;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.95);
+  color: #334155;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.18);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.map-picker-expand:hover {
+  background: #fff;
+  color: #5d3fd3;
+}
+
+.map-picker-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.map-picker-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(15, 23, 42, 0.45);
+  cursor: pointer;
+}
+
+.map-picker-modal-panel {
+  position: relative;
+  z-index: 1;
+  width: min(960px, 100%);
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  background: #fff;
+  border-radius: 16px;
+  padding: 1rem 1rem 1.1rem;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.22);
+  display: grid;
+  gap: 0.75rem;
+}
+
+.map-picker-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.map-picker-modal-head h3 {
+  margin: 0;
+}
+
+.map-picker-modal-map {
+  min-height: min(68vh, 620px);
 }
 
 .loc-search-icon {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { searchPlaces } from '../lib/geocode';
 
 export default function LocationSearch({
@@ -15,14 +15,15 @@ export default function LocationSearch({
   const seqRef = useRef(0);
   const suppressOpenRef = useRef(false);
 
-  useEffect(() => {
-    const q = query.trim();
-    if (q.length < 2) {
-      setResults([]);
-      setError('');
-      return undefined;
-    }
-    const handle = setTimeout(async () => {
+  const runSearch = useCallback(
+    async (rawQuery, { openResults = true } = {}) => {
+      const q = String(rawQuery || '').trim();
+      if (q.length < 2) {
+        setResults([]);
+        setError('');
+        return;
+      }
+
       const seq = ++seqRef.current;
       setBusy(true);
       setError('');
@@ -30,13 +31,17 @@ export default function LocationSearch({
         const places = await searchPlaces(q, { proximity });
         if (seq !== seqRef.current) return;
         setResults(places);
-        if (suppressOpenRef.current) {
-          suppressOpenRef.current = false;
-          setOpen(false);
-        } else {
-          setOpen(true);
+        if (openResults) {
+          if (suppressOpenRef.current) {
+            suppressOpenRef.current = false;
+            setOpen(false);
+          } else {
+            setOpen(true);
+          }
         }
-        if (!places.length) setError('No matching places. Try a nearby estate or road.');
+        if (!places.length) {
+          setError('No matching places. Try the full name (e.g. Kabiria Primary School) or click the map.');
+        }
       } catch (err) {
         if (seq !== seqRef.current) return;
         setResults([]);
@@ -44,9 +49,20 @@ export default function LocationSearch({
       } finally {
         if (seq === seqRef.current) setBusy(false);
       }
-    }, 280);
+    },
+    [proximity?.lat, proximity?.lng]
+  );
+
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) {
+      setResults([]);
+      setError('');
+      return undefined;
+    }
+    const handle = setTimeout(() => runSearch(q), 320);
     return () => clearTimeout(handle);
-  }, [query, proximity?.lat, proximity?.lng]);
+  }, [query, runSearch]);
 
   useEffect(() => {
     const onDoc = (e) => {
@@ -83,13 +99,21 @@ export default function LocationSearch({
             if (e.key === 'Enter') {
               e.preventDefault();
               if (results[0]) pick(results[0]);
+              else runSearch(query, { openResults: true });
             }
             if (e.key === 'Escape') setOpen(false);
           }}
           placeholder={placeholder}
           autoComplete="off"
         />
-        {busy ? <span className="loc-search-busy">Searching…</span> : null}
+        <button
+          type="button"
+          className="loc-search-btn"
+          disabled={busy || query.trim().length < 2}
+          onClick={() => runSearch(query, { openResults: true })}
+        >
+          {busy ? 'Searching…' : 'Search'}
+        </button>
       </div>
       {open && results.length > 0 && (
         <ul className="loc-search-list">

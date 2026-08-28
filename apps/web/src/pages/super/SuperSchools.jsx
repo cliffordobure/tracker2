@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
-import LocationSearch from '../../components/LocationSearch';
-import MapView from '../../components/MapView';
+import LocationMapPicker from '../../components/LocationMapPicker';
 import { Empty, PageFoot, StatusDot, formatDate } from './shared';
 
 const emptyForm = {
@@ -224,27 +223,20 @@ export default function SuperSchools() {
               </select>
             </label>
           </div>
-          <p className="hint">Search a place or click the map to pin the school gate.</p>
-          <LocationSearch
-            proximity={{ lat: Number(form.lat), lng: Number(form.lng) }}
-            placeholder="Search estate, landmark, or area…"
-            onSelect={(place) => {
+          <LocationMapPicker
+            hint="Search a place or click the map to pin the school gate."
+            center={{ lat: Number(form.lat), lng: Number(form.lng) }}
+            focus={mapFocus}
+            stopName={form.name || 'School'}
+            onLocationChange={({ lat, lng, address }) => {
               setForm((f) => ({
                 ...f,
-                lat: place.lat,
-                lng: place.lng,
-                address: f.address.trim() ? f.address : place.placeName || place.name,
+                lat,
+                lng,
+                address: address && !f.address.trim() ? address : f.address,
               }));
-              setMapFocus({ lat: place.lat, lng: place.lng, zoom: 16.4, at: Date.now() });
             }}
-          />
-          <MapView
-            center={{ lat: Number(form.lat), lng: Number(form.lng) }}
-            zoom={13}
-            focus={mapFocus}
-            onMapClick={(loc) => setForm({ ...form, lat: loc.lat, lng: loc.lng })}
-            stops={[{ name: form.name || 'School', type: 'school', location: { lat: Number(form.lat), lng: Number(form.lng) } }]}
-            className="map-canvas pa-map"
+            onFocusChange={setMapFocus}
           />
           <h3>School admin (optional)</h3>
           <label className="sa-field">

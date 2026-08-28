@@ -201,6 +201,14 @@ export default function MapView({
     map.addControl(new mapboxgl.NavigationControl(), 'top-right');
     mapRef.current = map;
 
+    const resizeObserver =
+      typeof ResizeObserver !== 'undefined' && containerRef.current
+        ? new ResizeObserver(() => {
+            map.resize();
+          })
+        : null;
+    resizeObserver?.observe(containerRef.current);
+
     map.on('load', () => {
       mapReadyRef.current = true;
       ensureLayers(map);
@@ -211,6 +219,7 @@ export default function MapView({
     });
 
     return () => {
+      resizeObserver?.disconnect();
       if (animRafRef.current) cancelAnimationFrame(animRafRef.current);
       map.remove();
       mapRef.current = null;
