@@ -2895,17 +2895,67 @@ button.sa-text-link {
   position: fixed;
   inset: 0;
   z-index: 40;
-  background: rgba(15, 23, 42, 0.35);
-  display: grid;
-  place-items: center;
-  padding: 1.5rem;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 1rem 1.25rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .sa-reports-modal .sa-card {
-  width: min(420px, 100%);
+  width: min(480px, 100%);
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  display: grid;
+  gap: 0.85rem;
+  margin: auto;
+  padding: 1.25rem 1.35rem;
+  border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);
+  -webkit-overflow-scrolling: touch;
+}
+.sa-reports-modal .sa-card .sa-reports-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin-top: 0.35rem;
+  padding-top: 0.85rem;
+  background: linear-gradient(to top, #fff 78%, rgba(255, 255, 255, 0));
+  border-top: 1px solid #e2e8f0;
+}
+.sa-reports-modal .sa-modal-head {
+  display: grid;
+  gap: 0.25rem;
+  padding-bottom: 0.15rem;
+}
+.sa-reports-modal .sa-modal-head h3 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+.sa-reports-modal .sa-modal-body {
   display: grid;
   gap: 0.85rem;
 }
-.sa-reports-modal h3 { margin: 0; }
+.sa-reports-modal .sa-modal-grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem;
+}
+@media (max-width: 560px) {
+  .sa-reports-modal .sa-modal-grid2 {
+    grid-template-columns: 1fr;
+  }
+}
+.sa-reports-modal form.sa-card.sa-modal-form {
+  gap: 0;
+}
+.sa-reports-modal form.sa-card.sa-modal-form .sa-modal-body {
+  padding: 0.85rem 0 0.35rem;
+}
+.sa-reports-modal form.sa-card.sa-modal-form .sa-reports-actions {
+  margin-top: 0;
+}
 .sa-reports-kpis.is-fleet .sa-stu-kpi.tint-purple .sa-stu-kpi-icon::before { content: '⛽'; }
 .sa-reports-kpis.is-fleet .sa-stu-kpi.tint-green .sa-stu-kpi-icon::before { content: '💵'; }
 .sa-reports-kpis.is-fleet .sa-stu-kpi.tint-violet .sa-stu-kpi-icon::before { content: '🌿'; }
@@ -4004,8 +4054,6 @@ button.sa-text-link { background: none; border: 0; cursor: pointer; font: inheri
 }
 .sa-reports-modal.sa-wide .sa-card {
   width: min(560px, 100%);
-  max-height: 90vh;
-  overflow: auto;
 }
 .sa-sched-grid {
   display: grid;

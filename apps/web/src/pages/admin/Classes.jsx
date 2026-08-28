@@ -180,64 +180,105 @@ export default function Classes() {
         {!rows.length && <p className="sa-home-empty">No classes stored yet.</p>}
       </article>
       {open && (
-        <div className="sa-reports-modal" role="dialog">
-          <form className="sa-card" onSubmit={save}>
-            <h3>{editing ? 'Edit class' : 'Add class'}</h3>
-            <label>
-              Grade / class name
-              <input required value={form.grade} onChange={(e) => setForm({ ...form, grade: e.target.value })} />
-            </label>
-            <label>
-              Class code
-              <input value={form.classCode} onChange={(e) => setForm({ ...form, classCode: e.target.value })} />
-            </label>
-            <label>
-              Classroom
-              <input value={form.classroom} onChange={(e) => setForm({ ...form, classroom: e.target.value })} />
-            </label>
-            <label>
-              Section
-              <input value={form.section} onChange={(e) => setForm({ ...form, section: e.target.value })} />
-            </label>
-            <label>
-              Academic year
-              <input value={form.academicYear} onChange={(e) => setForm({ ...form, academicYear: e.target.value })} />
-            </label>
-            <label>
-              Class teacher
-              <select value={form.teacherId} onChange={(e) => setForm({ ...form, teacherId: e.target.value })}>
-                <option value="">Not assigned</option>
-                {(data?.teachers || []).map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Assistant
-              <input value={form.assistantName} onChange={(e) => setForm({ ...form, assistantName: e.target.value })} />
-            </label>
-            <label>
-              Capacity
-              <input
-                type="number"
-                min="1"
-                max="80"
-                value={form.capacity}
-                onChange={(e) => setForm({ ...form, capacity: e.target.value })}
-              />
-            </label>
-            <label>
-              Description
-              <textarea rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-            </label>
+        <div className="sa-reports-modal" role="dialog" aria-modal="true" aria-labelledby="class-form-title">
+          <form className="sa-card sa-modal-form" onSubmit={save}>
+            <header className="sa-modal-head">
+              <h3 id="class-form-title">{editing ? 'Edit class' : 'Add class'}</h3>
+              <p className="sa-muted">Define the grade, section, room, and class teacher.</p>
+            </header>
+            <div className="sa-modal-body">
+              <label>
+                Grade / class name
+                <input
+                  required
+                  value={form.grade}
+                  onChange={(e) => setForm({ ...form, grade: e.target.value })}
+                  placeholder="e.g. Grade 4"
+                />
+              </label>
+              <div className="sa-modal-grid2">
+                <label>
+                  Class code
+                  <input
+                    value={form.classCode}
+                    onChange={(e) => setForm({ ...form, classCode: e.target.value })}
+                    placeholder="e.g. G4"
+                  />
+                </label>
+                <label>
+                  Classroom
+                  <input
+                    value={form.classroom}
+                    onChange={(e) => setForm({ ...form, classroom: e.target.value })}
+                    placeholder="e.g. Room 1"
+                  />
+                </label>
+              </div>
+              <div className="sa-modal-grid2">
+                <label>
+                  Section
+                  <input
+                    value={form.section}
+                    onChange={(e) => setForm({ ...form, section: e.target.value })}
+                    placeholder="e.g. A"
+                  />
+                </label>
+                <label>
+                  Academic year
+                  <input
+                    value={form.academicYear}
+                    onChange={(e) => setForm({ ...form, academicYear: e.target.value })}
+                    placeholder={`e.g. ${year}`}
+                  />
+                </label>
+              </div>
+              <label>
+                Class teacher
+                <select value={form.teacherId} onChange={(e) => setForm({ ...form, teacherId: e.target.value })}>
+                  <option value="">Not assigned</option>
+                  {(data?.teachers || []).map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="sa-modal-grid2">
+                <label>
+                  Assistant
+                  <input
+                    value={form.assistantName}
+                    onChange={(e) => setForm({ ...form, assistantName: e.target.value })}
+                    placeholder="Optional"
+                  />
+                </label>
+                <label>
+                  Capacity
+                  <input
+                    type="number"
+                    min="1"
+                    max="80"
+                    value={form.capacity}
+                    onChange={(e) => setForm({ ...form, capacity: e.target.value })}
+                  />
+                </label>
+              </div>
+              <label>
+                Description
+                <textarea
+                  rows={3}
+                  value={form.description}
+                  onChange={(e) => setForm({ ...form, description: e.target.value })}
+                  placeholder="Optional notes about this class"
+                />
+              </label>
+            </div>
             <div className="sa-reports-actions">
               <button type="button" className="sa-btn sa-btn-outline" onClick={() => setOpen(false)}>
                 Cancel
               </button>
               <button className="sa-btn sa-btn-primary" type="submit" disabled={saving}>
-                Save
+                {saving ? 'Saving…' : 'Save class'}
               </button>
             </div>
           </form>
