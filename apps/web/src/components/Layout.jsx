@@ -4,10 +4,11 @@ import { useAuth } from '../context/AuthContext';
 export default function Layout({ navItems, title, rideMode = false }) {
   const { user, logout, toast } = useAuth();
   const location = useLocation();
-  const isRide = rideMode || location.pathname.startsWith('/parent');
+  const isParent = location.pathname.startsWith('/parent');
+  const isRide = (rideMode || isParent) && !isParent;
 
   return (
-    <div className={`app-shell${isRide ? ' app-shell--ride' : ''}`}>
+    <div className={`app-shell${isRide ? ' app-shell--ride' : ''}${isParent ? ' app-shell--parent' : ''}`}>
       {!isRide && (
         <aside className="sidebar">
           <div className="brand">
@@ -44,7 +45,7 @@ export default function Layout({ navItems, title, rideMode = false }) {
             </Link>
           </header>
         )}
-        <div className={`content${isRide ? ' content--ride' : ''}`}>
+        <div className={`content${isRide ? ' content--ride' : ''}${isParent ? ' content--parent' : ''}`}>
           <Outlet />
         </div>
       </main>

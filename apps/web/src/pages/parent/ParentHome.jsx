@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../lib/api';
 import { connectSocket } from '../../lib/socket';
-import MapView from '../../components/MapView';
 import { useAuth } from '../../context/AuthContext';
 import { fetchDrivingRoute, formatEtaMinutes } from '../../lib/directions';
 import {
@@ -11,7 +10,9 @@ import {
   waypointsToTargetStop,
 } from '../../lib/geo';
 import { anyKidOnBus, isKidOnBus } from '../../lib/mapMarkers';
-import { notificationTypeLabel, registerParentWebPush } from '../../lib/webPush';
+import { registerParentWebPush } from '../../lib/webPush';
+import ParentHomeDashboard from './ParentHomeDashboard';
+import ParentLiveScreen from './ParentLiveScreen';
 
 function locFrom(trip) {
   const loc = trip?.latestLocation || trip?.startLocation;
@@ -27,13 +28,16 @@ export default function ParentHome() {
   const [selected, setSelected] = useState(null);
   const [driverLocation, setDriverLocation] = useState(null);
   const [error, setError] = useState('');
+  const [screen, setScreen] = useState('home');
+  const [panel, setPanel] = useState('');
   const [sheetTab, setSheetTab] = useState('ride');
   const [lateNote, setLateNote] = useState('');
   const [lateKidId, setLateKidId] = useState('');
   const [lateBusy, setLateBusy] = useState(false);
   const [schoolFeed, setSchoolFeed] = useState({ attendance: [], assignments: [], notes: [], diary: [] });
-  /** { [kidId]: { durationSec, stopName, purpose, label } } */
   const [etas, setEtas] = useState({});
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
   const selectedRef = useRef(null);
   const etaFetchRef = useRef(0);
 
@@ -60,7 +64,7 @@ export default function ParentHome() {
     ]);
     setKids(k.kids);
     setActive(a.trips);
-    setNotifications(n.notifications);
+    setNotifications(n.notifications || n.list || []);
     setSchoolFeed({
       attendance: s.attendance || [],
       assignments: s.assignments || [],
@@ -106,7 +110,7 @@ export default function ParentHome() {
         if (!has) {
           const next = {
             ...cur,
-            events: [...(cur.events || []), { kidId, type: 'picked_up' }],
+            events: [...(cur.events || []), { kidId, type: 'picked_up', at: new Date().toISOString() }],
           };
           selectedRef.current = next;
           setSelected(next);
@@ -161,11 +165,7 @@ export default function ParentHome() {
     try {
       await api('/parent/late-pickup-request', {
         method: 'POST',
-        body: {
-          kidId,
-          message: lateNote,
-          tripId: selected?.trip?._id,
-        },
+        body: { kidId, message: lateNote, tripId: selected?.trip?._id },
       });
       setLateNote('');
       setLateKidId('');
@@ -179,18 +179,11 @@ export default function ParentHome() {
   };
 
   const onBus = selected ? anyKidOnBus(selected.events, selected.myKids) : false;
-  const statusLabel = !selected
-    ? 'No active trip'
-    : onBus
-      ? 'Live · tracking driver'
-      : 'Trip started — waiting for pickup';
-
   const mapStops = selected
     ? stopsForTripKids(selected.stops, selected.trip.kidIds || selected.myKids || [])
     : [];
   const tripKids = selected?.trip?.kidIds || selected?.myKids || [];
 
-  // Mapbox ETA to each child's next pickup/drop-off along the remaining path
   useEffect(() => {
     if (!selected || !driverLocation?.lat) {
       setEtas({});
@@ -198,10 +191,7 @@ export default function ParentHome() {
     }
     let cancelled = false;
     const runId = ++etaFetchRef.current;
-    const stops = stopsForTripKids(
-      selected.stops,
-      selected.trip.kidIds || selected.myKids || []
-    );
+    const stops = stopsForTripKids(selected.stops, selected.trip.kidIds || selected.myKids || []);
     const allKids = selected.trip.kidIds || selected.myKids || [];
     const events = selected.events || [];
     const direction = selected.trip.direction;
@@ -253,371 +243,92 @@ export default function ParentHome() {
     driverLocation?.lng,
   ]);
 
-  const primaryEta = (() => {
-    const list = Object.values(etas);
-    return list[0] || null;
-  })();
+  const primaryEta = Object.values(etas)[0] || null;
 
-  const mapCenter =
-    driverLocation ||
-    selected?.stops?.[0]?.location ||
-    selected?.trip?.schoolId?.location || { lat: -1.3965, lng: 36.7542 };
+  const openPanel = (name) => {
+    setMenuOpen(false);
+    if (name === 'live') {
+      setScreen('live');
+      return;
+    }
+    if (name === 'notifications') {
+      setSheetTab('alerts');
+      setScreen('live');
+      return;
+    }
+    if (name === 'children') {
+      setSheetTab('kids');
+      setScreen('live');
+      return;
+    }
+    if (name === 'attendance' || name === 'diary') {
+      setSheetTab('school');
+      setScreen('live');
+      return;
+    }
+    if (name === 'trips') {
+      setSheetTab('ride');
+      setScreen('live');
+      return;
+    }
+    if (name === 'fees') {
+      showToast('Fees & payments — contact your school admin for now.');
+      return;
+    }
+    if (name === 'contact') {
+      const school = kids[0]?.schoolId;
+      const bits = [school?.supportEmail, school?.supportPhone, school?.address].filter(Boolean);
+      showToast(bits.length ? bits.join(' · ') : 'No school contact on file yet.');
+    }
+  };
 
   return (
-    <div className="parent-ride">
-      {error && <div className="alert parent-ride-alert">{error}</div>}
+    <>
+      <ParentHomeDashboard
+        user={user}
+        kids={kids}
+        selected={selected}
+        active={active}
+        notifications={notifications}
+        schoolFeed={schoolFeed}
+        onOpenLive={() => setScreen('live')}
+        onOpenPanel={openPanel}
+        onDismissBanner={() => setBannerDismissed(true)}
+        bannerDismissed={bannerDismissed}
+        menuOpen={menuOpen}
+        setMenuOpen={setMenuOpen}
+        logout={logout}
+        error={screen === 'home' ? error : ''}
+      />
 
-      <div className="parent-ride-map">
-              <MapView
-          key={selected?.trip?._id || 'idle'}
-          center={mapCenter}
-          zoom={onBus ? 15.5 : 14}
+      {screen === 'live' && (
+        <ParentLiveScreen
+          error={error}
+          selected={selected}
+          active={active}
+          user={user}
+          onBus={onBus}
           driverLocation={driverLocation}
-          stops={mapStops}
-          direction={selected?.trip?.direction}
-          showRoute={!!selected}
-          liveNavigate={onBus}
-          events={selected?.events || []}
-          kids={tripKids}
-          followDriver={onBus}
-          className="map-canvas parent-ride-canvas"
+          mapStops={mapStops}
+          tripKids={tripKids}
+          etas={etas}
+          sheetTab={sheetTab}
+          setSheetTab={setSheetTab}
+          notifications={notifications}
+          kids={kids}
+          schoolFeed={schoolFeed}
+          markRead={markRead}
+          lateNote={lateNote}
+          setLateNote={setLateNote}
+          lateKidId={lateKidId}
+          setLateKidId={setLateKidId}
+          lateBusy={lateBusy}
+          requestLatePickup={requestLatePickup}
+          logout={logout}
+          onClose={() => setScreen('home')}
+          primaryEta={primaryEta}
         />
-
-        <div className="parent-ride-chrome">
-          <div className="parent-ride-status">
-            <span className={`parent-ride-dot ${onBus ? 'is-live' : ''}`} />
-            <div>
-              <strong>{statusLabel}</strong>
-              {selected && (
-                <small>
-                  {selected.trip.routeId?.name}
-                  {selected.trip.driverId?.name ? ` · ${selected.trip.driverId.name}` : ''}
-                </small>
-              )}
-            </div>
-          </div>
-          <div className="parent-ride-chrome-right">
-            {primaryEta?.label && (
-              <div className="parent-ride-eta" title={primaryEta.stopName}>
-                <strong>{primaryEta.shortLabel}</strong>
-                <small>{primaryEta.purpose}</small>
-              </div>
-            )}
-            <button type="button" className="btn btn-ghost parent-ride-logout" onClick={logout}>
-              Sign out
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="parent-ride-sheet">
-        <div className="parent-ride-handle" aria-hidden="true" />
-        <div className="parent-ride-tabs">
-          <button
-            type="button"
-            className={sheetTab === 'ride' ? 'active' : ''}
-            onClick={() => setSheetTab('ride')}
-          >
-            Ride
-          </button>
-          <button
-            type="button"
-            className={sheetTab === 'alerts' ? 'active' : ''}
-            onClick={() => setSheetTab('alerts')}
-          >
-            Alerts
-            {notifications.some((n) => !n.read) ? (
-              <span className="parent-ride-badge">
-                {notifications.filter((n) => !n.read).length}
-              </span>
-            ) : null}
-          </button>
-          <button
-            type="button"
-            className={sheetTab === 'kids' ? 'active' : ''}
-            onClick={() => setSheetTab('kids')}
-          >
-            Kids
-          </button>
-          <button
-            type="button"
-            className={sheetTab === 'school' ? 'active' : ''}
-            onClick={() => setSheetTab('school')}
-          >
-            School
-          </button>
-        </div>
-
-        {sheetTab === 'ride' && (
-          <div className="parent-ride-body">
-            {!selected && (
-              <p className="muted">No active trip. You will see the bus here after pickup.</p>
-            )}
-            {selected && (
-              <>
-                <div className="parent-ride-meta">
-                  <h2>{selected.trip.routeId?.name}</h2>
-                  <p className="muted">
-                    Driver {selected.trip.driverId?.name}
-                    {selected.driverProfile?.vehiclePlate
-                      ? ` · ${selected.driverProfile.vehiclePlate}`
-                      : ''}
-                    {' · '}
-                    {selected.trip.direction === 'to_school' ? 'To school' : 'To home'}
-                  </p>
-                  <p className="muted">
-                    {active.length} active trip{active.length === 1 ? '' : 's'} · signed in as{' '}
-                    {user?.email}
-                  </p>
-                </div>
-                <ul className="kid-list">
-                  {selected.myKids.map((kid) => {
-                    const picked = isKidOnBus(selected.events, kid._id);
-                    const dropped = (selected.events || []).some(
-                      (e) =>
-                        String(e.kidId?._id || e.kidId) === String(kid._id) &&
-                        e.type === 'dropped_off'
-                    );
-                    const waiting = !picked && !dropped;
-                    const composing = lateKidId === kid._id;
-                    const eta = etas[String(kid._id)];
-                    return (
-                      <li key={kid._id} className="kid-row kid-row--stack">
-                        <div className="kid-row-main">
-                          <div>
-                            <strong>{kid.name}</strong>
-                            <div className="muted">
-                              {dropped
-                                ? 'Dropped off'
-                                : picked
-                                  ? 'On the bus · tracking'
-                                  : 'Waiting for pickup'}
-                            </div>
-                            {eta?.label && !dropped && (
-                              <div className="parent-kid-eta">
-                                {eta.label}
-                                {eta.stopName ? ` · ${eta.stopName}` : ''}
-                              </div>
-                            )}
-                          </div>
-                          <span className={`pill ${picked && !dropped ? 'pill-live' : ''}`}>
-                            {dropped ? 'Done' : eta?.shortLabel || (picked ? 'Live' : 'Wait')}
-                          </span>
-                        </div>
-                        {waiting && (
-                          <div className="late-pickup">
-                            {!composing ? (
-                              <button
-                                type="button"
-                                className="btn btn-secondary"
-                                onClick={() => {
-                                  setLateKidId(kid._id);
-                                  setLateNote('');
-                                }}
-                              >
-                                Request late pickup
-                              </button>
-                            ) : (
-                              <>
-                                <textarea
-                                  rows={2}
-                                  placeholder="Optional note for the driver (e.g. running 10 minutes late)"
-                                  value={lateNote}
-                                  onChange={(e) => setLateNote(e.target.value)}
-                                />
-                                <div className="row-actions">
-                                  <button
-                                    type="button"
-                                    className="btn btn-ghost"
-                                    onClick={() => setLateKidId('')}
-                                    disabled={lateBusy}
-                                  >
-                                    Cancel
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="btn btn-primary"
-                                    onClick={() => requestLatePickup(kid._id)}
-                                    disabled={lateBusy}
-                                  >
-                                    {lateBusy ? 'Sending…' : 'Send to driver'}
-                                  </button>
-                                </div>
-                              </>
-                            )}
-                          </div>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              </>
-            )}
-          </div>
-        )}
-
-        {sheetTab === 'alerts' && (
-          <div className="parent-ride-body">
-            <div className="panel-head">
-              <h2>Notifications</h2>
-              <button type="button" className="btn btn-ghost" onClick={markRead}>
-                Mark all read
-              </button>
-            </div>
-            <ul className="notif-list">
-              {notifications.map((n) => (
-                <li key={n.id || n._id} className={n.read ? 'read' : 'unread'}>
-                  <span className="pill">{notificationTypeLabel(n.type)}</span>
-                  <strong>{n.title}</strong>
-                  <p>{n.body}</p>
-                  <small>{new Date(n.createdAt).toLocaleString()}</small>
-                </li>
-              ))}
-              {!notifications.length && <li className="muted">No notifications yet.</li>}
-            </ul>
-          </div>
-        )}
-
-        {sheetTab === 'kids' && (
-          <div className="parent-ride-body">
-            <ul className="list">
-              {kids.map((k) => (
-                <li key={k._id} className="panel tight">
-                  <strong>{k.name}</strong>
-                  <div className="muted">
-                    {k.schoolId?.name} · {k.routeId?.name} · {k.homeStopId?.name}
-                  </div>
-                  <div className="late-pickup" style={{ marginTop: '0.65rem' }}>
-                    {lateKidId === k._id ? (
-                      <>
-                        <textarea
-                          rows={2}
-                          placeholder="Optional note for the driver"
-                          value={lateNote}
-                          onChange={(e) => setLateNote(e.target.value)}
-                        />
-                        <div className="row-actions">
-                          <button
-                            type="button"
-                            className="btn btn-ghost"
-                            onClick={() => setLateKidId('')}
-                            disabled={lateBusy}
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-primary"
-                            onClick={() => requestLatePickup(k._id)}
-                            disabled={lateBusy}
-                          >
-                            {lateBusy ? 'Sending…' : 'Send late pickup request'}
-                          </button>
-                        </div>
-                      </>
-                    ) : (
-                      <button
-                        type="button"
-                        className="btn btn-secondary"
-                        onClick={() => {
-                          setLateKidId(k._id);
-                          setLateNote('');
-                        }}
-                      >
-                        Request late pickup
-                      </button>
-                    )}
-                  </div>
-                </li>
-              ))}
-              {!kids.length && <li className="muted">No children linked.</li>}
-            </ul>
-          </div>
-        )}
-
-        {sheetTab === 'school' && (
-          <div className="parent-ride-body">
-            <h2>Today’s register</h2>
-            <ul className="kid-list">
-              {kids.map((k) => {
-                const mark = schoolFeed.attendance.find(
-                  (m) => String(m.kidId?._id || m.kidId) === String(k._id)
-                );
-                return (
-                  <li key={k._id} className="kid-row">
-                    <div>
-                      <strong>{k.name}</strong>
-                      <div className="muted">{k.grade || ''}</div>
-                    </div>
-                    <span className={`pill status-${mark?.status || 'waiting'}`}>
-                      {mark?.status || 'Not marked'}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-
-            <h2 style={{ marginTop: '1.25rem' }}>Assignments</h2>
-            <ul className="notif-list">
-              {schoolFeed.assignments.map((a) => (
-                <li key={a._id}>
-                  <span className="pill">{a.subject || 'Class'}</span>
-                  <strong>{a.title}</strong>
-                  <p>{a.description || 'No extra instructions.'}</p>
-                  <small>
-                    {a.teacherId?.name || 'Teacher'}
-                    {a.dueDate ? ` · due ${new Date(a.dueDate).toLocaleDateString()}` : ''}
-                    {a.grade ? ` · ${a.grade}` : ''}
-                  </small>
-                </li>
-              ))}
-              {!schoolFeed.assignments.length && <li className="muted">No assignments posted.</li>}
-            </ul>
-
-            <h2>Class diary</h2>
-            <ul className="notif-list">
-              {(schoolFeed.diary || []).map((e) => (
-                <li key={e._id}>
-                  <span className="pill">{e.label || 'diary'}</span>
-                  <strong>{e.title}</strong>
-                  {e.body ? <p>{e.body}</p> : null}
-                  {e.media?.length ? (
-                    <div className="diary-thumbs" style={{ marginTop: '0.6rem' }}>
-                      {e.media.slice(0, 4).map((m) => (
-                        <img key={m.publicId || m.url} src={m.url} alt="" />
-                      ))}
-                    </div>
-                  ) : null}
-                  <small>
-                    {e.teacherId?.name || 'Teacher'}
-                    {e.grade ? ` · ${e.grade}` : ''}
-                    {e.createdAt ? ` · ${new Date(e.createdAt).toLocaleString()}` : ''}
-                  </small>
-                </li>
-              ))}
-              {!(schoolFeed.diary || []).length && (
-                <li className="muted">No class diary for today yet.</li>
-              )}
-            </ul>
-
-            <h2 style={{ marginTop: '1.25rem' }}>From the teacher</h2>
-            <ul className="notif-list">
-              {schoolFeed.notes.map((n) => (
-                <li key={n._id}>
-                  <span className="pill">{n.category}</span>
-                  <strong>{n.title}</strong>
-                  <p>{n.body}</p>
-                  <small>
-                    {n.kidId?.name || 'Your child'} · {n.teacherId?.name || 'Teacher'} ·{' '}
-                    {new Date(n.createdAt).toLocaleString()}
-                  </small>
-                </li>
-              ))}
-              {!schoolFeed.notes.length && <li className="muted">No teacher notes yet.</li>}
-            </ul>
-          </div>
-        )}
-      </div>
-    </div>
+      )}
+    </>
   );
 }

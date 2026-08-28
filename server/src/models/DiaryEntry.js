@@ -22,6 +22,16 @@ const diaryCommentSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+const parentSignatureSchema = new mongoose.Schema(
+  {
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    kidId: { type: mongoose.Schema.Types.ObjectId, ref: 'Kid', required: true },
+    parentName: { type: String, default: 'Parent', trim: true },
+    signedAt: { type: Date, default: Date.now },
+  },
+  { timestamps: false }
+);
+
 const diaryEntrySchema = new mongoose.Schema(
   {
     schoolId: { type: mongoose.Schema.Types.ObjectId, ref: 'School', required: true, index: true },
@@ -57,6 +67,7 @@ const diaryEntrySchema = new mongoose.Schema(
       behaviour: { type: String, default: '', trim: true, maxlength: 40 },
     },
     comments: { type: [diaryCommentSchema], default: [] },
+    parentSignatures: { type: [parentSignatureSchema], default: [] },
     active: { type: Boolean, default: true },
   },
   { timestamps: true }

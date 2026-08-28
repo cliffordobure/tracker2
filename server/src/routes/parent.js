@@ -2386,6 +2386,50 @@ function serializeDiaryComments(entry, userId) {
   }));
 }
 
+function diaryAppliesToKid(entry, kid) {
+  if (!kid?._id) return false;
+  const kidIds = (entry.kidIds || []).map((k) => String(k?._id || k)).filter(Boolean);
+  if (kidIds.length) return kidIds.includes(String(kid._id));
+  const grade = String(entry.grade || '').trim();
+  if (grade) return String(kid.grade || '') === grade;
+  return true;
+}
+
+function diaryApplicableKids(entry, kids) {
+  return (kids || []).filter((k) => diaryAppliesToKid(entry, k));
+}
+
+function serializeDiarySignatures(entry, { kids = [], userId, kidId } = {}) {
+  const applicable = diaryApplicableKids(entry, kids);
+  const sigs = (entry.parentSignatures || []).map((s) => {
+    const sigKidId = String(s.kidId?._id || s.kidId || '');
+    const kid = kids.find((k) => String(k._id) === sigKidId)
+      || (s.kidId && typeof s.kidId === 'object' ? s.kidId : null);
+    return {
+      _id: s._id,
+      kidId: sigKidId,
+      kidName: kid?.name || '',
+      parentName: s.parentName || 'Parent',
+      signedAt: s.signedAt,
+      mine: userId && s.userId && String(s.userId) === String(userId),
+    };
+  });
+  const targetKidId = kidId ? String(kidId) : String(pickDiaryKid(entry, kids, kidId)?._id || applicable[0]?._id || '');
+  const mySig = sigs.find(
+    (s) => s.mine && (!targetKidId || String(s.kidId) === targetKidId),
+  );
+  const unsignedKids = applicable.filter(
+    (k) => !sigs.some((s) => s.mine && String(s.kidId) === String(k._id)),
+  );
+  return {
+    signatures: sigs,
+    signed: Boolean(mySig),
+    signedAt: mySig?.signedAt || null,
+    needsSignature: applicable.length > 0 && unsignedKids.length > 0,
+    unsignedKids: unsignedKids.map((k) => ({ _id: k._id, name: k.name || 'Child' })),
+  };
+}
+
 function pickDiaryKid(entry, kids, preferredKidId) {
   const linked = (entry.kidIds || []).filter((k) => k && typeof k === 'object' && k._id);
   if (preferredKidId) {
@@ -2402,6 +2446,7 @@ function serializeParentDiary(entry, { kids = [], userId, previous = [], kidId }
   const kid = pickDiaryKid(doc, kids, kidId);
   const teacher = doc.teacherId && typeof doc.teacherId === 'object' ? doc.teacherId : {};
   const attachments = serializeDiaryAttachments(doc);
+  const signature = serializeDiarySignatures(doc, { kids, userId, kidId: kidId || kid?._id });
   return {
     _id: doc._id,
     id: String(doc._id),
@@ -2421,6 +2466,7 @@ function serializeParentDiary(entry, { kids = [], userId, previous = [], kidId }
     homework: serializeDiaryHomework(doc),
     attachments,
     comments: serializeDiaryComments(doc, userId),
+    ...signature,
     previous,
     photoUrl: attachments.find((m) => m.kind === 'image')?.url || '',
   };
@@ -2632,7 +2678,7 @@ function sampleDiaryFeed(kids) {
   ];
 }
 
-async function buildParentDiaryFeed(kids, query = {}) {
+async function buildParentDiaryFeed(kids, query = {}, userId = null) {
   const schoolIds = [...new Set(kids.map((k) => (k.schoolId?._id || k.schoolId)?.toString()).filter(Boolean))];
   if (!schoolIds.length) return [];
   const from = startOfDay(new Date(Date.now() - 21 * 24 * 60 * 60 * 1000));
@@ -2690,6 +2736,7 @@ async function buildParentDiaryFeed(kids, query = {}) {
       source: 'diary',
       photoUrl: media.find((m) => m.kind === 'image')?.url || '',
       comments: serializeDiaryComments(e),
+      ...serializeDiarySignatures(e, { kids, userId }),
     });
   }
   for (const a of announcements) {
@@ -2926,7 +2973,7 @@ router.get('/diary', async (req, res) => {
     });
 
     const dates = [...new Set(monthEntries.map((e) => ymd(e.date)))];
-    const feed = await buildParentDiaryFeed(kids, req.query);
+    const feed = await buildParentDiaryFeed(kids, req.query, req.user.id);
     const serializedEntries = entries.map((e) =>
       serializeParentDiary(e, { kids, userId: req.user.id, kidId: selected._id }),
     );
@@ -3005,6 +3052,70 @@ router.post('/diary/:id/comments', async (req, res) => {
       kids,
       userId: req.user.id,
       kidId: req.query.kidId,
+    });
+    res.status(201).json({ entry: detail });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/diary/:id/sign', async (req, res) => {
+  try {
+    if (!/^[a-fA-F0-9]{24}$/.test(String(req.params.id))) {
+      return res.status(404).json({ error: 'Diary entry not found' });
+    }
+    const { entry, kids } = await findParentDiary(req.user.id, req.params.id);
+    if (!entry) return res.status(404).json({ error: 'Diary entry not found' });
+
+    const applicable = diaryApplicableKids(entry, kids);
+    if (!applicable.length) {
+      return res.status(400).json({ error: 'This diary entry does not apply to your children' });
+    }
+
+    const requestedKidId = String(req.body?.kidId || req.query?.kidId || '').trim();
+    const kid = requestedKidId
+      ? applicable.find((k) => String(k._id) === requestedKidId)
+      : applicable[0];
+    if (!kid) {
+      return res.status(400).json({ error: 'Select a child to sign for' });
+    }
+
+    if (!Array.isArray(entry.parentSignatures)) entry.parentSignatures = [];
+    const already = entry.parentSignatures.some(
+      (s) => String(s.userId) === String(req.user.id) && String(s.kidId) === String(kid._id),
+    );
+    if (already) {
+      return res.status(400).json({ error: 'You have already signed this diary entry' });
+    }
+
+    const author = await User.findById(req.user.id).select('name photoUrl');
+    entry.parentSignatures.push({
+      userId: req.user.id,
+      kidId: kid._id,
+      parentName: author?.name || req.user.name || 'Parent',
+      signedAt: new Date(),
+    });
+    await entry.save();
+
+    const teacherId = entry.teacherId?._id || entry.teacherId;
+    if (teacherId) {
+      try {
+        await createAndEmitNotifications(getIO(), [
+          {
+            userId: teacherId,
+            type: 'reminder',
+            title: 'Diary signed',
+            body: `${author?.name || 'A parent'} signed "${entry.title}" for ${kid.name}.`,
+            kidId: kid._id,
+          },
+        ]);
+      } catch (_) {}
+    }
+
+    const detail = await serializeDiaryWithPrevious(entry, {
+      kids,
+      userId: req.user.id,
+      kidId: kid._id,
     });
     res.status(201).json({ entry: detail });
   } catch (err) {

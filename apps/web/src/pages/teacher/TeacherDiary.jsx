@@ -104,6 +104,32 @@ export default function TeacherDiary() {
     }
   };
 
+  const addDocuments = async (files) => {
+    const remaining = 8 - form.media.length;
+    const batch = [...files].slice(0, remaining);
+    if (!batch.length) return;
+    setUploading(true);
+    setError('');
+    try {
+      const uploaded = [];
+      for (const file of batch) {
+        uploaded.push(await uploadFile(file, { folder: 'diary' }));
+      }
+      setForm((f) => ({ ...f, media: [...f.media, ...uploaded] }));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const isImageMedia = (m) => {
+    const type = String(m?.resourceType || '').toLowerCase();
+    if (type === 'image') return true;
+    if (type === 'raw' || type === 'video') return false;
+    return /\.(jpe?g|png|gif|webp)($|\?)/i.test(m?.url || '');
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     setBusy(true);
@@ -111,7 +137,7 @@ export default function TeacherDiary() {
     try {
       await api('/teacher/diary', { method: 'POST', body: form });
       setForm(emptyForm(selected));
-      showToast('Diary posted. Parents can see the photos and update.', 'success');
+      showToast('Diary posted. Parents can read and sign it.', 'success');
       await load();
     } catch (err) {
       setError(err.message);
@@ -222,6 +248,7 @@ export default function TeacherDiary() {
                   {e.grade || (e.kidIds?.length ? e.kidIds.map((k) => k.name).join(', ') : 'Whole school')}
                   {' · '}
                   {e.teacherId?.name || 'You'}
+                  {e.signatureCount > 0 ? ` · ${e.signatureCount} signed` : ' · Awaiting parent signature'}
                 </small>
                 <button type="button" className="tw-btn tw-btn-ghost" onClick={() => remove(e._id)}>
                   Remove
@@ -307,35 +334,63 @@ export default function TeacherDiary() {
           })}
         </fieldset>
         <div className="media-picker">
-          <span className="media-picker-label">Photos of the kids</span>
+          <span className="media-picker-label">Photos & documents</span>
           <div className="diary-thumbs">
             {form.media.map((m) => (
-              <button
-                type="button"
-                key={m.publicId || m.url}
-                className="diary-thumb-wrap"
-                onClick={() => setForm((f) => ({ ...f, media: f.media.filter((x) => x.url !== m.url) }))}
-                title="Remove"
-              >
-                <img src={m.url} alt="" />
-              </button>
+              isImageMedia(m) ? (
+                <button
+                  type="button"
+                  key={m.publicId || m.url}
+                  className="diary-thumb-wrap"
+                  onClick={() => setForm((f) => ({ ...f, media: f.media.filter((x) => x.url !== m.url) }))}
+                  title="Remove"
+                >
+                  <img src={m.url} alt="" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  key={m.publicId || m.url}
+                  className="diary-file-chip"
+                  onClick={() => setForm((f) => ({ ...f, media: f.media.filter((x) => x.url !== m.url) }))}
+                  title="Remove"
+                >
+                  📎 {m.originalName || 'Document'}
+                </button>
+              )
             ))}
           </div>
-          <label className="tw-btn tw-btn-secondary">
-            {uploading ? 'Uploading…' : form.media.length ? 'Add more photos' : 'Upload photos'}
-            <input
-              type="file"
-              accept="image/*"
-              multiple
-              hidden
-              disabled={uploading || form.media.length >= 8}
-              onChange={(e) => {
-                addPhotos(e.target.files);
-                e.target.value = '';
-              }}
-            />
-          </label>
-          <p className="hint">Up to 8 photos. They are stored on Cloudinary and shown to parents.</p>
+          <div className="diary-upload-row">
+            <label className="tw-btn tw-btn-secondary">
+              {uploading ? 'Uploading…' : 'Upload photos'}
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                hidden
+                disabled={uploading || form.media.length >= 8}
+                onChange={(e) => {
+                  addPhotos(e.target.files);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+            <label className="tw-btn tw-btn-secondary">
+              {uploading ? 'Uploading…' : 'Upload document'}
+              <input
+                type="file"
+                accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                multiple
+                hidden
+                disabled={uploading || form.media.length >= 8}
+                onChange={(e) => {
+                  addDocuments(e.target.files);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+          </div>
+          <p className="hint">Up to 8 files (photos, PDF, or Word). Parents can view them before signing.</p>
         </div>
         <button className="tw-btn tw-btn-primary" type="submit" disabled={busy || uploading}>
           {busy ? 'Posting…' : 'Post to parent diary'}

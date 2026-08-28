@@ -1959,6 +1959,7 @@ async function notifyDiaryParents(entry, teacher) {
   const photoNote = entry.media?.length
     ? ` ${entry.media.length} file${entry.media.length === 1 ? '' : 's'} attached.`
     : '';
+  const signNote = ' Please read and sign in the diary.';
   const items = [];
   for (const kid of kids) {
     for (const parent of kid.parentIds || []) {
@@ -1966,7 +1967,7 @@ async function notifyDiaryParents(entry, teacher) {
         userId: parent._id || parent,
         type: NOTIFICATION_TYPES.DIARY,
         title: `Class diary: ${entry.title}`,
-        body: `${teacherName} posted about ${kid.name}.${photoNote}`,
+        body: `${teacherName} posted about ${kid.name}.${photoNote}${signNote}`,
         kidId: kid._id,
       });
     }
@@ -2039,7 +2040,8 @@ async function syncHomeworkAssignment(entry, schoolId, teacherId, { notify } = {
 function populateDiary(q) {
   return q
     .populate('teacherId', 'name')
-    .populate('kidIds', 'name grade');
+    .populate('kidIds', 'name grade')
+    .populate('parentSignatures.kidId', 'name grade');
 }
 
 async function audienceKids(schoolId, { kidIds, grade } = {}) {
@@ -2085,10 +2087,19 @@ router.get('/diary', async (req, res) => {
         body: c.body || '',
         createdAt: c.createdAt,
       }));
+      const signatures = (doc.parentSignatures || []).map((s) => ({
+        _id: s._id,
+        kidId: s.kidId?._id || s.kidId,
+        kidName: s.kidId?.name || '',
+        parentName: s.parentName || 'Parent',
+        signedAt: s.signedAt,
+      }));
       return {
         ...doc,
         photoUrl: photo?.url || media.find((m) => m?.url)?.url || '',
         comments,
+        signatures,
+        signatureCount: signatures.length,
       };
     });
     res.json({ entries: list, dates });
