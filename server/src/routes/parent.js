@@ -965,6 +965,346 @@ router.get('/kids/:id/health', async (req, res) => {
   }
 });
 
+const PARENT_DOC_FILTERS = ['All', 'School', 'Student', 'Transport'];
+
+function classifyParentDocument(doc, { source = 'kid', name = '' } = {}) {
+  const kind = String(doc?.kind || '').toLowerCase();
+  const hay = `${kind} ${name} ${doc?.originalName || doc?.name || ''}`.toLowerCase();
+  if (kind === 'transport' || /transport|bus route|vehicle|route policy/.test(hay)) return 'Transport';
+  if (kind === 'school' || source === 'announcement' || source === 'fee') return 'School';
+  if (kind === 'health') return 'Student';
+  if (source === 'diary' || source === 'leave') return 'Student';
+  if (/admission|handbook|policy|school letter|notice/.test(hay)) return 'School';
+  if (/report card|assessment|homework|worksheet/.test(hay)) return 'Student';
+  return 'Student';
+}
+
+function parentDocumentIconKind(doc) {
+  const mime = String(doc?.mimeType || '').toLowerCase();
+  const name = String(doc?.originalName || doc?.name || '').toLowerCase();
+  if (mime.startsWith('image/') || /\.(jpe?g|png|gif|webp)($|\?)/i.test(name)) return 'image';
+  if (mime.includes('pdf') || /\.pdf($|\?)/i.test(name)) return 'pdf';
+  if (/word|document|msword|officedocument/.test(mime) || /\.(docx?|rtf)($|\?)/i.test(name)) return 'doc';
+  return 'file';
+}
+
+function serializeParentDocumentItem(doc, meta = {}) {
+  const name = doc.originalName || doc.name || doc.attachmentName || 'Document';
+  const category = meta.category || classifyParentDocument(doc, { source: meta.source, name });
+  return {
+    id: meta.id,
+    name,
+    category,
+    source: meta.source || 'kid',
+    kidId: meta.kidId ? String(meta.kidId) : null,
+    kidName: meta.kidName || '',
+    url: doc.url || doc.attachmentUrl || '',
+    mimeType: doc.mimeType || '',
+    sizeLabel: attachmentSizeLabel(doc.bytes || doc.attachmentSize || 0),
+    iconKind: parentDocumentIconKind({ ...doc, originalName: name, mimeType: doc.mimeType }),
+    date: meta.date || null,
+    uploadedBy: doc.uploadedBy || meta.uploadedBy || 'school',
+    canDelete: doc.uploadedBy === 'parent' || meta.canDelete === true,
+  };
+}
+
+async function ensureParentDocumentsSample(kids) {
+  if (!kids?.length) return kids;
+  const kid = kids[0];
+  const docs = Array.isArray(kid.documents) ? kid.documents : [];
+  if (docs.length) return kids;
+  const sampleUrl = 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf';
+  kid.documents = [
+    {
+      url: sampleUrl,
+      publicId: '',
+      originalName: 'Admission Letter.pdf',
+      mimeType: 'application/pdf',
+      kind: 'school',
+      bytes: 524288,
+      uploadedBy: 'school',
+    },
+    {
+      url: sampleUrl,
+      publicId: '',
+      originalName: 'Transport Policy.pdf',
+      mimeType: 'application/pdf',
+      kind: 'transport',
+      bytes: 412672,
+      uploadedBy: 'school',
+    },
+    {
+      url: sampleUrl,
+      publicId: '',
+      originalName: 'Report Card Term 1.pdf',
+      mimeType: 'application/pdf',
+      kind: 'student',
+      bytes: 943718,
+      uploadedBy: 'school',
+    },
+  ];
+  try {
+    await kid.save();
+  } catch (_) {
+    /* ignore */
+  }
+  return kids;
+}
+
+async function buildParentDocuments(parentId, query = {}) {
+  let kids = await Kid.find({ parentIds: parentId, active: true })
+    .populate('schoolId', 'name')
+    .populate('routeId', 'name');
+  kids = await ensureParentDocumentsSample(kids);
+
+  const kidFilter = query.kidId ? String(query.kidId) : '';
+  const scopedKids = kidFilter ? kids.filter((k) => String(k._id) === kidFilter) : kids;
+  const schoolIds = [...new Set(scopedKids.map((k) => k.schoolId?._id || k.schoolId).filter(Boolean))];
+  const kidIds = scopedKids.map((k) => k._id);
+  const from = startOfDay(new Date(Date.now() - 180 * 24 * 60 * 60 * 1000));
+
+  const [diaryEntries, announcements, statements, leaves] = await Promise.all([
+    kidIds.length
+      ? DiaryEntry.find({
+          ...parentDiaryMatch(scopedKids, schoolIds),
+          date: { $gte: from },
+          'media.0': { $exists: true },
+        })
+          .populate('teacherId', 'name')
+          .sort({ date: -1 })
+          .limit(60)
+      : [],
+    schoolIds.length
+      ? Announcement.find({
+          schoolId: { $in: schoolIds },
+          active: { $ne: false },
+          attachmentUrl: { $nin: [null, ''] },
+        })
+          .sort({ publishedAt: -1 })
+          .limit(40)
+      : [],
+    kidIds.length ? FeeStatement.find({ kidId: { $in: kidIds }, statementUrl: { $nin: [null, ''] } }).sort({ createdAt: -1 }).limit(20) : [],
+    kidIds.length
+      ? LeaveRequest.find({ parentId, kidId: { $in: kidIds }, attachmentUrl: { $nin: [null, ''] } })
+          .populate('kidId', 'name')
+          .sort({ createdAt: -1 })
+          .limit(30)
+      : [],
+  ]);
+
+  const items = [];
+
+  for (const kid of scopedKids) {
+    for (let i = 0; i < (kid.documents || []).length; i += 1) {
+      const doc = kid.documents[i];
+      if (!doc?.url) continue;
+      items.push(
+        serializeParentDocumentItem(doc, {
+          id: `kid:${kid._id}:${i}`,
+          source: 'kid',
+          kidId: kid._id,
+          kidName: kid.name,
+          date: kid.updatedAt || kid.createdAt,
+        }),
+      );
+    }
+  }
+
+  for (const entry of diaryEntries) {
+    const applicable = scopedKids.filter((k) => diaryAppliesToKid(entry, k));
+    if (!applicable.length) continue;
+    const kidLabel = applicable.map((k) => k.name).join(', ');
+    const kidRef = applicable[0];
+    for (let i = 0; i < (entry.media || []).length; i += 1) {
+      const media = entry.media[i];
+      if (!media?.url) continue;
+      items.push(
+        serializeParentDocumentItem(
+          {
+            url: media.url,
+            originalName: media.originalName || `${entry.title || 'Diary'} attachment`,
+            mimeType: media.resourceType === 'raw' ? 'application/pdf' : 'image/jpeg',
+            bytes: media.bytes || 0,
+            kind: 'diary',
+          },
+          {
+            id: `diary:${entry._id}:${i}`,
+            source: 'diary',
+            kidId: kidRef._id,
+            kidName: kidLabel,
+            date: entry.date || entry.createdAt,
+            uploadedBy: 'school',
+          },
+        ),
+      );
+    }
+  }
+
+  for (const ann of announcements) {
+    if (!ann.attachmentUrl) continue;
+    items.push(
+      serializeParentDocumentItem(
+        {
+          url: ann.attachmentUrl,
+          originalName: ann.attachmentName || ann.title || 'School announcement',
+          mimeType: '',
+          bytes: ann.attachmentSize || 0,
+          kind: 'school',
+        },
+        {
+          id: `announcement:${ann._id}`,
+          source: 'announcement',
+          date: ann.publishedAt || ann.createdAt,
+          uploadedBy: 'school',
+        },
+      ),
+    );
+  }
+
+  for (const stmt of statements) {
+    if (!stmt.statementUrl) continue;
+    const kid = scopedKids.find((k) => String(k._id) === String(stmt.kidId));
+    items.push(
+      serializeParentDocumentItem(
+        {
+          url: stmt.statementUrl,
+          originalName: 'Fee Statement.pdf',
+          mimeType: 'application/pdf',
+          bytes: 0,
+          kind: 'school',
+        },
+        {
+          id: `fee:${stmt._id}`,
+          source: 'fee',
+          kidId: kid?._id,
+          kidName: kid?.name || '',
+          date: stmt.updatedAt || stmt.createdAt,
+          uploadedBy: 'school',
+        },
+      ),
+    );
+  }
+
+  for (const leave of leaves) {
+    if (!leave.attachmentUrl) continue;
+    const kid = leave.kidId && typeof leave.kidId === 'object' ? leave.kidId : scopedKids.find((k) => String(k._id) === String(leave.kidId));
+    items.push(
+      serializeParentDocumentItem(
+        {
+          url: leave.attachmentUrl,
+          originalName: leave.attachmentName || 'Leave attachment',
+          mimeType: '',
+          bytes: 0,
+          kind: 'leave',
+        },
+        {
+          id: `leave:${leave._id}`,
+          source: 'leave',
+          kidId: kid?._id || leave.kidId,
+          kidName: kid?.name || '',
+          date: leave.createdAt,
+          uploadedBy: 'parent',
+        },
+      ),
+    );
+  }
+
+  items.sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+
+  const category = String(query.category || 'all').trim();
+  const q = String(query.q || '').trim().toLowerCase();
+  let filtered = items;
+  if (category && category.toLowerCase() !== 'all') {
+    filtered = filtered.filter((d) => d.category.toLowerCase() === category.toLowerCase());
+  }
+  if (q) {
+    filtered = filtered.filter(
+      (d) =>
+        d.name.toLowerCase().includes(q)
+        || d.category.toLowerCase().includes(q)
+        || d.kidName.toLowerCase().includes(q),
+    );
+  }
+
+  return {
+    documents: filtered,
+    kids: scopedKids.map((k) => ({ _id: k._id, name: k.name, grade: k.grade || '' })),
+    filters: PARENT_DOC_FILTERS,
+  };
+}
+
+router.get('/documents', async (req, res) => {
+  try {
+    const payload = await buildParentDocuments(req.user.id, req.query);
+    res.json(payload);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/documents', async (req, res) => {
+  try {
+    const { kidId, category, file } = req.body || {};
+    if (!kidId) return res.status(400).json({ error: 'kidId is required' });
+    if (!file?.url) return res.status(400).json({ error: 'Uploaded file is required' });
+
+    const kid = await assertParentKid(req.user.id, kidId);
+    if (!kid) return res.status(404).json({ error: 'Child not found' });
+
+    const cat = String(category || 'Student');
+    const kind =
+      cat === 'Transport' ? 'transport' : cat === 'School' ? 'school' : cat === 'Student' ? 'student' : 'general';
+    const doc = {
+      url: String(file.url || '').trim().slice(0, 500),
+      publicId: String(file.publicId || '').trim().slice(0, 200),
+      originalName: String(file.originalName || 'Document').trim().slice(0, 120),
+      mimeType: String(file.mimeType || '').trim().slice(0, 80),
+      bytes: Number(file.bytes) || 0,
+      kind,
+      uploadedBy: 'parent',
+    };
+    if (!Array.isArray(kid.documents)) kid.documents = [];
+    if (kid.documents.length >= 20) {
+      return res.status(400).json({ error: 'Document limit reached for this child (20 max)' });
+    }
+    kid.documents.push(doc);
+    await kid.save();
+
+    const idx = kid.documents.length - 1;
+    const serialized = serializeParentDocumentItem(doc, {
+      id: `kid:${kid._id}:${idx}`,
+      source: 'kid',
+      kidId: kid._id,
+      kidName: kid.name,
+      date: new Date(),
+      canDelete: true,
+    });
+    res.status(201).json({ document: serialized });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete('/documents/:kidId/:index', async (req, res) => {
+  try {
+    const kid = await assertParentKid(req.user.id, req.params.kidId);
+    if (!kid) return res.status(404).json({ error: 'Child not found' });
+    const index = Number(req.params.index);
+    if (!Number.isInteger(index) || index < 0 || index >= (kid.documents || []).length) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    const doc = kid.documents[index];
+    if (doc.uploadedBy !== 'parent') {
+      return res.status(403).json({ error: 'Only documents you uploaded can be removed' });
+    }
+    kid.documents.splice(index, 1);
+    await kid.save();
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 function feeLineStatus(total, paid) {
   const t = Number(total) || 0;
   const p = Number(paid) || 0;

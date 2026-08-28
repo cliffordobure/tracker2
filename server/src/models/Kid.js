@@ -36,6 +36,7 @@ const kidSchema = new mongoose.Schema(
           mimeType: { type: String, default: '' },
           kind: { type: String, default: '', trim: true, maxlength: 40 },
           bytes: { type: Number, default: 0, min: 0 },
+          uploadedBy: { type: String, enum: ['school', 'parent'], default: 'school' },
         },
       ],
       default: [],
