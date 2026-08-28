@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
+import LocationSearch from '../../components/LocationSearch';
 import MapView from '../../components/MapView';
 import { Empty, PageFoot, StatusDot, formatDate } from './shared';
 
@@ -23,6 +24,7 @@ export default function SuperSchools() {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyForm);
+  const [mapFocus, setMapFocus] = useState(null);
   const [statusFilter, setStatusFilter] = useState('');
   const q = params.get('q') || '';
 
@@ -222,13 +224,27 @@ export default function SuperSchools() {
               </select>
             </label>
           </div>
-          <p className="hint">Click the map to pin the school gate.</p>
+          <p className="hint">Search a place or click the map to pin the school gate.</p>
+          <LocationSearch
+            proximity={{ lat: Number(form.lat), lng: Number(form.lng) }}
+            placeholder="Search estate, landmark, or area…"
+            onSelect={(place) => {
+              setForm((f) => ({
+                ...f,
+                lat: place.lat,
+                lng: place.lng,
+                address: f.address.trim() ? f.address : place.placeName || place.name,
+              }));
+              setMapFocus({ lat: place.lat, lng: place.lng, zoom: 16.4, at: Date.now() });
+            }}
+          />
           <MapView
             center={{ lat: Number(form.lat), lng: Number(form.lng) }}
             zoom={13}
+            focus={mapFocus}
             onMapClick={(loc) => setForm({ ...form, lat: loc.lat, lng: loc.lng })}
             stops={[{ name: form.name || 'School', type: 'school', location: { lat: Number(form.lat), lng: Number(form.lng) } }]}
-            className="map-canvas map-sm pa-map"
+            className="map-canvas pa-map"
           />
           <h3>School admin (optional)</h3>
           <label className="sa-field">

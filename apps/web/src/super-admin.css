@@ -152,7 +152,7 @@
   padding: 0.5rem 0.7rem;
   background: #fff;
 }
-.pa-map { min-height: 220px; border-radius: 12px; overflow: hidden; }
+.pa-map { min-height: 420px; border-radius: 12px; overflow: hidden; }
 
 .sa-shell--platform .sa-table { min-width: 720px; }
 .sa-shell--platform .sa-table tbody tr { cursor: default; }
