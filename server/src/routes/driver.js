@@ -323,6 +323,15 @@ async function serializeDriverTripCard(trip) {
       : null;
   const startLabel = formatDriverClock(start);
   const endLabel = formatDriverClock(end);
+  let progressPct = 0;
+  if (obj.status === 'completed') {
+    progressPct = 100;
+  } else if (obj.status === 'active' && start && durationMins > 0) {
+    const elapsed = (Date.now() - start.getTime()) / (durationMins * 60000);
+    progressPct = Math.min(95, Math.max(8, Math.round(elapsed * 100)));
+  } else if (obj.status === 'active' && board.studentCount > 0) {
+    progressPct = Math.min(90, Math.round((board.studentsOnBoard / board.studentCount) * 70) + 10);
+  }
   return {
     ...obj,
     originName: ends.originName,
@@ -332,6 +341,7 @@ async function serializeDriverTripCard(trip) {
     studentsOnBoard: board.studentsOnBoard,
     pendingCheckouts: board.pendingCheckouts,
     durationMins,
+    progressPct,
     startAt: start,
     endAt: end,
     startTime: startLabel,
