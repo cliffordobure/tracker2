@@ -213,6 +213,7 @@ export default function DriverDetails() {
             <div className="sa-sd-name">
               <h2>{driver.name}</h2>
               <em className={`sa-stu-status is-${statusKey}`}>{statusLabel}</em>
+              <span className="sa-role-pill">Driver</span>
             </div>
             <p className="sa-sd-meta">
               {[
@@ -274,7 +275,7 @@ export default function DriverDetails() {
         <section className="sa-card sa-sd-tab">
           <div className="sa-rd-card-head">
             <h3>Schedules</h3>
-            <Link to="/school-admin/trip-scheduling" className="sa-btn sa-btn-outline">
+            <Link to="/school-admin/trip-instances?tab=schedules" className="sa-btn sa-btn-outline">
               Open scheduling
             </Link>
           </div>

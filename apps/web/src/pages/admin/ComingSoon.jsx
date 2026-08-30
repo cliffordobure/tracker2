@@ -37,8 +37,7 @@ export default function ComingSoon() {
   if (feature === 'subjects') return <Navigate to="/school-admin/subjects" replace />;
   if (feature === 'examinations') return <Navigate to="/school-admin/examinations" replace />;
   if (feature === 'assignments') return <Navigate to="/school-admin/assignments" replace />;
-  if (feature === 'attendance') return <Navigate to="/school-admin/attendance" replace />;
-  if (feature === 'bulk-attendance') return <Navigate to="/school-admin/attendance/bulk" replace />;
+  if (feature === 'attendance' || feature === 'bulk-attendance') return <Navigate to="/school-admin/attendance" replace />;
   const slug = feature || 'feature';
   const title =
     titles[slug] || slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useOutletContext } from 'react-router-dom';
+import { Link, useNavigate, useOutletContext } from 'react-router-dom';
 import { api } from '../../lib/api';
 import MapView from '../../components/MapView';
 import { getSocket } from '../../lib/socket';
+import { notificationActionLabel, notificationHref } from '../../lib/notificationLinks';
 
 const PAGE = 8;
 const TABS = [
@@ -92,8 +93,18 @@ function glyph(kind) {
   return '🔔';
 }
 
+function BtnIcon({ name }) {
+  const p = { width: 13, height: 13, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' };
+  if (name === 'gear') return <svg {...p}><circle cx="12" cy="12" r="3" /><path d="M12 3.5v2.2M12 18.3V20.5M4.6 6.5l1.6 1.6M17.8 15.9l1.6 1.6M3.5 12h2.2M18.3 12H20.5M4.6 17.5l1.6-1.6M17.8 8.1l1.6-1.6" /></svg>;
+  if (name === 'map') return <svg {...p}><path d="M9 4.5 3.8 6.4v13.1L9 17.6l6 1.9 5.2-1.9V4.5L15 6.4 9 4.5Z" /><path d="M9 4.5v13.1M15 6.4v13.1" /></svg>;
+  if (name === 'phone') return <svg {...p}><path d="M8 3.5h3.2l1.2 3.2-2 1.4a12 12 0 0 0 5.5 5.5l1.4-2 3.2 1.2V16a2 2 0 0 1-2.2 2 16 16 0 0 1-14-14A2 2 0 0 1 8 3.5Z" /></svg>;
+  if (name === 'flag') return <svg {...p}><path d="M5 21V4.5h9.2l-.8 3.4H19L17.4 14H5" /></svg>;
+  return <svg {...p}><path d="M5 7h14M10 7V5h4v2M8 7l.7 12h6.6L16 7" /></svg>;
+}
+
 export default function Notifications() {
-  const { globalSearch = '' } = useOutletContext() || {};
+  const navigate = useNavigate();
+  const { schoolName = '', globalSearch = '' } = useOutletContext() || {};
   const [tab, setTab] = useState('all');
   const [sort, setSort] = useState('latest');
   const [q, setQ] = useState('');
@@ -179,33 +190,38 @@ export default function Notifications() {
     };
   }, [selectedId]);
 
-  const openItem = async (n) => {
+  const markRead = async (n) => {
     const id = String(n._id);
-    setSelectedId(id);
-    if (!n.read) {
-      try {
-        await api(`/admin/notifications/${id}/read`, { method: 'POST', body: {} });
-        setData((prev) => {
-          if (!prev) return prev;
-          const notifications =
-            tab === 'unread'
-              ? prev.notifications.filter((row) => String(row._id) !== id)
-              : prev.notifications.map((row) =>
-                  String(row._id) === id ? { ...row, read: true } : row
-                );
-          const unread = Math.max(0, (prev.stats?.unread || 0) - 1);
-          return {
-            ...prev,
-            notifications,
-            counts: { ...prev.counts, unread: Math.max(0, (prev.counts?.unread || 0) - 1) },
-            stats: { ...prev.stats, unread },
-          };
-        });
-        pingInbox();
-      } catch {
-        /* keep unread if the request fails */
-      }
+    if (n.read) return;
+    try {
+      await api(`/admin/notifications/${id}/read`, { method: 'POST', body: {} });
+      setData((prev) => {
+        if (!prev) return prev;
+        const notifications =
+          tab === 'unread'
+            ? prev.notifications.filter((row) => String(row._id) !== id)
+            : prev.notifications.map((row) =>
+                String(row._id) === id ? { ...row, read: true } : row
+              );
+        const unread = Math.max(0, (prev.stats?.unread || 0) - 1);
+        return {
+          ...prev,
+          notifications,
+          counts: { ...prev.counts, unread: Math.max(0, (prev.counts?.unread || 0) - 1) },
+          stats: { ...prev.stats, unread },
+        };
+      });
+      pingInbox();
+    } catch {
+      /* keep unread if the request fails */
     }
+  };
+
+  const openItem = (n) => {
+    setSelectedId(String(n._id));
+    markRead(n);
+    const href = notificationHref(n);
+    if (href) navigate(href);
   };
 
   const markAll = async () => {
@@ -247,10 +263,10 @@ export default function Notifications() {
     {
       label: 'Total Today',
       value: stats.today ?? (data ? 0 : '…'),
-      hint: stats.todayDelta ? deltaLabel(stats.todayDelta, 'vs yesterday') : 'Created today',
+      hint: stats.todayDelta ? deltaLabel(stats.todayDelta, 'vs yesterday') : 'vs yesterday',
       hintClass:
         stats.todayDelta?.dir === 'up' ? 'is-up' : stats.todayDelta?.dir === 'down' ? 'is-down' : '',
-      tint: 'sky',
+      tint: 'green',
     },
     {
       label: 'High Priority',
@@ -263,7 +279,7 @@ export default function Notifications() {
       label: 'Announcements',
       value: stats.announcementsWeek ?? (data ? 0 : '…'),
       hint: 'In your inbox this week',
-      tint: 'purple',
+      tint: 'orange',
     },
   ];
 
@@ -284,6 +300,7 @@ export default function Notifications() {
           Mark All Read
         </button>
         <button type="button" className="sa-btn sa-btn-primary" onClick={() => setShowSettings(true)}>
+          <BtnIcon name="gear" />
           Settings
         </button>
       </div>
@@ -314,18 +331,24 @@ export default function Notifications() {
                 {t.label} ({counts[t.id] ?? 0})
               </button>
             ))}
+          </div>
+          <div className="sa-notify-toolbar">
+            <label className="sa-notify-search">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                <circle cx="11" cy="11" r="6.5" />
+                <path d="m16 16 4.2 4.2" />
+              </svg>
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search notifications..."
+                aria-label="Search notifications"
+              />
+            </label>
             <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort">
               <option value="latest">Latest First</option>
               <option value="oldest">Oldest First</option>
             </select>
-          </div>
-          <div className="sa-notify-search">
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search notifications..."
-              aria-label="Search notifications"
-            />
           </div>
           <ul>
             {slice.map((n) => {
@@ -336,12 +359,16 @@ export default function Notifications() {
                     type="button"
                     className={`sa-notify-item${String(n._id) === selectedId ? ' is-on' : ''}${n.read ? '' : ' is-unread'}`}
                     onClick={() => openItem(n)}
+                    title={notificationHref(n) ? `Open ${notificationActionLabel(n) || 'related page'}` : undefined}
                   >
                     <i className={`sa-notify-glyph is-${kind}`} aria-hidden="true">
                       {glyph(kind)}
                     </i>
                     <div>
-                      <strong>{n.title}</strong>
+                      <strong>
+                        {n.title}
+                        {!n.read ? <em>New</em> : null}
+                      </strong>
                       <p>{n.body}</p>
                     </div>
                     <time>{ago(n.createdAt)}</time>
@@ -380,11 +407,12 @@ export default function Notifications() {
                   {glyph(tone(note))}
                 </i>
                 <div>
-                  <h3>{note.title}</h3>
-                  <p>
-                    {fmtStamp(note.createdAt)}
+                  <h3>
+                    {note.title}
+                    {!note.read ? <span className="sa-notify-tag is-new">New</span> : null}
                     {note.important ? <span className="sa-notify-tag">High Priority</span> : null}
-                  </p>
+                  </h3>
+                  <p>{fmtStamp(note.createdAt)}</p>
                 </div>
               </header>
               <p className="sa-notify-body">{note.body}</p>
@@ -434,28 +462,34 @@ export default function Notifications() {
                 <p className="sa-muted">No live GPS is stored for this trip.</p>
               ) : null}
               <div className="sa-notify-actions">
-                {trip?._id ? (
-                  <Link className="sa-btn sa-btn-primary" to={`/school-admin/live-tracking?trip=${trip._id}`}>
-                    View Live Tracking
+                {notificationHref(note) ? (
+                  <Link className="sa-btn sa-btn-primary" to={notificationHref(note)}>
+                    <BtnIcon name="map" />
+                    {notificationActionLabel(note) || 'Open'}
                   </Link>
                 ) : (
                   <Link className="sa-btn sa-btn-primary" to="/school-admin/live-tracking">
+                    <BtnIcon name="map" />
                     View Live Tracking
                   </Link>
                 )}
                 {driver?._id ? (
                   <Link className="sa-btn sa-btn-outline" to={`/school-admin/drivers/${driver._id}`}>
+                    <BtnIcon name="phone" />
                     Contact Driver
                   </Link>
                 ) : (
                   <button type="button" className="sa-btn sa-btn-outline" disabled>
+                    <BtnIcon name="phone" />
                     Contact Driver
                   </button>
                 )}
                 <Link className="sa-btn sa-btn-outline" to="/school-admin/incidents">
+                  <BtnIcon name="flag" />
                   Create Incident
                 </Link>
                 <button type="button" className="sa-btn sa-btn-outline" onClick={dismiss} disabled={busy}>
+                  <BtnIcon name="trash" />
                   Dismiss
                 </button>
               </div>
@@ -505,7 +539,7 @@ export default function Notifications() {
       )}
 
       <footer className="sa-home-foot">
-        <span>© {year} Transport</span>
+        <span>© {year} {schoolName || 'School'}. All rights reserved.</span>
         <span>Transport Management System v1.0.0</span>
       </footer>
     </div>

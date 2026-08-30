@@ -11,6 +11,9 @@ import {
   SchoolHoliday,
   ScheduleException,
   CalendarEvent,
+  SchoolOuting,
+  OutingPermission,
+  DriverProfile,
 } from '../models/index.js';
 import {
   generateInstancesForSchedule,
@@ -22,7 +25,7 @@ import {
   findPeriodConflict,
   nextTripCode,
 } from '../services/tripScheduleService.js';
-import { notifyTripCancelled, createAndEmitNotifications } from '../services/notifications.js';
+import { notifyTripCancelled, createAndEmitNotifications, NOTIFICATION_TYPES } from '../services/notifications.js';
 import { getIO } from '../socket.js';
 
 const router = Router();
@@ -53,6 +56,7 @@ function populateTrip(q) {
     .populate('busId', 'plate label seats')
     .populate('driverId', 'name email phone photoUrl')
     .populate('scheduleId', 'name period scheduleType scheduledTime')
+    .populate('outingId', 'title location startAt endAt')
     .populate('kidIds', 'name grade homeStopId photoUrl');
 }
 
@@ -94,9 +98,14 @@ const HOUR_BUCKETS = ['12–6 AM', '6–8 AM', '8 AM–12 PM', '12–3 PM', '3�
 function serializeTrip(t, pathByRoute = {}) {
   const json = t.toObject ? t.toObject() : t;
   const rid = String(json.routeId?._id || json.routeId || '');
+  const outing = json.outingId && typeof json.outingId === 'object' ? json.outingId : null;
   return {
     ...json,
-    path: pathByRoute[rid] || '',
+    kind: json.kind || (json.outingId ? 'outing' : 'regular'),
+    outing: outing
+      ? { _id: outing._id, title: outing.title, location: outing.location, startAt: outing.startAt, endAt: outing.endAt }
+      : null,
+    path: pathByRoute[rid] || outing?.location || '',
     studentCount: Array.isArray(json.kidIds) ? json.kidIds.length : 0,
     durationMinutes: durationMinutesOf(json),
   };
@@ -1533,10 +1542,31 @@ router.get('/live-tracking', async (req, res) => {
 
     const tripIds = trips.map((t) => t._id);
     const routeIds = [...new Set(trips.map((t) => t.routeId?._id || t.routeId).filter(Boolean))];
-    const [events, stops] = await Promise.all([
+    const missingDriverIds = [
+      ...new Set(
+        trips
+          .filter((t) => !t.busId && t.driverId)
+          .map((t) => String(t.driverId._id || t.driverId))
+      ),
+    ];
+    const [events, stops, driverBuses] = await Promise.all([
       tripIds.length ? TripEvent.find({ tripId: { $in: tripIds } }) : [],
       routeIds.length ? Stop.find({ routeId: { $in: routeIds } }).sort({ order: 1 }) : [],
+      missingDriverIds.length
+        ? DriverProfile.find({ userId: { $in: missingDriverIds } }).populate('busId', 'plate label seats')
+        : [],
     ]);
+    const busByDriver = new Map(
+      driverBuses
+        .filter((p) => p.busId)
+        .map((p) => [String(p.userId), p.busId])
+    );
+    for (const trip of trips) {
+      if (!trip.busId) {
+        const fallback = busByDriver.get(String(trip.driverId?._id || trip.driverId));
+        if (fallback) trip.busId = fallback;
+      }
+    }
     const eventsByTrip = {};
     for (const e of events) {
       const key = String(e.tripId);
@@ -1720,7 +1750,7 @@ router.get('/calendar', async (req, res) => {
       else byStatus.scheduled += 1;
       incidentCount += (t.incidents || []).length;
       const bid = String(t.busId?._id || t.busId || '');
-      if (bid) buses.add(bid);
+      if (bid && t.status === 'active') buses.add(bid);
       if (t.status !== 'cancelled') {
         for (const id of t.kidIds || []) kids.add(String(id._id || id));
       }
@@ -1734,9 +1764,7 @@ router.get('/calendar', async (req, res) => {
         id: String(t._id),
         tripId: String(t._id),
         routeId: t.routeId?._id ? String(t.routeId._id) : null,
-        title: [period === 'afternoon' ? 'Afternoon' : period === 'evening' ? 'Evening' : period === 'morning' ? 'Morning' : '', routeName]
-          .filter(Boolean)
-          .join(' '),
+        title: routeName,
         period,
         status: t.status,
         startAt: start,
@@ -2071,6 +2099,336 @@ router.delete('/calendar-events/:id', async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+function populateOuting(q) {
+  return q
+    .populate('routeId', 'name')
+    .populate('busId', 'plate label seats')
+    .populate('driverId', 'name phone photoUrl')
+    .populate('tripId', 'tripCode status scheduledFor startedAt endedAt kind')
+    .populate('kidIds', 'name grade');
+}
+
+function periodFromDate(value) {
+  const h = new Date(value).getHours();
+  if (h < 12) return 'morning';
+  if (h < 17) return 'afternoon';
+  return 'evening';
+}
+
+function outingPayload(body = {}) {
+  const startAt = body.startAt ? new Date(body.startAt) : null;
+  const endAt = body.endAt ? new Date(body.endAt) : null;
+  return {
+    title: String(body.title || '').trim().slice(0, 160),
+    location: String(body.location || '').trim().slice(0, 160),
+    notes: String(body.notes || '').trim().slice(0, 2000),
+    startAt,
+    endAt: endAt && !Number.isNaN(endAt.getTime()) ? endAt : null,
+    grade: String(body.grade || '').trim().slice(0, 40),
+    audience: String(body.audience || '').trim().slice(0, 80),
+    busCount: Number(body.busCount) > 0 ? Number(body.busCount) : 1,
+    teacherCount: Number(body.teacherCount) > 0 ? Number(body.teacherCount) : 1,
+    status: ['upcoming', 'completed', 'cancelled'].includes(body.status) ? body.status : 'upcoming',
+    routeId: body.routeId || null,
+    busId: body.busId || null,
+    driverId: body.driverId || null,
+    kidIds: Array.isArray(body.kidIds) ? body.kidIds.filter(Boolean) : [],
+  };
+}
+
+async function kidsForOuting({ schoolId, grade, routeId, kidIds }) {
+  if (Array.isArray(kidIds) && kidIds.length) {
+    return Kid.find({ _id: { $in: kidIds }, schoolId, active: { $ne: false } }).select('_id parentIds name grade');
+  }
+  const filter = { schoolId, active: { $ne: false } };
+  if (grade) {
+    filter.grade = new RegExp(`^${String(grade).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+  } else if (routeId) {
+    filter.routeId = routeId;
+  }
+  return Kid.find(filter).select('_id parentIds name grade');
+}
+
+async function notifyOutingParents(outing, kids) {
+  const items = [];
+  const seen = new Set();
+  for (const kid of kids) {
+    for (const parent of kid.parentIds || []) {
+      const userId = parent._id || parent;
+      const key = String(userId);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      items.push({
+        userId,
+        type: NOTIFICATION_TYPES.ANNOUNCEMENT,
+        title: outing.title,
+        body: `School trip${outing.location ? ` to ${outing.location}` : ''} on ${new Date(outing.startAt).toLocaleDateString()}. Please review and grant permission.`,
+        key: `${userId}:outing:${outing._id}`,
+      });
+    }
+  }
+  if (items.length) await createAndEmitNotifications(getIO(), items);
+}
+
+async function createTransportForOuting({ schoolId, outing, routeId, driverId, busId, kids }) {
+  if (!routeId || !driverId) return null;
+  const route = await Route.findById(routeId);
+  if (!route) {
+    const err = new Error('Route not found');
+    err.status = 404;
+    throw err;
+  }
+  if (String(route.schoolId) !== String(schoolId)) {
+    const err = new Error('Cannot use a route from another school');
+    err.status = 403;
+    throw err;
+  }
+  const serviceDate = startOfDay(outing.startAt);
+  const period = periodFromDate(outing.startAt);
+  const conflict = await findPeriodConflict({
+    schoolId,
+    busId: busId || null,
+    driverId,
+    serviceDate,
+    period,
+  });
+  if (conflict) {
+    const err = new Error(`Transport conflict with ${conflict.tripCode || 'another trip'} that day/period`);
+    err.status = 409;
+    err.conflictTripCode = conflict.tripCode;
+    throw err;
+  }
+  return Trip.create({
+    schoolId,
+    routeId,
+    driverId,
+    busId: busId || null,
+    period,
+    direction: 'to_school',
+    kind: 'outing',
+    outingId: outing._id,
+    serviceDate,
+    scheduledFor: outing.startAt,
+    kidIds: kids.map((k) => k._id || k),
+    tripCode: await nextTripCode(),
+    status: 'scheduled',
+  });
+}
+
+async function cancelOutingTrip(tripId) {
+  if (!tripId) return;
+  const trip = await Trip.findById(tripId);
+  if (!trip || trip.status === 'completed') return;
+  trip.status = 'cancelled';
+  await trip.save();
+}
+
+router.get('/outings', async (req, res) => {
+  try {
+    const schoolId = resolveSchoolId(req);
+    if (!schoolId) return res.json({ outings: [], stats: { total: 0, upcoming: 0, completed: 0, cancelled: 0 } });
+    const outings = await populateOuting(SchoolOuting.find({ schoolId, active: { $ne: false } }).sort({ startAt: -1 }));
+    const ids = outings.map((o) => o._id);
+    const permissions = ids.length
+      ? await OutingPermission.find({ outingId: { $in: ids } }).select('outingId status')
+      : [];
+    const byOuting = new Map();
+    for (const p of permissions) {
+      const key = String(p.outingId);
+      const cur = byOuting.get(key) || { granted: 0, denied: 0, pending: 0, total: 0 };
+      cur.total += 1;
+      if (p.status === 'granted') cur.granted += 1;
+      else if (p.status === 'denied') cur.denied += 1;
+      else cur.pending += 1;
+      byOuting.set(key, cur);
+    }
+    const rows = outings.map((o) => {
+      const json = o.toObject ? o.toObject() : o;
+      return { ...json, permissions: byOuting.get(String(o._id)) || { granted: 0, denied: 0, pending: 0, total: 0 } };
+    });
+    const stats = {
+      total: rows.length,
+      upcoming: rows.filter((o) => o.status === 'upcoming').length,
+      completed: rows.filter((o) => o.status === 'completed').length,
+      cancelled: rows.filter((o) => o.status === 'cancelled').length,
+    };
+    res.json({ outings: rows, stats });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/outings', async (req, res) => {
+  try {
+    let schoolId = resolveSchoolId(req);
+    if (req.user.role === 'super_admin') schoolId = req.body.schoolId || schoolId;
+    if (!schoolId) return res.status(400).json({ error: 'schoolId is required' });
+    const payload = outingPayload(req.body);
+    if (!payload.title || !payload.startAt || Number.isNaN(payload.startAt.getTime())) {
+      return res.status(400).json({ error: 'title and startAt are required' });
+    }
+    const kids = await kidsForOuting({
+      schoolId,
+      grade: payload.grade,
+      routeId: payload.routeId,
+      kidIds: payload.kidIds,
+    });
+    const outing = await SchoolOuting.create({
+      schoolId,
+      ...payload,
+      kidIds: kids.map((k) => k._id),
+    });
+    try {
+      const trip = await createTransportForOuting({
+        schoolId,
+        outing,
+        routeId: payload.routeId,
+        driverId: payload.driverId,
+        busId: payload.busId,
+        kids,
+      });
+      if (trip) {
+        outing.tripId = trip._id;
+        await outing.save();
+      }
+    } catch (transportErr) {
+      outing.active = false;
+      outing.status = 'cancelled';
+      await outing.save();
+      return res.status(transportErr.status || 400).json({
+        error: transportErr.message,
+        conflictTripCode: transportErr.conflictTripCode,
+      });
+    }
+    await notifyOutingParents(outing, kids);
+    const populated = await populateOuting(SchoolOuting.findById(outing._id));
+    res.status(201).json({ outing: populated });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.get('/outings/:id', async (req, res) => {
+  try {
+    const outing = await populateOuting(SchoolOuting.findById(req.params.id));
+    if (!outing || outing.active === false) return res.status(404).json({ error: 'Outing not found' });
+    if (!assertSchoolAccess(req, outing.schoolId)) {
+      return res.status(403).json({ error: 'Cannot view outing from another school' });
+    }
+    const permissions = await OutingPermission.find({ outingId: outing._id })
+      .populate('parentId', 'name phone')
+      .populate('kidId', 'name grade')
+      .sort({ createdAt: -1 });
+    res.json({ outing, permissions });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/outings/:id', async (req, res) => {
+  try {
+    const outing = await SchoolOuting.findById(req.params.id);
+    if (!outing || outing.active === false) return res.status(404).json({ error: 'Outing not found' });
+    if (!assertSchoolAccess(req, outing.schoolId)) {
+      return res.status(403).json({ error: 'Cannot edit outing from another school' });
+    }
+    const payload = outingPayload({ ...outing.toObject(), ...req.body });
+    if (!payload.title || !payload.startAt || Number.isNaN(payload.startAt.getTime())) {
+      return res.status(400).json({ error: 'title and startAt are required' });
+    }
+    const kids = await kidsForOuting({
+      schoolId: outing.schoolId,
+      grade: payload.grade,
+      routeId: payload.routeId,
+      kidIds: payload.kidIds,
+    });
+    Object.assign(outing, payload, { kidIds: kids.map((k) => k._id) });
+    if (payload.status === 'cancelled' && outing.tripId) {
+      await cancelOutingTrip(outing.tripId);
+    }
+    if (payload.status !== 'cancelled' && payload.routeId && payload.driverId) {
+      if (outing.tripId) {
+        const trip = await Trip.findById(outing.tripId);
+        if (trip && trip.status === 'scheduled') {
+          const serviceDate = startOfDay(payload.startAt);
+          const period = periodFromDate(payload.startAt);
+          const conflict = await findPeriodConflict({
+            schoolId: outing.schoolId,
+            busId: payload.busId || null,
+            driverId: payload.driverId,
+            serviceDate,
+            period,
+            excludeTripId: trip._id,
+          });
+          if (conflict) {
+            return res.status(409).json({
+              error: `Transport conflict with ${conflict.tripCode || 'another trip'} that day/period`,
+              conflictTripCode: conflict.tripCode,
+            });
+          }
+          trip.routeId = payload.routeId;
+          trip.driverId = payload.driverId;
+          trip.busId = payload.busId || null;
+          trip.serviceDate = serviceDate;
+          trip.scheduledFor = payload.startAt;
+          trip.period = period;
+          trip.kidIds = kids.map((k) => k._id);
+          await trip.save();
+        }
+      } else {
+        const trip = await createTransportForOuting({
+          schoolId: outing.schoolId,
+          outing,
+          routeId: payload.routeId,
+          driverId: payload.driverId,
+          busId: payload.busId,
+          kids,
+        });
+        if (trip) outing.tripId = trip._id;
+      }
+    }
+    await outing.save();
+    const populated = await populateOuting(SchoolOuting.findById(outing._id));
+    res.json({ outing: populated });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message, conflictTripCode: err.conflictTripCode });
+  }
+});
+
+router.post('/outings/:id/cancel', async (req, res) => {
+  try {
+    const outing = await SchoolOuting.findById(req.params.id);
+    if (!outing || outing.active === false) return res.status(404).json({ error: 'Outing not found' });
+    if (!assertSchoolAccess(req, outing.schoolId)) {
+      return res.status(403).json({ error: 'Cannot cancel outing from another school' });
+    }
+    outing.status = 'cancelled';
+    await outing.save();
+    await cancelOutingTrip(outing.tripId);
+    const populated = await populateOuting(SchoolOuting.findById(outing._id));
+    res.json({ outing: populated });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete('/outings/:id', async (req, res) => {
+  try {
+    const outing = await SchoolOuting.findById(req.params.id);
+    if (!outing) return res.status(404).json({ error: 'Outing not found' });
+    if (!assertSchoolAccess(req, outing.schoolId)) {
+      return res.status(403).json({ error: 'Cannot delete outing from another school' });
+    }
+    outing.active = false;
+    outing.status = 'cancelled';
+    await outing.save();
+    await cancelOutingTrip(outing.tripId);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 

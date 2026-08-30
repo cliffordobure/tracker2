@@ -11,17 +11,18 @@ export function createBoltCarElement({
   el.title = label || 'Bus';
 
   const deg = Number.isFinite(heading) && heading >= 0 ? heading : 0;
+  const uid = `bolt${Math.random().toString(36).slice(2, 9)}`;
   el.innerHTML = `
     <div class="marker-bolt-pulse" aria-hidden="true"></div>
     <div class="marker-bolt-inner">
       <div class="marker-bolt-rotator" style="transform: rotate(${deg}deg)">
         <svg viewBox="0 0 52 52" aria-hidden="true">
           <defs>
-            <filter id="boltShadow" x="-40%" y="-40%" width="180%" height="180%">
+            <filter id="${uid}Shadow" x="-40%" y="-40%" width="180%" height="180%">
               <feDropShadow dx="0" dy="2" stdDeviation="2" flood-opacity="0.28"/>
             </filter>
           </defs>
-          <g filter="url(#boltShadow)">
+          <g filter="url(#${uid}Shadow)">
             <rect x="16" y="8" width="20" height="36" rx="7" fill="#2BEE8C" stroke="#fff" stroke-width="2"/>
             <rect x="16" y="16" width="3.5" height="20" rx="2" fill="#10B981"/>
             <rect x="32.5" y="16" width="3.5" height="20" rx="2" fill="#10B981"/>
@@ -30,6 +31,7 @@ export function createBoltCarElement({
             <rect x="20.5" y="22" width="11" height="7" rx="2" fill="#fff" fill-opacity="0.35"/>
             <circle cx="20.5" cy="9.5" r="1.6" fill="#fff"/>
             <circle cx="31.5" cy="9.5" r="1.6" fill="#fff"/>
+            <rect x="20.5" y="39.2" width="11" height="3.1" rx="0.45" fill="#F7E017" stroke="#111827" stroke-width="0.45"/>
           </g>
         </svg>
       </div>
@@ -50,6 +52,24 @@ export function setBoltCarHeading(el, heading) {
 export function setBoltCarSelected(el, selected) {
   if (!el) return;
   el.classList.toggle('is-selected', !!selected);
+}
+
+export function setBoltCarLabel(el, label) {
+  if (!el) return;
+  const text = String(label || '').trim();
+  el.title = text || 'Bus';
+  const inner = el.querySelector('.marker-bolt-inner');
+  let span = el.querySelector('.marker-bolt-label');
+  if (!text) {
+    span?.remove();
+    return;
+  }
+  if (!span) {
+    span = document.createElement('span');
+    span.className = 'marker-bolt-label';
+    inner?.appendChild(span);
+  }
+  span.textContent = text;
 }
 
 function escapeHtml(s) {

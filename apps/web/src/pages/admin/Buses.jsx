@@ -115,7 +115,7 @@ function fmtDate(value) {
   if (!value) return '';
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 function daysUntil(value) {
@@ -132,8 +132,121 @@ function vehicleName(b) {
   return b.label || b.plate || 'Vehicle';
 }
 
+function prettySchool(name) {
+  const raw = String(name || 'School').trim();
+  return raw.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function pctBar(part, total) {
+  if (!total) return 0;
+  return Math.min(100, Math.round(((Number(part) || 0) / total) * 100));
+}
+
+function daysTone(days, warnAt = 45) {
+  if (days == null) return '';
+  if (days < 0) return 'is-expired';
+  if (days < warnAt) return 'is-soon';
+  return 'is-ok';
+}
+
+function daysLabel(days, { expired, today, unit }) {
+  if (days == null) return '';
+  if (days < 0) return `${expired} ${Math.abs(days)} day${Math.abs(days) === 1 ? '' : 's'} ago`;
+  if (days === 0) return today;
+  return `${days} ${unit}${days === 1 ? '' : 's'} left`;
+}
+
+function BusKpiGlyph({ name }) {
+  const common = {
+    width: 16,
+    height: 16,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.8,
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+  };
+  if (name === 'bus') {
+    return (
+      <svg {...common}>
+        <rect x="3" y="7" width="18" height="10" rx="2" />
+        <path d="M7 17v2M17 17v2M3 12h18" />
+      </svg>
+    );
+  }
+  if (name === 'wrench') {
+    return (
+      <svg {...common}>
+        <path d="M14.7 6.3a4.5 4.5 0 0 0-6.4 6.4L3 18l3 3 5.3-5.3a4.5 4.5 0 0 0 6.4-6.4l-2.5 2.5-2.5-2.5 2.5-2.5Z" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common}>
+      <path d="M12 3 4.5 6.2v5.4c0 4.4 2.9 8.4 7.5 9.6 4.6-1.2 7.5-5.2 7.5-9.6V6.2L12 3Z" />
+    </svg>
+  );
+}
+
+function BusKpiMark({ name }) {
+  const common = {
+    width: 11,
+    height: 11,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 2.2,
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+  };
+  if (name === 'check') return <svg {...common}><path d="M5 12.5 10 17.5 19 7" /></svg>;
+  if (name === 'pause') return <svg {...common}><path d="M9 6v12M15 6v12" /></svg>;
+  return (
+    <svg {...common}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 8v5M12 16.5h.01" />
+    </svg>
+  );
+}
+
+function ActionGlyph({ name }) {
+  const common = {
+    width: 14,
+    height: 14,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.8,
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+  };
+  if (name === 'view') {
+    return (
+      <svg {...common}>
+        <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+        <circle cx="12" cy="12" r="3" />
+      </svg>
+    );
+  }
+  if (name === 'edit') {
+    return (
+      <svg {...common}>
+        <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common}>
+      <circle cx="12" cy="5" r="1.35" />
+      <circle cx="12" cy="12" r="1.35" />
+      <circle cx="12" cy="19" r="1.35" />
+    </svg>
+  );
+}
+
 export default function Buses() {
-  const { globalSearch = '' } = useOutletContext() || {};
+  const { globalSearch = '', schoolName } = useOutletContext() || {};
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const openedEdit = useRef('');
@@ -148,9 +261,10 @@ export default function Buses() {
   const [fuelFilter, setFuelFilter] = useState('');
   const [moreFilters, setMoreFilters] = useState(false);
   const [colorFilter, setColorFilter] = useState('');
+  const [routeFilter, setRouteFilter] = useState('');
+  const [driverFilter, setDriverFilter] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
-  const [selected, setSelected] = useState(() => new Set());
   const [menuId, setMenuId] = useState('');
   const [panel, setPanel] = useState(null);
   const [viewing, setViewing] = useState(null);
@@ -172,15 +286,37 @@ export default function Buses() {
   }, [globalSearch]);
 
   useEffect(() => {
-    const close = () => setMenuId('');
-    window.addEventListener('click', close);
-    return () => window.removeEventListener('click', close);
-  }, []);
+    if (!menuId) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'Escape') setMenuId('');
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [menuId]);
 
   const colors = useMemo(
     () => [...new Set(buses.map((b) => b.color).filter(Boolean))].sort(),
     [buses]
   );
+
+  const routeOptions = useMemo(() => {
+    const map = new Map();
+    buses.forEach((b) => {
+      (b.routes || []).forEach((r) => {
+        if (r?.id) map.set(r.id, r.name || 'Route');
+      });
+    });
+    return [...map.entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1])));
+  }, [buses]);
+
+  const driverOptions = useMemo(() => {
+    const map = new Map();
+    buses.forEach((b) => {
+      const key = b.driver?.id || b.driver?.name;
+      if (key) map.set(key, b.driver.name);
+    });
+    return [...map.entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1])));
+  }, [buses]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -193,6 +329,8 @@ export default function Buses() {
       if (capacityFilter && capacityBucket(b.seats) !== capacityFilter) return false;
       if (fuelFilter && b.fuelType !== fuelFilter) return false;
       if (colorFilter && b.color !== colorFilter) return false;
+      if (routeFilter && !(b.routes || []).some((r) => r.id === routeFilter)) return false;
+      if (driverFilter && (b.driver?.id || b.driver?.name) !== driverFilter) return false;
       if (!needle) return true;
       const hay = [
         b.label,
@@ -202,13 +340,14 @@ export default function Buses() {
         b.color,
         typeLabel(b.vehicleType),
         b.driver?.name,
+        b.routeName,
       ]
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
       return hay.includes(needle);
     });
-  }, [buses, q, statusFilter, typeFilter, capacityFilter, fuelFilter, colorFilter]);
+  }, [buses, q, statusFilter, typeFilter, capacityFilter, fuelFilter, colorFilter, routeFilter, driverFilter]);
 
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, pages);
@@ -216,27 +355,7 @@ export default function Buses() {
 
   useEffect(() => {
     setPage(1);
-  }, [q, statusFilter, typeFilter, capacityFilter, fuelFilter, colorFilter, pageSize]);
-
-  const allOnPageSelected = slice.length > 0 && slice.every((b) => selected.has(busId(b)));
-
-  const toggleAllPage = () => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (allOnPageSelected) slice.forEach((b) => next.delete(busId(b)));
-      else slice.forEach((b) => next.add(busId(b)));
-      return next;
-    });
-  };
-
-  const toggleRow = (id) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
+  }, [q, statusFilter, typeFilter, capacityFilter, fuelFilter, colorFilter, routeFilter, driverFilter, pageSize]);
 
   const closePanel = () => {
     setPanel(null);
@@ -363,7 +482,7 @@ export default function Buses() {
   };
 
   const exportRows = () => {
-    const rows = selected.size ? filtered.filter((b) => selected.has(busId(b))) : filtered;
+    const rows = filtered;
     const header = ['Label', 'Code', 'Plate', 'Type', 'Model', 'Seats', 'Driver', 'Status', 'Insurance Expiry', 'Next Service'];
     const lines = [
       header.join(','),
@@ -392,50 +511,62 @@ export default function Buses() {
   };
 
   const year = new Date().getFullYear();
+  const menuBus = buses.find((b) => busId(b) === menuId);
+  const menuStatus = menuBus ? busStatus(menuBus) : null;
   const canSave = Boolean(String(form.plate).trim() && Number(form.seats) >= 1);
+  const total = stats?.total ?? buses.length;
+  const activeCount = stats?.active ?? buses.filter((b) => busStatus(b).label === 'Active').length;
+  const maintenanceCount = stats?.maintenance ?? 0;
+  const insuranceCount = stats?.insuranceValid ?? 0;
   const kpis = [
     {
-      label: 'Total Vehicles',
-      value: stats?.total ?? buses.length,
-      hint: stats?.addedThisMonth ? `↑ ${stats.addedThisMonth} this month` : 'No change this month',
-      up: Boolean(stats?.addedThisMonth),
-      tint: 'purple',
-    },
-    {
+      key: 'active',
       label: 'Active Vehicles',
-      value: stats?.active ?? buses.filter((b) => busStatus(b).label === 'Active').length,
-      hint: pct(stats?.active ?? 0, stats?.total || buses.length),
+      value: activeCount,
+      hint: `${pct(activeCount, total)} of total`,
       tint: 'green',
+      icon: 'bus',
+      mark: 'check',
+      bar: pctBar(activeCount, total),
     },
     {
+      key: 'maint',
       label: 'Under Maintenance',
-      value: stats?.maintenance ?? 0,
-      hint: pct(stats?.maintenance ?? 0, stats?.total || buses.length),
+      value: maintenanceCount,
+      hint: `${pct(maintenanceCount, total)} of total`,
       tint: 'orange',
+      icon: 'wrench',
+      mark: 'pause',
+      bar: pctBar(maintenanceCount, total),
     },
     {
-      label: 'Out of Service',
-      value: stats?.outOfService ?? 0,
-      hint: pct(stats?.outOfService ?? 0, stats?.total || buses.length),
-      tint: 'rose',
-    },
-    {
+      key: 'ins',
       label: 'Insurance Valid',
-      value: stats?.insuranceValid ?? 0,
-      hint: pct(stats?.insuranceValid ?? 0, stats?.total || buses.length),
-      tint: 'violet',
+      value: insuranceCount,
+      hint: `${pct(insuranceCount, total)} of total`,
+      tint: 'rose',
+      icon: 'shield',
+      mark: 'alert',
+      bar: pctBar(insuranceCount, total),
     },
   ];
 
   return (
-    <div className="sa-students">
+    <div className="sa-buses">
       {error && <div className="alert">{error}</div>}
       {success && <div className="alert alert-ok">{success}</div>}
 
-      <div className="sa-sd-top">
-        <span />
-        <div className="sa-sd-top-actions">
-          <button type="button" className="sa-btn sa-btn-outline sa-stu-export" onClick={exportRows}>
+      <div className="sa-bus-head">
+        <div>
+          <h2>Buses / Vehicles</h2>
+          <p>Manage and monitor all school buses and their status.</p>
+        </div>
+        <div className="sa-bus-head-actions">
+          <button type="button" className="sa-btn sa-btn-outline sa-bus-export" onClick={exportRows}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+              <path d="M12 4v10M8 10l4 4 4-4" />
+              <path d="M5 18h14" />
+            </svg>
             Export
           </button>
           <button type="button" className="sa-btn sa-btn-primary" onClick={startCreate}>
@@ -444,27 +575,38 @@ export default function Buses() {
         </div>
       </div>
 
-      <section className="sa-stu-kpis sa-tch-kpis" aria-label="Vehicle metrics">
+      <section className="sa-bus-kpis" aria-label="Vehicle metrics">
         {kpis.map((m) => (
-          <article key={m.label} className={`sa-stu-kpi tint-${m.tint}`}>
-            <div>
+          <article key={m.key} className={`sa-bus-kpi tint-${m.tint}`}>
+            <i className="sa-bus-kpi-icon" aria-hidden="true">
+              <BusKpiGlyph name={m.icon} />
+            </i>
+            <div className="sa-bus-kpi-copy">
               <span>{m.label}</span>
               <strong>{m.value}</strong>
-              <em className={m.up ? 'is-up' : ''}>{m.hint}</em>
+              <em>{m.hint}</em>
             </div>
-            <i className="sa-stu-kpi-icon" aria-hidden="true" />
+            <b className="sa-bus-kpi-mark" aria-hidden="true">
+              <BusKpiMark name={m.mark} />
+            </b>
+            <div className="sa-bus-kpi-bar" aria-hidden="true">
+              <i style={{ width: `${m.bar}%` }} />
+            </div>
           </article>
         ))}
       </section>
 
-      <section className="sa-card sa-stu-table-card">
-        <div className="sa-stu-toolbar sa-drv-toolbar">
+      <section className="sa-card sa-bus-table-card">
+        <div className="sa-bus-toolbar">
           <label className="sa-stu-search">
-            <span aria-hidden="true">⌕</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-3.2-3.2" />
+            </svg>
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search by bus number, plate no. or model..."
+              placeholder="Search by bus name..."
             />
           </label>
           <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Status">
@@ -473,34 +615,53 @@ export default function Buses() {
             <option value="maintenance">Under Maintenance</option>
             <option value="out_of_service">Out of Service</option>
           </select>
-          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} aria-label="Type">
-            <option value="">All Types</option>
-            {VEHICLE_TYPES.map((t) => (
-              <option key={t.value} value={t.value}>
-                {t.label}
-              </option>
-            ))}
-          </select>
           <select value={capacityFilter} onChange={(e) => setCapacityFilter(e.target.value)} aria-label="Capacity">
             <option value="">All Capacity</option>
             <option value="1-20">1–20 seats</option>
             <option value="21-40">21–40 seats</option>
             <option value="41+">41+ seats</option>
           </select>
-          <select value={fuelFilter} onChange={(e) => setFuelFilter(e.target.value)} aria-label="Fuel type">
-            <option value="">All Fuel Types</option>
-            {FUEL_TYPES.map((t) => (
-              <option key={t.value} value={t.value}>
-                {t.label}
+          <select value={routeFilter} onChange={(e) => setRouteFilter(e.target.value)} aria-label="Route">
+            <option value="">All Routes</option>
+            {routeOptions.map(([id, name]) => (
+              <option key={id} value={id}>
+                {name}
               </option>
             ))}
           </select>
-          <button type="button" className="sa-btn sa-btn-outline" onClick={() => setMoreFilters((v) => !v)}>
+          <select value={driverFilter} onChange={(e) => setDriverFilter(e.target.value)} aria-label="Driver">
+            <option value="">All Driver</option>
+            {driverOptions.map(([id, name]) => (
+              <option key={id} value={id}>
+                {name}
+              </option>
+            ))}
+          </select>
+          <button type="button" className="sa-btn sa-btn-outline sa-bus-more-btn" onClick={() => setMoreFilters((v) => !v)}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+              <path d="M4 6h16M7 12h10M10 18h4" />
+            </svg>
             More Filters
           </button>
         </div>
         {moreFilters && (
-          <div className="sa-tch-more">
+          <div className="sa-bus-more">
+            <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} aria-label="Type">
+              <option value="">All Types</option>
+              {VEHICLE_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+            <select value={fuelFilter} onChange={(e) => setFuelFilter(e.target.value)} aria-label="Fuel type">
+              <option value="">All Fuel Types</option>
+              {FUEL_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
             <select value={colorFilter} onChange={(e) => setColorFilter(e.target.value)} aria-label="Color">
               <option value="">All colours</option>
               {colors.map((c) => (
@@ -513,14 +674,10 @@ export default function Buses() {
         )}
 
         <div className="sa-table-wrap">
-          <table className="sa-table sa-stu-table sa-drv-table">
+          <table className="sa-table sa-bus-table">
             <thead>
               <tr>
-                <th>
-                  <input type="checkbox" checked={allOnPageSelected} onChange={toggleAllPage} aria-label="Select page" />
-                </th>
-                <th>Vehicle</th>
-                <th>Registration No.</th>
+                <th>Vehicle No.</th>
                 <th>Type / Model</th>
                 <th>Capacity</th>
                 <th>Driver</th>
@@ -539,120 +696,103 @@ export default function Buses() {
                 return (
                   <tr key={id}>
                     <td>
-                      <input
-                        type="checkbox"
-                        checked={selected.has(id)}
-                        onChange={() => toggleRow(id)}
-                        aria-label={`Select ${vehicleName(b)}`}
-                      />
-                    </td>
-                    <td>
-                      <div className="sa-stu-person">
-                        {b.photoUrl ? <img src={b.photoUrl} alt="" /> : <span>{initials(vehicleName(b))}</span>}
+                      <div className="sa-bus-id">
+                        <i className="sa-bus-id-icon" aria-hidden="true">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                            <rect x="3" y="7" width="18" height="10" rx="2" />
+                            <path d="M7 17v2M17 17v2M3 12h18" />
+                          </svg>
+                        </i>
                         <div>
-                          <strong>{vehicleName(b)}</strong>
-                          <small>{b.code || '—'}</small>
+                          <strong>{b.plate || vehicleName(b)}</strong>
+                          <em>{typeLabel(b.vehicleType) || 'School Bus'}</em>
                         </div>
                       </div>
                     </td>
-                    <td>{b.plate || '—'}</td>
                     <td>
-                      <span>
-                        {b.model || '—'}
-                        {typeLabel(b.vehicleType) ? <small className="sa-stu-phone">{typeLabel(b.vehicleType)}</small> : null}
-                      </span>
+                      <div className="sa-bus-cell">
+                        <strong>{b.model || '—'}</strong>
+                        <small>{b.year ? `${b.year} Model` : '—'}</small>
+                      </div>
                     </td>
-                    <td>{b.seats ? `${b.seats} seats` : '—'}</td>
+                    <td>
+                      <div className="sa-bus-cell">
+                        <strong>{b.seats ? `${b.seats} Seats` : '—'}</strong>
+                        <small className="is-students">{Number(b.studentCount) || 0} Students</small>
+                      </div>
+                    </td>
                     <td>
                       {b.driver?.name ? (
-                        <span>
-                          {b.driver.name}
-                          {b.extraDrivers ? <small className="sa-stu-phone">+{b.extraDrivers} more</small> : null}
-                        </span>
+                        <div className="sa-bus-driver">
+                          {b.driver.photoUrl ? <img src={b.driver.photoUrl} alt="" /> : <span>{initials(b.driver.name)}</span>}
+                          <div>
+                            <strong>{b.driver.name}</strong>
+                            <small>{b.driver.phone || (b.extraDrivers ? `+${b.extraDrivers} more` : '—')}</small>
+                          </div>
+                        </div>
                       ) : (
-                        '—'
+                        <span className="sa-bus-muted">Unassigned</span>
                       )}
                     </td>
                     <td>
-                      <span className={`sa-stu-status is-${status.key}`}>{status.label}</span>
+                      <span className={`sa-stu-status is-${status.key}`}>{status.label === 'Under Maintenance' ? 'Maintenance' : status.label}</span>
                     </td>
                     <td>
                       {b.insuranceExpiry ? (
-                        <span className={insDays != null && insDays < 0 ? 'sa-drv-expiry is-expired' : 'sa-drv-expiry'}>
-                          {insDays != null && insDays < 0 ? `Expired ${fmtDate(b.insuranceExpiry)}` : fmtDate(b.insuranceExpiry)}
-                          {insDays != null && insDays >= 0 ? (
-                            <small className="sa-stu-phone">
-                              {insDays === 0 ? 'Expires today' : `${insDays} day${insDays === 1 ? '' : 's'} left`}
-                            </small>
-                          ) : null}
-                        </span>
+                        <div className={`sa-bus-date ${daysTone(insDays, 60)}`}>
+                          <i aria-hidden="true">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                              <rect x="3" y="5" width="18" height="16" rx="2" />
+                              <path d="M8 3v4M16 3v4M3 11h18" />
+                            </svg>
+                          </i>
+                          <div>
+                            <strong>{fmtDate(b.insuranceExpiry)}</strong>
+                            <small>{daysLabel(insDays, { expired: 'Expired', today: 'Expires today', unit: 'day' })}</small>
+                          </div>
+                        </div>
                       ) : (
-                        '—'
+                        <span className="sa-bus-muted">—</span>
                       )}
                     </td>
                     <td>
                       {b.nextServiceAt ? (
-                        <span className={`sa-bus-service${svcDays != null && svcDays < 0 ? ' is-overdue' : ''}`}>
-                          {svcDays != null && svcDays < 0 ? `Overdue ${fmtDate(b.nextServiceAt)}` : fmtDate(b.nextServiceAt)}
-                          {svcDays != null && svcDays >= 0 ? (
-                            <small className="sa-stu-phone">
-                              {svcDays === 0 ? 'Due today' : `${svcDays} day${svcDays === 1 ? '' : 's'} left`}
-                            </small>
-                          ) : null}
-                        </span>
+                        <div className={`sa-bus-date ${daysTone(svcDays, 45)}`}>
+                          <i aria-hidden="true">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                              <path d="M14.7 6.3a4.5 4.5 0 0 0-6.4 6.4L3 18l3 3 5.3-5.3a4.5 4.5 0 0 0 6.4-6.4l-2.5 2.5-2.5-2.5 2.5-2.5Z" />
+                            </svg>
+                          </i>
+                          <div>
+                            <strong>{fmtDate(b.nextServiceAt)}</strong>
+                            <small>{daysLabel(svcDays, { expired: 'Overdue', today: 'Due today', unit: 'day' })}</small>
+                          </div>
+                        </div>
                       ) : (
-                        '—'
+                        <span className="sa-bus-muted">—</span>
                       )}
                     </td>
                     <td>
-                      <div className="sa-stu-actions">
+                      <div className="sa-stu-actions sa-bus-actions">
                         <button
                           type="button"
                           className="sa-icon-ghost is-view"
                           aria-label="View"
                           onClick={() => navigate(`/school-admin/buses/${id}`)}
                         >
-                          ◉
+                          <ActionGlyph name="view" />
                         </button>
                         <button type="button" className="sa-icon-ghost is-edit" aria-label="Edit" onClick={() => startEdit(b)}>
-                          ✎
+                          <ActionGlyph name="edit" />
                         </button>
-                        <div className="sa-stu-more">
-                          <button
-                            type="button"
-                            className="sa-icon-ghost"
-                            aria-label="More"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              e.nativeEvent.stopImmediatePropagation();
-                              setMenuId((cur) => (cur === id ? '' : id));
-                            }}
-                          >
-                            ⋮
-                          </button>
-                          {menuId === id && (
-                            <div className="sa-stu-menu" onClick={(e) => e.stopPropagation()}>
-                              {status.label !== 'Active' && (
-                                <button type="button" onClick={() => { setStatus(b, 'active'); setMenuId(''); }}>
-                                  Mark active
-                                </button>
-                              )}
-                              {status.label !== 'Under Maintenance' && (
-                                <button type="button" onClick={() => { setStatus(b, 'maintenance'); setMenuId(''); }}>
-                                  Under maintenance
-                                </button>
-                              )}
-                              {status.label !== 'Out of Service' && (
-                                <button type="button" onClick={() => { setStatus(b, 'out_of_service'); setMenuId(''); }}>
-                                  Out of service
-                                </button>
-                              )}
-                              <button type="button" className="is-danger" onClick={() => { setMenuId(''); remove(b); }}>
-                                Delete
-                              </button>
-                            </div>
-                          )}
-                        </div>
+                        <button
+                          type="button"
+                          className="sa-icon-ghost"
+                          aria-label="More"
+                          onClick={() => setMenuId((cur) => (cur === id ? '' : id))}
+                        >
+                          <ActionGlyph name="more" />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -660,7 +800,7 @@ export default function Buses() {
               })}
               {!slice.length && (
                 <tr>
-                  <td colSpan={10} className="sa-stu-empty">
+                  <td colSpan={8} className="sa-stu-empty">
                     No vehicles match these filters.
                   </td>
                 </tr>
@@ -672,7 +812,7 @@ export default function Buses() {
         <div className="sa-table-foot sa-stu-foot">
           <span>
             Showing {filtered.length ? (safePage - 1) * pageSize + 1 : 0} to{' '}
-            {Math.min(safePage * pageSize, filtered.length)} of {filtered.length} vehicles
+            {Math.min(safePage * pageSize, filtered.length)} of {filtered.length} vehicle{filtered.length === 1 ? '' : 's'}
           </span>
           <label className="sa-stu-pagesize">
             <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}>
@@ -900,8 +1040,148 @@ export default function Buses() {
         </aside>
       )}
 
+      {menuBus && (
+        <div className="sa-action-overlay" onClick={() => setMenuId('')} role="presentation">
+          <div
+            className="sa-action-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="sa-bus-action-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <header className="sa-action-head">
+              <div>
+                <p className="sa-action-kicker">Vehicle actions</p>
+                <h3 id="sa-bus-action-title">{menuBus.plate || vehicleName(menuBus)}</h3>
+                <small>
+                  {typeLabel(menuBus.vehicleType) || 'School Bus'} · {menuStatus.label}
+                </small>
+              </div>
+              <button type="button" className="sa-icon-ghost" aria-label="Close" onClick={() => setMenuId('')}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M6 6l12 12M18 6 6 18" />
+                </svg>
+              </button>
+            </header>
+            <div className="sa-action-list">
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuId('');
+                  navigate(`/school-admin/buses/${busId(menuBus)}`);
+                }}
+              >
+                <i aria-hidden="true">
+                  <ActionGlyph name="view" />
+                </i>
+                <span>
+                  <strong>View details</strong>
+                  <em>Open the full vehicle profile</em>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuId('');
+                  startEdit(menuBus);
+                }}
+              >
+                <i aria-hidden="true">
+                  <ActionGlyph name="edit" />
+                </i>
+                <span>
+                  <strong>Edit vehicle</strong>
+                  <em>Update registration, capacity, or insurance</em>
+                </span>
+              </button>
+              {menuStatus.label !== 'Active' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStatus(menuBus, 'active');
+                    setMenuId('');
+                  }}
+                >
+                  <i aria-hidden="true">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                      <path d="M5 12.5 10 17.5 19 7" />
+                    </svg>
+                  </i>
+                  <span>
+                    <strong>Mark active</strong>
+                    <em>Return this vehicle to service</em>
+                  </span>
+                </button>
+              )}
+              {menuStatus.label !== 'Under Maintenance' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStatus(menuBus, 'maintenance');
+                    setMenuId('');
+                  }}
+                >
+                  <i aria-hidden="true">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                      <path d="M14.7 6.3a4.5 4.5 0 0 0-6.4 6.4L3 18l3 3 5.3-5.3a4.5 4.5 0 0 0 6.4-6.4l-2.5 2.5-2.5-2.5 2.5-2.5Z" />
+                    </svg>
+                  </i>
+                  <span>
+                    <strong>Under maintenance</strong>
+                    <em>Temporarily take this vehicle offline</em>
+                  </span>
+                </button>
+              )}
+              {menuStatus.label !== 'Out of Service' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStatus(menuBus, 'out_of_service');
+                    setMenuId('');
+                  }}
+                >
+                  <i aria-hidden="true">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                      <circle cx="12" cy="12" r="8" />
+                      <path d="M8 8l8 8" />
+                    </svg>
+                  </i>
+                  <span>
+                    <strong>Out of service</strong>
+                    <em>Remove this vehicle from the active fleet</em>
+                  </span>
+                </button>
+              )}
+              <button
+                type="button"
+                className="is-danger"
+                onClick={() => {
+                  setMenuId('');
+                  remove(menuBus);
+                }}
+              >
+                <i aria-hidden="true">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                    <path d="M4 7h16M9 7V5h6v2M8 7l1 12h6l1-12" />
+                  </svg>
+                </i>
+                <span>
+                  <strong>Delete vehicle</strong>
+                  <em>Permanently remove this record</em>
+                </span>
+              </button>
+            </div>
+            <div className="sa-action-foot">
+              <button type="button" className="sa-btn sa-btn-outline" onClick={() => setMenuId('')}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <footer className="sa-home-foot">
-        <span>© {year} Transport</span>
+        <span>© {year} {prettySchool(schoolName)}. All rights reserved.</span>
         <span>Transport Management System v1.0.0</span>
       </footer>
     </div>

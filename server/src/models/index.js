@@ -34,6 +34,7 @@ export { Message } from './Message.js';
 export { CalendarEvent } from './CalendarEvent.js';
 export { FeeStatement } from './FeeStatement.js';
 export { AuditLog } from './AuditLog.js';
+export { VehicleRecord } from './VehicleRecord.js';
 export { FeatureRequest } from './FeatureRequest.js';
 export { PlatformSettings } from './PlatformSettings.js';
 export { PlatformNotice } from './PlatformNotice.js';

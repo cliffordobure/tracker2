@@ -12,6 +12,7 @@
     "dev:server": "npm run dev -w server",
     "dev:web": "npm run dev -w web",
     "seed": "npm run seed -w server",
+    "clear-sample-data": "npm run clear-sample-data -w server",
     "install:all": "npm install"
   },
   "devDependencies": {

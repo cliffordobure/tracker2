@@ -308,6 +308,9 @@ router.post('/:id/location', authenticate, requireRole('driver'), async (req, re
     const payload = { tripId: trip._id.toString(), ...ping };
     const io = getIO();
     io?.to(`trip:${trip._id}`).emit('location:update', payload);
+    if (trip.schoolId) {
+      io?.to(`school:${trip.schoolId}`).emit('location:update', payload);
+    }
 
     // Parents only get live GPS after the trip is actually started.
     if (trip.status === 'active') {

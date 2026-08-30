@@ -428,17 +428,20 @@ export default function Drivers() {
       <section className="sa-stu-kpis sa-tch-kpis" aria-label="Driver metrics">
         {kpis.map((m) => (
           <article key={m.label} className={`sa-stu-kpi tint-${m.tint}`}>
+            <i className="sa-stu-kpi-icon" aria-hidden="true" />
             <div>
               <span>{m.label}</span>
               <strong>{m.value}</strong>
               <em className={m.up ? 'is-up' : ''}>{m.hint}</em>
             </div>
-            <i className="sa-stu-kpi-icon" aria-hidden="true" />
+            <svg className="sa-stu-spark" viewBox="0 0 120 18" preserveAspectRatio="none" aria-hidden="true">
+              <path d="M0 12 C12 12 14 6 24 6 S36 14 48 11 S64 4 76 7 S96 16 120 8" fill="none" stroke="currentColor" strokeWidth="1.8" />
+            </svg>
           </article>
         ))}
       </section>
 
-      <section className="sa-card sa-stu-table-card">
+      <section className={`sa-card sa-stu-table-card${menuId ? ' is-menu-open' : ''}`}>
         <div className="sa-stu-toolbar sa-drv-toolbar">
           <label className="sa-stu-search">
             <span aria-hidden="true">⌕</span>
@@ -509,7 +512,7 @@ export default function Drivers() {
               </tr>
             </thead>
             <tbody>
-              {slice.map((d) => {
+              {slice.map((d, i) => {
                 const status = driverStatus(d);
                 const id = driverId(d);
                 const days = daysUntil(d.profile?.licenseExpiry);
@@ -576,25 +579,41 @@ export default function Drivers() {
                         <button type="button" className="sa-icon-ghost is-edit" aria-label="Edit" onClick={() => startEdit(d)}>
                           ✎
                         </button>
-                        <div className="sa-stu-more">
+                        <div className={`sa-stu-more${menuId === id ? ' is-open' : ''}${i >= slice.length - 1 ? ' is-up' : ''}`}>
                           <button
                             type="button"
                             className="sa-icon-ghost"
                             aria-label="More"
+                            aria-expanded={menuId === id}
                             onClick={(e) => {
                               e.stopPropagation();
                               e.nativeEvent.stopImmediatePropagation();
                               setMenuId((cur) => (cur === id ? '' : id));
                             }}
                           >
-                            ⋮
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                              <circle cx="12" cy="5" r="1.6" />
+                              <circle cx="12" cy="12" r="1.6" />
+                              <circle cx="12" cy="19" r="1.6" />
+                            </svg>
                           </button>
                           {menuId === id && (
-                            <div className="sa-stu-menu" onClick={(e) => e.stopPropagation()}>
-                              <button type="button" onClick={() => { setActive(d, d.active === false); setMenuId(''); }}>
+                            <div className="sa-stu-menu" role="menu" onClick={(e) => e.stopPropagation()}>
+                              <button type="button" role="menuitem" onClick={() => { setActive(d, d.active === false); setMenuId(''); }}>
+                                <i aria-hidden="true">
+                                  {d.active === false ? (
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="8" /><path d="m9 12 2.2 2.2L15.5 10" /></svg>
+                                  ) : (
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="8" /><path d="M10 9v6M14 9v6" /></svg>
+                                  )}
+                                </i>
                                 {d.active === false ? 'Activate' : 'Deactivate'}
                               </button>
-                              <button type="button" className="is-danger" onClick={() => { setMenuId(''); remove(d); }}>
+                              <span className="sa-stu-menu-sep" />
+                              <button type="button" role="menuitem" className="is-danger" onClick={() => { setMenuId(''); remove(d); }}>
+                                <i aria-hidden="true">
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 7h14M10 7V5h4v2M8 7l.7 12h6.6L16 7" /></svg>
+                                </i>
                                 Delete
                               </button>
                             </div>
@@ -656,13 +675,13 @@ export default function Drivers() {
       </section>
 
       {panel === 'form' && (
-        <aside className="sa-drawer sa-drawer-wide" aria-label={editingId ? 'Edit driver' : 'Add driver'}>
-          <div className="sa-drawer-head">
+        <div className="sa-action-overlay" onClick={closePanel} role="presentation">
+        <aside className="sa-action-modal sa-people-modal" aria-label={editingId ? 'Edit driver' : 'Add driver'} onClick={(e) => e.stopPropagation()}>
+          <header className="sa-stop-detail-bar">
             <h2>{editingId ? 'Edit driver' : 'Add driver'}</h2>
-            <button type="button" className="sa-btn sa-btn-ghost" onClick={closePanel}>
-              Close
-            </button>
-          </div>
+            <button type="button" className="sa-icon-ghost" aria-label="Close" onClick={closePanel}>×</button>
+          </header>
+          <div className="sa-people-body">
           {error && <div className="alert">{error}</div>}
           <label className="sa-field">
             <span>Name</span>
@@ -751,7 +770,8 @@ export default function Drivers() {
               Active
             </label>
           )}
-          <div className="row-actions">
+          </div>
+          <div className="sa-people-foot">
             <button type="button" className="sa-btn sa-btn-outline" onClick={closePanel}>
               Cancel
             </button>
@@ -760,6 +780,7 @@ export default function Drivers() {
             </button>
           </div>
         </aside>
+        </div>
       )}
 
       <footer className="sa-home-foot">

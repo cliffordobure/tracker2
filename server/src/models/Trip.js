@@ -15,6 +15,8 @@ const tripSchema = new mongoose.Schema(
     schoolId: { type: mongoose.Schema.Types.ObjectId, ref: 'School', required: true },
     busId: { type: mongoose.Schema.Types.ObjectId, ref: 'Bus', default: null },
     scheduleId: { type: mongoose.Schema.Types.ObjectId, ref: 'TripSchedule', default: null },
+    outingId: { type: mongoose.Schema.Types.ObjectId, ref: 'SchoolOuting', default: null },
+    kind: { type: String, enum: ['regular', 'outing'], default: 'regular', index: true },
     period: {
       type: String,
       enum: ['morning', 'afternoon', 'evening'],
@@ -76,5 +78,6 @@ const tripSchema = new mongoose.Schema(
 tripSchema.index({ scheduleId: 1, serviceDate: 1, period: 1 });
 tripSchema.index({ driverId: 1, serviceDate: 1, status: 1 });
 tripSchema.index({ schoolId: 1, status: 1 });
+tripSchema.index({ outingId: 1 });
 
 export const Trip = mongoose.model('Trip', tripSchema);

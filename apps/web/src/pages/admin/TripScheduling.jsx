@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { api } from '../../lib/api';
 
@@ -52,7 +52,32 @@ function periodLabel(value) {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-export default function TripScheduling() {
+function SchedGlyph({ name }) {
+  const common = {
+    width: 16,
+    height: 16,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.8,
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+  };
+  if (name === 'calendar') return <svg {...common}><rect x="3.5" y="5" width="17" height="15.5" rx="2" /><path d="M8 3.5v3M16 3.5v3M3.5 10h17" /></svg>;
+  if (name === 'check') return <svg {...common}><circle cx="12" cy="12" r="8.2" /><path d="m8.5 12.2 2.4 2.4 4.6-5" /></svg>;
+  if (name === 'sun') return <svg {...common}><rect x="3.5" y="5" width="17" height="15.5" rx="2" /><path d="M8 3.5v3M16 3.5v3M8 14h3M8 17h8" /></svg>;
+  return <svg {...common}><circle cx="12" cy="12" r="8.2" /><path d="M12 8v4.2l2.4 1.6" /></svg>;
+}
+
+function Spark({ color }) {
+  return (
+    <svg className="sa-sched-spark" viewBox="0 0 120 18" preserveAspectRatio="none" aria-hidden="true">
+      <path d="M0 12 C12 12 14 6 24 6 S36 14 48 11 S64 4 76 7 S96 16 120 8" fill="none" stroke={color} strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+export default function TripScheduling({ embedded = false, onBindCreate }) {
   const { schoolName = '', globalSearch = '' } = useOutletContext() || {};
   const [schedules, setSchedules] = useState([]);
   const [routes, setRoutes] = useState([]);
@@ -71,7 +96,7 @@ export default function TripScheduling() {
   const [holidayForm, setHolidayForm] = useState({ date: todayInput(), name: '' });
   const [exForm, setExForm] = useState({
     serviceDate: todayInput(),
-    type: 'SKIP',
+    type: '',
     busId: '',
     driverId: '',
     scheduledTime: '06:30',
@@ -79,6 +104,7 @@ export default function TripScheduling() {
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [busy, setBusy] = useState(false);
+  const [showAllHolidays, setShowAllHolidays] = useState(false);
   const year = new Date().getFullYear();
 
   const load = async () => {
@@ -129,6 +155,15 @@ export default function TripScheduling() {
     loadExceptions(selectedScheduleId).catch(() => setExceptions([]));
   }, [selectedScheduleId]);
 
+  useEffect(() => {
+    if (!formOpen) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'Escape') cancelEdit();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [formOpen]);
+
   const routeKids = kids.filter((k) => (k.routeId?._id || k.routeId) === form.routeId);
 
   const toggleKid = (id) => {
@@ -161,6 +196,13 @@ export default function TripScheduling() {
     setInfo('');
     setFormOpen(true);
   };
+
+  const bindCreateRef = useRef(onBindCreate);
+  bindCreateRef.current = onBindCreate;
+  useEffect(() => {
+    bindCreateRef.current?.(startCreate);
+    return () => bindCreateRef.current?.(null);
+  }, [routes, buses, drivers]);
 
   const startEdit = (s) => {
     setEditingId(s._id);
@@ -314,7 +356,7 @@ export default function TripScheduling() {
 
   const addException = async (e) => {
     e.preventDefault();
-    if (!selectedScheduleId) return;
+    if (!selectedScheduleId || !exForm.type) return;
     setError('');
     try {
       const body = {
@@ -347,253 +389,278 @@ export default function TripScheduling() {
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    if (!needle) return schedules;
-    return schedules.filter((s) =>
-      [s.name, s.routeId?.name, s.busId?.label, s.busId?.plate, s.driverId?.name, s.period]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase()
-        .includes(needle)
-    );
+    const list = needle
+      ? schedules.filter((s) =>
+          [s.name, s.routeId?.name, s.busId?.label, s.busId?.plate, s.driverId?.name, s.period]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase()
+            .includes(needle)
+        )
+      : schedules;
+    return [...list].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' }));
   }, [schedules, q]);
 
   const activeCount = schedules.filter((s) => s.active !== false).length;
+  const today = todayInput();
+  const byDate = (a, b, key) => new Date(a[key] || 0) - new Date(b[key] || 0);
+  const upcomingHolidays = holidays.filter((h) => toDateInput(h.date) >= today).sort((a, b) => byDate(a, b, 'date'));
+  const holidayRows = (showAllHolidays ? [...holidays].sort((a, b) => byDate(a, b, 'date')) : upcomingHolidays);
+  const exceptionRows = [...exceptions].sort((a, b) => byDate(a, b, 'serviceDate'));
+  const schedKpis = [
+    { key: 'schedules', label: 'Schedules', value: schedules.length, hint: 'Recurring templates', tint: 'purple', icon: 'calendar', spark: '#6366f1', bar: 72 },
+    { key: 'active', label: 'Active', value: activeCount, hint: 'Will generate trips', tint: 'green', icon: 'check', spark: '#22c55e', bar: activeCount ? 80 : 18 },
+    { key: 'holidays', label: 'Holidays', value: holidays.length, hint: 'No trips generated', tint: 'orange', icon: 'sun', spark: '#f97316', bar: holidays.length ? 64 : 16 },
+    { key: 'exceptions', label: 'Exceptions', value: exceptions.length, hint: 'Selected schedule', tint: 'rose', icon: 'clock', spark: '#e11d48', bar: exceptions.length ? 58 : 14 },
+  ];
 
   return (
-    <div className="sa-students">
+    <div className={embedded ? 'sa-trips-sched' : 'sa-buses sa-trips sa-trips-sched'}>
       {error && <div className="alert">{error}</div>}
       {info && <div className="alert alert-ok">{info}</div>}
-      <div className="sa-users-head">
-        <p className="sa-muted">
-          Recurring trip templates, holidays, and one-day exceptions. Saving a template can generate trip instances.
-        </p>
-        <button type="button" className="sa-btn sa-btn-primary" onClick={startCreate}>
-          + Add schedule
-        </button>
-      </div>
-      <section className="sa-stu-kpis sa-users-kpis">
-        <article className="sa-stu-kpi tint-purple">
+      {!embedded && (
+        <div className="sa-bus-head">
           <div>
-            <span>Schedules</span>
-            <strong>{schedules.length}</strong>
+            <h2>Trip Scheduling</h2>
+            <p className="sa-vd-crumbs">Recurring templates that generate daily trips.</p>
           </div>
-        </article>
-        <article className="sa-stu-kpi tint-green">
-          <div>
-            <span>Active</span>
-            <strong>{activeCount}</strong>
-          </div>
-        </article>
-        <article className="sa-stu-kpi tint-orange">
-          <div>
-            <span>Holidays</span>
-            <strong>{holidays.length}</strong>
-          </div>
-        </article>
-        <article className="sa-stu-kpi tint-sky">
-          <div>
-            <span>Exceptions</span>
-            <strong>{exceptions.length}</strong>
-            <em>For the selected schedule</em>
-          </div>
-        </article>
+          <button type="button" className="sa-btn sa-btn-primary" onClick={startCreate}>+ Add schedule</button>
+        </div>
+      )}
+      <section className="sa-bus-kpis sa-trips-sched-kpis" aria-label="Schedule metrics">
+        {schedKpis.map((m) => (
+          <article key={m.key} className={`sa-bus-kpi tint-${m.tint}`}>
+            <i className="sa-bus-kpi-icon" aria-hidden="true"><SchedGlyph name={m.icon} /></i>
+            <div className="sa-bus-kpi-copy">
+              <span>{m.label}</span>
+              <strong>{m.value}</strong>
+              <em>{m.hint}</em>
+            </div>
+            <Spark color={m.spark} />
+          </article>
+        ))}
       </section>
-      <article className="sa-card sa-stu-table-card">
-        <div className="sa-stu-toolbar">
+
+      <article className="sa-card sa-bus-table-card sa-sched-table-card">
+        <div className="sa-sched-table-head">
+          <h3>Schedules</h3>
           <label className="sa-stu-search">
-            <span aria-hidden="true">⌕</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-3.2-3.2" />
+            </svg>
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search schedules, routes, drivers..." />
           </label>
         </div>
         <div className="sa-table-wrap">
-          <table className="sa-table sa-users-table">
+          <table className="sa-table sa-trips-table">
             <thead>
               <tr>
                 <th>Name</th>
                 <th>Type</th>
                 <th>Period</th>
                 <th>Route / Bus / Driver</th>
-                <th />
+                <th>Status</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((s) => (
                 <tr key={s._id}>
                   <td>
-                    <strong>{s.name}</strong>
-                    <div className="sa-muted">
-                      {s.scheduledTime} · {s.active === false ? 'Inactive' : 'Active'}
+                    <div className="sa-rt-name">
+                      <strong>{s.name}</strong>
+                      <small>{s.scheduledTime || '—'}</small>
                     </div>
                   </td>
                   <td>{typeLabel(s.scheduleType)}</td>
                   <td>
-                    {periodLabel(s.period)}
-                    <div className="sa-muted">{s.direction === 'to_school' ? 'To school' : 'To home'}</div>
-                  </td>
-                  <td>
-                    {s.routeId?.name || '-'}
-                    <div className="sa-muted">
-                      {[s.busId?.label || s.busId?.plate, s.driverId?.name].filter(Boolean).join(' · ') || '-'}
+                    <div className="sa-rt-name">
+                      <strong>{periodLabel(s.period)}</strong>
+                      <small>{s.direction === 'to_school' ? 'To school' : 'To home'}</small>
                     </div>
                   </td>
                   <td>
-                    <button type="button" className="sa-text-link" onClick={() => startEdit(s)}>
-                      Edit
-                    </button>{' '}
-                    <button type="button" className="sa-text-link" onClick={() => generate(s._id)}>
-                      Generate
-                    </button>{' '}
-                    <button type="button" className="sa-text-link" onClick={() => deactivate(s._id)}>
-                      Deactivate
-                    </button>
+                    <div className="sa-rt-name">
+                      <strong>{s.routeId?.name || '—'}</strong>
+                      <small>{[s.busId?.label || s.busId?.plate, s.driverId?.name].filter(Boolean).join(' · ') || '—'}</small>
+                    </div>
+                  </td>
+                  <td>
+                    <span className={`sa-stu-status ${s.active === false ? 'is-cancelled' : 'is-completed'}`}>
+                      {s.active === false ? 'Inactive' : 'Active'}
+                    </span>
+                  </td>
+                  <td className="sa-trips-sched-actions">
+                    <button type="button" className="sa-text-link" onClick={() => startEdit(s)}>Edit</button>
+                    <button type="button" className="sa-text-link" onClick={() => generate(s._id)}>Generate</button>
+                    <button type="button" className="sa-text-link" onClick={() => deactivate(s._id)}>Deactivate</button>
                   </td>
                 </tr>
               ))}
+              {!rows.length && (
+                <tr>
+                  <td colSpan={6}>
+                    <div className="sa-sched-empty">
+                      <i aria-hidden="true">
+                        <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+                          <rect x="9" y="10" width="30" height="28" rx="4" fill="#eef2ff" stroke="#6366f1" strokeWidth="1.6" />
+                          <path d="M16 8.5h16v6a2 2 0 0 1-2 2H18a2 2 0 0 1-2-2v-6Z" fill="#c7d2fe" stroke="#6366f1" strokeWidth="1.4" />
+                          <path d="M17 24h6M17 29h14M27 24h4" stroke="#818cf8" strokeWidth="1.6" strokeLinecap="round" />
+                        </svg>
+                      </i>
+                      <strong>No schedules found</strong>
+                      <p>Create your first schedule to automate trip generation.</p>
+                      <button type="button" className="sa-btn sa-btn-primary" onClick={startCreate}>+ Add schedule</button>
+                    </div>
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
-        {!rows.length && <p className="sa-home-empty">No schedules in this view.</p>}
       </article>
 
       <div className="sa-sched-grid">
-        <article className="sa-card">
+        <article className="sa-card sa-sched-panel">
           <h3>School holidays</h3>
           <p className="sa-muted">No trips are generated on these dates for any schedule.</p>
-          <form className="sa-stu-toolbar" onSubmit={addHoliday}>
-            <input
-              type="date"
-              required
-              value={holidayForm.date}
-              onChange={(e) => setHolidayForm({ ...holidayForm, date: e.target.value })}
-            />
-            <input
-              required
-              placeholder="Holiday name"
-              value={holidayForm.name}
-              onChange={(e) => setHolidayForm({ ...holidayForm, name: e.target.value })}
-            />
-            <button type="submit" className="sa-btn sa-btn-outline">
-              Add holiday
-            </button>
+          <form className="sa-sched-inline" onSubmit={addHoliday}>
+            <input type="date" required value={holidayForm.date} onChange={(e) => setHolidayForm({ ...holidayForm, date: e.target.value })} />
+            <input required placeholder="Holiday name" value={holidayForm.name} onChange={(e) => setHolidayForm({ ...holidayForm, name: e.target.value })} />
+            <button type="submit" className="sa-btn sa-btn-primary">Add holiday</button>
           </form>
-          {holidays.length ? (
-            <ul className="sa-activity">
-              {holidays.map((h) => (
+          <div className="sa-sched-list-head">
+            <span>Upcoming holidays</span>
+            <button type="button" className="sa-text-link" onClick={() => setShowAllHolidays((v) => !v)}>
+              {showAllHolidays ? 'Upcoming' : 'View all'}
+            </button>
+          </div>
+          {holidayRows.length ? (
+            <ul className="sa-sched-list">
+              {holidayRows.map((h) => (
                 <li key={h._id}>
-                  <strong>{h.name}</strong>
-                  <small>{new Date(h.date).toLocaleDateString()}</small>
-                  <button type="button" className="sa-text-link" onClick={() => removeHoliday(h._id)}>
-                    Remove
-                  </button>
+                  <div>
+                    <strong>{h.name}</strong>
+                    <small>{new Date(h.date).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}</small>
+                  </div>
+                  <button type="button" className="sa-text-link" onClick={() => removeHoliday(h._id)}>Remove</button>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="sa-muted">No holidays stored.</p>
+            <div className="sa-sched-mini-empty">
+              <i aria-hidden="true">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="1.7">
+                  <rect x="3.5" y="5" width="17" height="15.5" rx="2" />
+                  <path d="M8 3.5v3M16 3.5v3M3.5 10h17" />
+                </svg>
+              </i>
+              <div>
+                <strong>No holidays added yet.</strong>
+                <p>Add school holidays to prevent trips on those dates.</p>
+              </div>
+            </div>
           )}
         </article>
 
-        <article className="sa-card">
+        <article className="sa-card sa-sched-panel">
           <h3>Schedule exceptions</h3>
-          <label>
-            Schedule
-            <select value={selectedScheduleId} onChange={(e) => setSelectedScheduleId(e.target.value)}>
-              {!schedules.length && <option value="">No schedules</option>}
-              {schedules.map((s) => (
-                <option key={s._id} value={s._id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <form className="sa-note-form sa-ex-form" onSubmit={addException}>
-            <div className="form-row">
-              <label>
-                Date
-                <input
-                  type="date"
-                  required
-                  value={exForm.serviceDate}
-                  onChange={(e) => setExForm({ ...exForm, serviceDate: e.target.value })}
-                />
-              </label>
-              <label>
-                Type
-                <select value={exForm.type} onChange={(e) => setExForm({ ...exForm, type: e.target.value })}>
-                  <option value="SKIP">Skip day</option>
-                  <option value="OVERRIDE">Override bus/driver/time</option>
-                </select>
-              </label>
-            </div>
+          <p className="sa-muted">Exclude specific dates or modify schedules when needed.</p>
+          <form className="sa-sched-ex-form" onSubmit={addException}>
+            <label>
+              <span>Schedule</span>
+              <select value={selectedScheduleId} onChange={(e) => setSelectedScheduleId(e.target.value)}>
+                {!schedules.length && <option value="">No schedules</option>}
+                {schedules.map((s) => (
+                  <option key={s._id} value={s._id}>{s.name}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Date</span>
+              <input type="date" required value={exForm.serviceDate} onChange={(e) => setExForm({ ...exForm, serviceDate: e.target.value })} />
+            </label>
+            <label>
+              <span>Type</span>
+              <select value={exForm.type} onChange={(e) => setExForm({ ...exForm, type: e.target.value })} required>
+                <option value="">Select type</option>
+                <option value="SKIP">Skip day</option>
+                <option value="OVERRIDE">Override bus/driver/time</option>
+              </select>
+            </label>
+            <button type="submit" className="sa-btn sa-btn-primary" disabled={!selectedScheduleId || !exForm.type}>Add exception</button>
             {exForm.type === 'OVERRIDE' && (
               <>
                 <label>
-                  Bus
+                  <span>Bus</span>
                   <select value={exForm.busId} onChange={(e) => setExForm({ ...exForm, busId: e.target.value })}>
                     <option value="">Keep schedule bus</option>
                     {buses.map((b) => (
-                      <option key={b._id} value={b._id}>
-                        {b.label || b.plate}
-                      </option>
+                      <option key={b._id} value={b._id}>{b.label || b.plate}</option>
                     ))}
                   </select>
                 </label>
                 <label>
-                  Driver
+                  <span>Driver</span>
                   <select value={exForm.driverId} onChange={(e) => setExForm({ ...exForm, driverId: e.target.value })}>
                     <option value="">Keep schedule driver</option>
                     {drivers.map((d) => (
-                      <option key={d.id || d._id} value={d.id || d._id}>
-                        {d.name}
-                      </option>
+                      <option key={d.id || d._id} value={d.id || d._id}>{d.name}</option>
                     ))}
                   </select>
                 </label>
                 <label>
-                  Time
-                  <input
-                    type="time"
-                    value={exForm.scheduledTime}
-                    onChange={(e) => setExForm({ ...exForm, scheduledTime: e.target.value })}
-                  />
+                  <span>Time</span>
+                  <input type="time" value={exForm.scheduledTime} onChange={(e) => setExForm({ ...exForm, scheduledTime: e.target.value })} />
                 </label>
               </>
             )}
-            <button type="submit" className="sa-btn sa-btn-outline" disabled={!selectedScheduleId}>
-              Save exception
-            </button>
           </form>
-          {exceptions.length ? (
-            <ul className="sa-activity">
-              {exceptions.map((ex) => (
+          {exceptionRows.length ? (
+            <ul className="sa-sched-list">
+              {exceptionRows.map((ex) => (
                 <li key={ex._id}>
-                  <strong>{ex.type === 'SKIP' ? 'Skip' : 'Override'}</strong>
-                  <span>
-                    {new Date(ex.serviceDate).toLocaleDateString()}
-                    {ex.type === 'OVERRIDE'
-                      ? ` · ${ex.busId?.label || ex.busId?.plate || 'bus'} · ${ex.driverId?.name || 'driver'}`
-                      : ''}
-                  </span>
-                  <button type="button" className="sa-text-link" onClick={() => removeException(ex._id)}>
-                    Remove
-                  </button>
+                  <div>
+                    <strong>{ex.type === 'SKIP' ? 'Skip' : 'Override'}</strong>
+                    <small>
+                      {new Date(ex.serviceDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}
+                      {ex.type === 'OVERRIDE' ? ` · ${ex.busId?.label || ex.busId?.plate || 'bus'} · ${ex.driverId?.name || 'driver'}` : ''}
+                    </small>
+                  </div>
+                  <button type="button" className="sa-text-link" onClick={() => removeException(ex._id)}>Remove</button>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="sa-muted">No exceptions for this schedule.</p>
+            <div className="sa-sched-mini-empty">
+              <i aria-hidden="true">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="1.7">
+                  <circle cx="12" cy="12" r="8.2" />
+                  <path d="M12 8v4.2l2.4 1.6" />
+                </svg>
+              </i>
+              <div>
+                <strong>No exceptions added yet.</strong>
+                <p>Add exceptions to skip or modify trips on specific dates.</p>
+              </div>
+            </div>
           )}
         </article>
       </div>
 
       {formOpen && (
-        <div className="sa-reports-modal sa-wide" role="dialog">
-          <form className="sa-card" onSubmit={submit}>
-            <h3>{editingId ? 'Edit schedule' : 'New schedule'}</h3>
+        <div className="sa-action-overlay" onClick={cancelEdit} role="presentation">
+          <form className="sa-action-modal sa-stop-form" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+            <header className="sa-stop-detail-bar">
+              <h2>{editingId ? 'Edit schedule' : 'New schedule'}</h2>
+              <button type="button" className="sa-icon-ghost" aria-label="Close" onClick={cancelEdit}>×</button>
+            </header>
+            <div className="sa-stop-form-body">
             {editingId && (
               <>
-                <label>
-                  Edit scope
+                <label className="sa-field">
+                  <span>Edit scope</span>
                   <select value={scope} onChange={(e) => setScope(e.target.value)}>
                     <option value="THIS_OCCURRENCE">This occurrence only</option>
                     <option value="THIS_AND_FUTURE">This and future</option>
@@ -601,33 +668,20 @@ export default function TripScheduling() {
                   </select>
                 </label>
                 {(scope === 'THIS_OCCURRENCE' || scope === 'THIS_AND_FUTURE') && (
-                  <label>
-                    {scope === 'THIS_OCCURRENCE' ? 'Occurrence date' : 'From date'}
-                    <input
-                      type="date"
-                      required
-                      value={scopeDate}
-                      onChange={(e) => setScopeDate(e.target.value)}
-                    />
+                  <label className="sa-field">
+                    <span>{scope === 'THIS_OCCURRENCE' ? 'Occurrence date' : 'From date'}</span>
+                    <input type="date" required value={scopeDate} onChange={(e) => setScopeDate(e.target.value)} />
                   </label>
                 )}
               </>
             )}
-            <label>
-              Name
-              <input
-                required
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="Morning Route A"
-              />
+            <label className="sa-field">
+              <span>Name <b className="sa-req">*</b></span>
+              <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Morning Route A" />
             </label>
-            <label>
-              Schedule type
-              <select
-                value={form.scheduleType}
-                onChange={(e) => setForm({ ...form, scheduleType: e.target.value })}
-              >
+            <label className="sa-field">
+              <span>Schedule type</span>
+              <select value={form.scheduleType} onChange={(e) => setForm({ ...form, scheduleType: e.target.value })}>
                 <option value="WEEKDAYS">Weekdays (Mon-Fri)</option>
                 <option value="EVERY_DAY">Every day</option>
                 <option value="ONE_TIME">One time</option>
@@ -648,100 +702,76 @@ export default function TripScheduling() {
                 ))}
               </div>
             )}
-            <div className="form-row">
-              <label>
-                Period
+            <div className="sa-stu-form-row">
+              <label className="sa-field">
+                <span>Period</span>
                 <select value={form.period} onChange={(e) => setForm({ ...form, period: e.target.value })}>
                   <option value="morning">Morning</option>
                   <option value="afternoon">Afternoon</option>
                   <option value="evening">Evening</option>
                 </select>
               </label>
-              <label>
-                Direction
+              <label className="sa-field">
+                <span>Direction</span>
                 <select value={form.direction} onChange={(e) => setForm({ ...form, direction: e.target.value })}>
                   <option value="to_school">To school</option>
                   <option value="to_home">To home</option>
                 </select>
               </label>
             </div>
-            <label>
-              Time
-              <input
-                type="time"
-                value={form.scheduledTime}
-                onChange={(e) => setForm({ ...form, scheduledTime: e.target.value })}
-              />
+            <label className="sa-field">
+              <span>Time</span>
+              <input type="time" value={form.scheduledTime} onChange={(e) => setForm({ ...form, scheduledTime: e.target.value })} />
             </label>
-            <label>
-              Route
-              <select
-                required
-                value={form.routeId}
-                onChange={(e) => setForm({ ...form, routeId: e.target.value, kidIds: [] })}
-              >
+            <label className="sa-field">
+              <span>Route <b className="sa-req">*</b></span>
+              <select required value={form.routeId} onChange={(e) => setForm({ ...form, routeId: e.target.value, kidIds: [] })}>
                 {routes.map((r) => (
-                  <option key={r._id} value={r._id}>
-                    {r.name}
-                  </option>
+                  <option key={r._id} value={r._id}>{r.name}</option>
                 ))}
               </select>
             </label>
-            <label>
-              Bus
+            <label className="sa-field">
+              <span>Bus <b className="sa-req">*</b></span>
               <select required value={form.busId} onChange={(e) => setForm({ ...form, busId: e.target.value })}>
                 {buses.map((b) => (
-                  <option key={b._id} value={b._id}>
-                    {b.label || b.plate} ({b.seats} seats)
-                  </option>
+                  <option key={b._id} value={b._id}>{b.label || b.plate} ({b.seats} seats)</option>
                 ))}
               </select>
             </label>
-            <label>
-              Driver
+            <label className="sa-field">
+              <span>Driver <b className="sa-req">*</b></span>
               <select required value={form.driverId} onChange={(e) => setForm({ ...form, driverId: e.target.value })}>
                 {drivers.map((d) => (
-                  <option key={d.id || d._id} value={d.id || d._id}>
-                    {d.name}
-                  </option>
+                  <option key={d.id || d._id} value={d.id || d._id}>{d.name}</option>
                 ))}
               </select>
             </label>
-            <div className="form-row">
-              <label>
-                Start date
-                <input
-                  type="date"
-                  required
-                  value={form.startDate}
-                  onChange={(e) => setForm({ ...form, startDate: e.target.value })}
-                />
+            <div className="sa-stu-form-row">
+              <label className="sa-field">
+                <span>Start date <b className="sa-req">*</b></span>
+                <input type="date" required value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} />
               </label>
-              <label>
-                End date
+              <label className="sa-field">
+                <span>End date</span>
                 <input type="date" value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} />
               </label>
             </div>
-            <fieldset>
-              <legend>Students (optional - defaults to all on route)</legend>
+            <fieldset className="sa-tour-kids">
+              <legend>Students (optional — defaults to all on route)</legend>
               <div className="sa-sched-kids">
                 {routeKids.map((k) => (
                   <label key={k._id} className="chip-check">
-                    <input
-                      type="checkbox"
-                      checked={form.kidIds.includes(k._id)}
-                      onChange={() => toggleKid(k._id)}
-                    />
+                    <input type="checkbox" checked={form.kidIds.includes(k._id)} onChange={() => toggleKid(k._id)} />
                     {k.name}
                   </label>
                 ))}
                 {!routeKids.length && <span className="sa-muted">No students on this route.</span>}
               </div>
             </fieldset>
-            <div className="sa-reports-actions">
-              <button type="button" className="sa-btn sa-btn-outline" onClick={cancelEdit}>
-                Cancel
-              </button>
+            </div>
+            <div className="sa-stop-form-foot">
+              <button type="button" className="sa-btn sa-btn-outline" onClick={cancelEdit}>Cancel</button>
               <button className="sa-btn sa-btn-primary" type="submit" disabled={busy}>
                 {busy ? 'Saving...' : editingId ? 'Save with scope' : 'Create & generate'}
               </button>
@@ -749,12 +779,12 @@ export default function TripScheduling() {
           </form>
         </div>
       )}
-      <footer className="sa-home-foot">
-        <span>
-          © {year} {schoolName || 'School'}. All rights reserved.
-        </span>
-        <span>Transport Management System v1.0.0</span>
-      </footer>
+      {!embedded && (
+        <footer className="sa-home-foot">
+          <span>© {year} {schoolName || 'School'}. All rights reserved.</span>
+          <span>Transport Management System v1.0.0</span>
+        </footer>
+      )}
     </div>
   );
 }

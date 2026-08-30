@@ -766,15 +766,19 @@ th {
 }
 
 .marker-bolt-label {
-  margin-top: -2px;
-  padding: 0.12rem 0.4rem;
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.88);
-  color: #fff;
-  font-size: 0.65rem;
-  font-weight: 700;
+  margin-top: -4px;
+  padding: 0.08rem 0.32rem 0.06rem;
+  border-radius: 3px;
+  background: #f7e017;
+  color: #111827;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1.15;
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
   white-space: nowrap;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+  border: 1px solid #111827;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.22);
 }
 
 @keyframes bolt-pulse {

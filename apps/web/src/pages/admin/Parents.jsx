@@ -33,6 +33,14 @@ function parentId(p) {
   return p.id || p._id;
 }
 
+function FieldIcon({ name }) {
+  const p = { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' };
+  if (name === 'mail') return <svg {...p}><rect x="3.5" y="5.5" width="17" height="13" rx="2" /><path d="m4 7 8 6 8-6" /></svg>;
+  if (name === 'phone') return <svg {...p}><path d="M8 3.5h3.2l1.2 3.2-2 1.4a12 12 0 0 0 5.5 5.5l1.4-2 3.2 1.2V16a2 2 0 0 1-2.2 2 16 16 0 0 1-14-14A2 2 0 0 1 8 3.5Z" /></svg>;
+  if (name === 'lock') return <svg {...p}><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0" /></svg>;
+  return <svg {...p}><circle cx="12" cy="8" r="3.2" /><path d="M5.5 19a6.5 6.5 0 0 1 13 0" /></svg>;
+}
+
 export default function Parents() {
   const { schoolName = '', globalSearch = '' } = useOutletContext() || {};
   const [parents, setParents] = useState([]);
@@ -47,6 +55,7 @@ export default function Parents() {
   const [editing, setEditing] = useState(null);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [menuId, setMenuId] = useState('');
   const year = new Date().getFullYear();
 
   const load = async () => {
@@ -84,6 +93,12 @@ export default function Parents() {
   useEffect(() => {
     setPage(1);
   }, [q, statusFilter, pageSize]);
+
+  useEffect(() => {
+    const close = () => setMenuId('');
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, []);
 
   const startCreate = () => {
     setEditing(null);
@@ -163,27 +178,26 @@ export default function Parents() {
 
   return (
     <div className="sa-students">
-      {error && <div className="alert">{error}</div>}
+      {error && !open && <div className="alert">{error}</div>}
       {notice && <div className="alert alert-ok">{notice}</div>}
-      <div className="sa-users-head">
-        <p className="sa-muted">Parent accounts for this school. Students stay linked from their own records.</p>
-        <button type="button" className="sa-btn sa-btn-primary" onClick={startCreate}>
-          + Add parent
-        </button>
-      </div>
+      <p className="sa-muted sa-par-lead">Parent accounts for this school. Students stay linked from their own records.</p>
       <section className="sa-stu-kpis sa-users-kpis">
         {kpis.map((m) => (
           <article key={m.label} className={`sa-stu-kpi tint-${m.tint}`}>
+            <i className="sa-stu-kpi-icon" aria-hidden="true" />
             <div>
               <span>{m.label}</span>
               <strong>{m.value}</strong>
               {m.hint ? <em>{m.hint}</em> : null}
             </div>
+            <svg className="sa-stu-spark" viewBox="0 0 120 18" preserveAspectRatio="none" aria-hidden="true">
+              <path d="M0 12 C12 12 14 6 24 6 S36 14 48 11 S64 4 76 7 S96 16 120 8" fill="none" stroke="currentColor" strokeWidth="1.8" />
+            </svg>
           </article>
         ))}
       </section>
-      <article className="sa-card sa-stu-table-card">
-        <div className="sa-stu-toolbar">
+      <article className={`sa-card sa-stu-table-card${menuId ? ' is-menu-open' : ''}`}>
+        <div className="sa-stu-toolbar sa-par-toolbar">
           <label className="sa-stu-search">
             <span aria-hidden="true">⌕</span>
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name, email, phone, or student..." />
@@ -195,67 +209,103 @@ export default function Parents() {
             <option value="linked">With students</option>
             <option value="unlinked">No students linked</option>
           </select>
+          <button type="button" className="sa-btn sa-btn-primary" onClick={startCreate}>
+            + Add parent
+          </button>
         </div>
         <div className="sa-table-wrap">
           <table className="sa-table sa-stu-table">
             <thead>
               <tr>
                 <th>Parent</th>
-                <th>Phone</th>
                 <th>Students</th>
                 <th>Status</th>
-                <th />
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {slice.map((p) => (
-                <tr key={parentId(p)}>
-                  <td>
-                    <div className="sa-stu-person">
-                      {p.photoUrl ? <img src={p.photoUrl} alt="" /> : <span>{initials(p.name)}</span>}
-                      <div>
-                        <strong>{p.name}</strong>
-                        <small>{p.email || '—'}</small>
+              {slice.map((p, i) => {
+                const id = parentId(p);
+                return (
+                  <tr key={id}>
+                    <td>
+                      <div className="sa-stu-person">
+                        {p.photoUrl ? <img src={p.photoUrl} alt="" /> : <span>{initials(p.name)}</span>}
+                        <div>
+                          <strong>{p.name}</strong>
+                          <small>{p.email || '—'}</small>
+                          {p.phone ? (
+                            <span className="sa-stu-phone">
+                              <a href={`tel:${p.phone}`}>{p.phone}</a>
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
-                    </div>
-                  </td>
-                  <td>{p.phone || '—'}</td>
-                  <td>
-                    {(p.children || []).length ? (
-                      <div className="sa-muted">
-                        {p.children.map((c) => (
-                          <div key={c.id}>
-                            <Link to={`/school-admin/students/${c.id}`}>{c.name}</Link>
-                            {c.grade ? ` · ${c.grade}` : ''}
-                          </div>
-                        ))}
+                    </td>
+                    <td>
+                      {(p.children || []).length ? (
+                        <div className="sa-par-kids">
+                          {p.children.map((c) => (
+                            <Link key={c.id} to={`/school-admin/students/${c.id}`}>
+                              {c.name}{c.grade ? ` · ${c.grade}` : ''}
+                            </Link>
+                          ))}
+                        </div>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                    <td>
+                      <span className={`sa-stu-status is-${p.active === false ? 'inactive' : 'active'}`}>
+                        {p.active === false ? 'Inactive' : 'Active'}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="sa-par-actions">
+                        <button type="button" className="sa-text-link" onClick={() => startEdit(p)}>
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          className="sa-text-link"
+                          onClick={() => setActive(p, p.active === false)}
+                        >
+                          {p.active === false ? 'Activate' : 'Deactivate'}
+                        </button>
+                        <div className={`sa-stu-more${menuId === id ? ' is-open' : ''}${i >= slice.length - 1 ? ' is-up' : ''}`}>
+                          <button
+                            type="button"
+                            className="sa-icon-ghost"
+                            aria-label="More"
+                            aria-expanded={menuId === id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.nativeEvent.stopImmediatePropagation();
+                              setMenuId((cur) => (cur === id ? '' : id));
+                            }}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                              <circle cx="12" cy="5" r="1.6" />
+                              <circle cx="12" cy="12" r="1.6" />
+                              <circle cx="12" cy="19" r="1.6" />
+                            </svg>
+                          </button>
+                          {menuId === id && (
+                            <div className="sa-stu-menu" role="menu" onClick={(e) => e.stopPropagation()}>
+                              <button type="button" role="menuitem" className="is-danger" onClick={() => { setMenuId(''); remove(p); }}>
+                                <i aria-hidden="true">
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 7h14M10 7V5h4v2M8 7l.7 12h6.6L16 7" /></svg>
+                                </i>
+                                Delete
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    ) : (
-                      '—'
-                    )}
-                  </td>
-                  <td>
-                    <span className={`sa-stu-status is-${p.active === false ? 'inactive' : 'active'}`}>
-                      {p.active === false ? 'Inactive' : 'Active'}
-                    </span>
-                  </td>
-                  <td>
-                    <button type="button" className="sa-text-link" onClick={() => startEdit(p)}>
-                      Edit
-                    </button>{' '}
-                    <button
-                      type="button"
-                      className="sa-text-link"
-                      onClick={() => setActive(p, p.active === false)}
-                    >
-                      {p.active === false ? 'Activate' : 'Deactivate'}
-                    </button>{' '}
-                    <button type="button" className="sa-text-link" onClick={() => remove(p)}>
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -299,41 +349,79 @@ export default function Parents() {
         </div>
       </article>
       {open && (
-        <div className="sa-reports-modal" role="dialog">
-          <form className="sa-card" onSubmit={save}>
-            <h3>{editing ? 'Edit parent' : 'Add parent'}</h3>
-            <label>
-              Name
-              <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-            </label>
-            <label>
-              Email
-              <input required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-            </label>
-            <label>
-              Phone
-              <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-            </label>
-            <label>
-              {editing ? 'New password (optional)' : 'Temp password'}
-              <input value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
-            </label>
-            {editing ? (
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={form.active}
-                  onChange={(e) => setForm({ ...form, active: e.target.checked })}
-                />
-                Active
-              </label>
-            ) : null}
-            <div className="sa-reports-actions">
-              <button type="button" className="sa-btn sa-btn-outline" onClick={() => setOpen(false)}>
+        <div className="sa-action-overlay" onClick={() => !saving && setOpen(false)} role="presentation">
+          <form className="sa-action-modal sa-par-modal" role="dialog" aria-label={editing ? 'Edit parent' : 'Add parent'} onClick={(e) => e.stopPropagation()} onSubmit={save}>
+            <header className="sa-par-head">
+              <i aria-hidden="true">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <circle cx="9" cy="8" r="3" />
+                  <path d="M3.6 18.5a5.4 5.4 0 0 1 10.8 0" />
+                  <circle cx="17" cy="9" r="2.4" />
+                  <path d="M21.6 18.2a4.4 4.4 0 0 0-6.2-3.2" />
+                </svg>
+              </i>
+              <div>
+                <h2>{editing ? 'Edit parent' : 'Add parent'}</h2>
+                <p>{editing ? 'Update this parent account and optional new password.' : 'Fill in the parent details below to create an account.'}</p>
+              </div>
+              <button type="button" className="sa-icon-ghost" aria-label="Close" onClick={() => !saving && setOpen(false)}>×</button>
+            </header>
+            <div className="sa-par-body">
+              {error ? <div className="alert">{error}</div> : null}
+              <div className="sa-par-field">
+                <i aria-hidden="true"><FieldIcon name="user" /></i>
+                <label className="sa-field">
+                  <span>Name <em>*</em></span>
+                  <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Jane Mwangi" />
+                </label>
+              </div>
+              <div className="sa-par-field">
+                <i aria-hidden="true"><FieldIcon name="mail" /></i>
+                <label className="sa-field">
+                  <span>Email <em>*</em></span>
+                  <input required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="parent@email.com" />
+                </label>
+              </div>
+              <div className="sa-par-field">
+                <i aria-hidden="true"><FieldIcon name="phone" /></i>
+                <label className="sa-field">
+                  <span>Phone <em>*</em></span>
+                  <input required value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="07..." />
+                </label>
+              </div>
+              <div className="sa-par-field">
+                <i aria-hidden="true"><FieldIcon name="lock" /></i>
+                <label className="sa-field">
+                  <span>{editing ? 'New password (optional)' : <>Temporary password <em>*</em></>}</span>
+                  <input
+                    required={!editing}
+                    value={form.password}
+                    onChange={(e) => setForm({ ...form, password: e.target.value })}
+                    placeholder={editing ? 'Leave blank to keep current' : 'parent123'}
+                  />
+                </label>
+              </div>
+              {editing ? (
+                <label className="check sa-par-active">
+                  <input
+                    type="checkbox"
+                    checked={form.active}
+                    onChange={(e) => setForm({ ...form, active: e.target.checked })}
+                  />
+                  Active
+                </label>
+              ) : null}
+            </div>
+            <div className="sa-par-foot">
+              <button type="button" className="sa-btn sa-btn-outline" onClick={() => !saving && setOpen(false)}>
                 Cancel
               </button>
               <button className="sa-btn sa-btn-primary" type="submit" disabled={saving}>
-                Save
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                  <path d="M5 5h12l3 3v11H5z" />
+                  <path d="M8 5v5h8V5M8 19v-6h8v6" />
+                </svg>
+                {saving ? 'Saving…' : editing ? 'Save changes' : 'Save parent'}
               </button>
             </div>
           </form>

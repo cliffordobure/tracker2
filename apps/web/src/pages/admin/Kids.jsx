@@ -336,19 +336,25 @@ export default function Kids() {
     setParentIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
   };
 
-  const maxStep = mode === 'edit' ? 3 : 4;
+  const STEPS = [
+    { n: 1, label: 'Details' },
+    { n: 2, label: 'Academic' },
+    { n: 3, label: 'Guardian' },
+    { n: 4, label: 'Review' },
+  ];
+  const maxStep = 4;
   const canNext = () => {
     if (step === 1) return Boolean(name.trim());
     if (step === 2) {
-      if (mode === 'edit') return Boolean(routeId);
-      return routeMode === 'existing' ? Boolean(routeId) : Boolean(routeName.trim());
+      const routeOk = mode === 'edit' || routeMode === 'existing' ? Boolean(routeId) : Boolean(routeName.trim());
+      return routeOk && boarding.lat != null && boarding.lng != null;
     }
-    if (step === 3) return boarding.lat != null && boarding.lng != null;
-    if (step === 4) {
+    if (step === 3) {
+      if (mode === 'edit') return true;
       if (parentMode === 'new') return Boolean(parent.name && parent.email && parent.password);
       return parentIds.length > 0;
     }
-    return false;
+    return true;
   };
   const canSaveEdit = () => Boolean(name.trim() && routeId && boarding.lat != null && boarding.lng != null);
 
@@ -502,17 +508,20 @@ export default function Kids() {
       <section className="sa-stu-kpis" aria-label="Student metrics">
         {kpis.map((m) => (
           <article key={m.label} className={`sa-stu-kpi tint-${m.tint}`}>
+            <i className="sa-stu-kpi-icon" aria-hidden="true" />
             <div>
               <span>{m.label}</span>
               <strong>{m.value}</strong>
               <em className={m.up ? 'is-up' : ''}>{m.hint}</em>
             </div>
-            <i className="sa-stu-kpi-icon" aria-hidden="true" />
+            <svg className="sa-stu-spark" viewBox="0 0 120 18" preserveAspectRatio="none" aria-hidden="true">
+              <path d="M0 12 C12 12 14 6 24 6 S36 14 48 11 S64 4 76 7 S96 16 120 8" fill="none" stroke="currentColor" strokeWidth="1.8" />
+            </svg>
           </article>
         ))}
       </section>
 
-      <section className="sa-card sa-stu-table-card">
+      <section className={`sa-card sa-stu-table-card${menuId ? ' is-menu-open' : ''}`}>
         <div className="sa-stu-toolbar">
           <label className="sa-stu-search">
             <span aria-hidden="true">⌕</span>
@@ -570,7 +579,7 @@ export default function Kids() {
               </tr>
             </thead>
             <tbody>
-              {slice.map((k) => {
+              {slice.map((k, i) => {
                 const status = studentStatus(k);
                 const age = ageYears(k.dateOfBirth);
                 const parent = k.parentIds?.[0];
@@ -598,7 +607,11 @@ export default function Kids() {
                           <span>{initials(k.name)}</span>
                         )}
                         <div>
-                          <strong>{k.name}</strong>
+                          <strong>
+                            <button type="button" className="sa-text-link" onClick={() => navigate(`/school-admin/students/${k._id}`)}>
+                              {k.name}
+                            </button>
+                          </strong>
                           {meta ? <small>{meta}</small> : null}
                         </div>
                       </div>
@@ -619,7 +632,11 @@ export default function Kids() {
                       {parent ? (
                         <span>
                           {parent.name}
-                          {parent.phone ? <small className="sa-stu-phone">{parent.phone}</small> : null}
+                          {parent.phone ? (
+                            <small className="sa-stu-phone">
+                              <a href={`tel:${parent.phone}`}>{parent.phone}</a>
+                            </small>
+                          ) : null}
                         </span>
                       ) : (
                         '—'
@@ -636,25 +653,41 @@ export default function Kids() {
                         <button type="button" className="sa-icon-ghost is-edit" aria-label="Edit" onClick={() => startEdit(k)}>
                           ✎
                         </button>
-                        <div className="sa-stu-more">
+                        <div className={`sa-stu-more${menuId === k._id ? ' is-open' : ''}${i >= slice.length - 1 ? ' is-up' : ''}`}>
                           <button
                             type="button"
                             className="sa-icon-ghost"
                             aria-label="More"
+                            aria-expanded={menuId === k._id}
                             onClick={(e) => {
                               e.stopPropagation();
                               e.nativeEvent.stopImmediatePropagation();
                               setMenuId((id) => (id === k._id ? '' : k._id));
                             }}
                           >
-                            ⋮
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                              <circle cx="12" cy="5" r="1.6" />
+                              <circle cx="12" cy="12" r="1.6" />
+                              <circle cx="12" cy="19" r="1.6" />
+                            </svg>
                           </button>
                           {menuId === k._id && (
-                            <div className="sa-stu-menu" onClick={(e) => e.stopPropagation()}>
-                              <button type="button" onClick={() => { setKidActive(k, k.active === false); setMenuId(''); }}>
+                            <div className="sa-stu-menu" role="menu" onClick={(e) => e.stopPropagation()}>
+                              <button type="button" role="menuitem" onClick={() => { setKidActive(k, k.active === false); setMenuId(''); }}>
+                                <i aria-hidden="true">
+                                  {k.active === false ? (
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="8" /><path d="m9 12 2.2 2.2L15.5 10" /></svg>
+                                  ) : (
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="8" /><path d="M10 9v6M14 9v6" /></svg>
+                                  )}
+                                </i>
                                 {k.active === false ? 'Activate' : 'Deactivate'}
                               </button>
-                              <button type="button" className="is-danger" onClick={() => { setMenuId(''); remove(k); }}>
+                              <span className="sa-stu-menu-sep" />
+                              <button type="button" role="menuitem" className="is-danger" onClick={() => { setMenuId(''); remove(k); }}>
+                                <i aria-hidden="true">
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 7h14M10 7V5h4v2M8 7l.7 12h6.6L16 7" /></svg>
+                                </i>
                                 Delete
                               </button>
                             </div>
@@ -766,31 +799,28 @@ export default function Kids() {
       )}
 
       {panel === 'form' && (
-        <aside className="sa-drawer sa-drawer-wide" aria-label={mode === 'edit' ? 'Edit student' : 'Add student'}>
-          <div className="sa-drawer-head">
+        <div className="sa-action-overlay" onClick={closePanel} role="presentation">
+        <aside className="sa-action-modal sa-people-modal" aria-label={mode === 'edit' ? 'Edit student' : 'Add student'} onClick={(e) => e.stopPropagation()}>
+          <header className="sa-stop-detail-bar">
             <h2>{mode === 'edit' ? 'Edit student' : 'Add student'}</h2>
-            <button
-              type="button"
-              className="sa-btn sa-btn-ghost"
-              onClick={closePanel}
-            >
-              Close
-            </button>
-          </div>
-          {error && <div className="alert">{error}</div>}
+            <button type="button" className="sa-icon-ghost" aria-label="Close" onClick={closePanel}>×</button>
+          </header>
+          {error && <div className="alert" style={{ margin: '0.55rem 0.95rem 0' }}>{error}</div>}
 
-          <div className="wizard-steps">
-            {Array.from({ length: maxStep }, (_, i) => i + 1).map((n) => (
+          <div className="sa-people-steps">
+            {STEPS.map((s) => (
               <button
-                key={n}
+                key={s.n}
                 type="button"
-                className={`wizard-step ${step === n ? 'active' : ''} ${step > n ? 'done' : ''}`}
-                onClick={() => (mode === 'edit' || n <= step) && setStep(n)}
+                className={`${step === s.n ? 'is-on' : ''} ${step > s.n ? 'is-done' : ''}`}
+                onClick={() => (mode === 'edit' || s.n <= step) && setStep(s.n)}
               >
-                {n}
+                <i>{s.n}</i>
+                {s.label}
               </button>
             ))}
           </div>
+          <div className="sa-people-body">
 
           {step === 1 && (
             <>
@@ -895,7 +925,7 @@ export default function Kids() {
 
           {step === 2 && (
             <>
-              <h3>Route</h3>
+              <h3>Academic / transport</h3>
               {mode === 'create' && (
                 <div className="segmented">
                   <button type="button" className={routeMode === 'existing' ? 'active' : ''} onClick={() => setRouteMode('existing')}>
@@ -926,7 +956,7 @@ export default function Kids() {
             </>
           )}
 
-          {step === 3 && (
+          {step === 2 && (
             <>
               <h3>Boarding / drop-off point</h3>
               <p className="hint">Search an area to zoom in, then click the map to mark the boarding point.</p>
@@ -966,26 +996,13 @@ export default function Kids() {
                 ]}
                 className="map-canvas map-sm"
               />
-              {mode === 'edit' && (
-                <>
-                  <h3 style={{ marginTop: '1rem' }}>Parents</h3>
-                  <fieldset className="checkbox-set">
-                    <legend>Linked parents</legend>
-                    {parents.map((p) => (
-                      <label key={p.id} className="check">
-                        <input type="checkbox" checked={parentIds.includes(p.id)} onChange={() => toggleParent(p.id)} />
-                        {p.name} <span className="muted">({p.email})</span>
-                      </label>
-                    ))}
-                  </fieldset>
-                </>
-              )}
             </>
           )}
 
-          {step === 4 && mode === 'create' && (
+          {step === 3 && (
             <>
-              <h3>Parent</h3>
+              <h3>Guardian</h3>
+              {mode === 'create' && (
               <div className="segmented">
                 <button type="button" className={parentMode === 'new' ? 'active' : ''} onClick={() => setParentMode('new')}>
                   Create parent
@@ -994,7 +1011,18 @@ export default function Kids() {
                   Existing parent
                 </button>
               </div>
-              {parentMode === 'new' ? (
+              )}
+              {mode === 'edit' || parentMode === 'existing' ? (
+                <fieldset className="checkbox-set">
+                  <legend>{mode === 'edit' ? 'Linked parents' : 'Select parents'}</legend>
+                  {parents.map((p) => (
+                    <label key={p.id} className="check">
+                      <input type="checkbox" checked={parentIds.includes(p.id)} onChange={() => toggleParent(p.id)} />
+                      {p.name} <span className="muted">({p.email})</span>
+                    </label>
+                  ))}
+                </fieldset>
+              ) : (
                 <>
                   <label className="sa-field">
                     <span>Name</span>
@@ -1013,44 +1041,59 @@ export default function Kids() {
                     <input required value={parent.password} onChange={(e) => setParent({ ...parent, password: e.target.value })} />
                   </label>
                 </>
-              ) : (
-                <fieldset className="checkbox-set">
-                  <legend>Select parents</legend>
-                  {parents.map((p) => (
-                    <label key={p.id} className="check">
-                      <input type="checkbox" checked={parentIds.includes(p.id)} onChange={() => toggleParent(p.id)} />
-                      {p.name} <span className="muted">({p.email})</span>
-                    </label>
-                  ))}
-                </fieldset>
               )}
             </>
           )}
 
-          <div className="row-actions">
-            {step > 1 && (
+          {step === 4 && (
+            <>
+              <h3>Review</h3>
+              <dl className="sa-people-review">
+                <div><dt>Name</dt><dd>{name || '—'}</dd></div>
+                <div><dt>Admission no.</dt><dd>{admissionNo || '—'}</dd></div>
+                <div><dt>Class</dt><dd>{[grade, section].filter(Boolean).join(' ') || '—'}</dd></div>
+                <div><dt>Gender / DOB</dt><dd>{[genderLabel(gender), dateOfBirth].filter(Boolean).join(' · ') || '—'}</dd></div>
+                <div><dt>Route</dt><dd>{routeMode === 'new' ? routeName : (routes.find((r) => r._id === routeId)?.name || '—')}</dd></div>
+                <div><dt>Stop</dt><dd>{boarding.stopName || '—'}</dd></div>
+                <div>
+                  <dt>Guardian</dt>
+                  <dd>
+                    {mode === 'edit' || parentMode === 'existing'
+                      ? parents.filter((p) => parentIds.includes(p.id)).map((p) => p.name).join(', ') || '—'
+                      : parent.name || '—'}
+                  </dd>
+                </div>
+              </dl>
+            </>
+          )}
+          </div>
+
+          <div className="sa-people-foot">
+            {step > 1 ? (
               <button type="button" className="sa-btn sa-btn-outline" onClick={() => setStep(step - 1)}>
                 Back
               </button>
-            )}
-            {step < maxStep && (
-              <button type="button" className="sa-btn sa-btn-primary" disabled={!canNext()} onClick={() => setStep(step + 1)}>
-                Next
+            ) : (
+              <button type="button" className="sa-btn sa-btn-outline" onClick={closePanel}>
+                Cancel
               </button>
             )}
-            {mode === 'edit' ? (
+            {step < maxStep ? (
+              <button type="button" className="sa-btn sa-btn-primary" disabled={!canNext()} onClick={() => setStep(step + 1)}>
+                Next →
+              </button>
+            ) : mode === 'edit' ? (
               <button type="button" className="sa-btn sa-btn-primary" disabled={!canSaveEdit()} onClick={submitEdit}>
                 Save student
               </button>
             ) : (
-              step >= maxStep && (
-                <button type="button" className="sa-btn sa-btn-primary" disabled={!canNext()} onClick={submitCreate}>
-                  Create student
-                </button>
-              )
+              <button type="button" className="sa-btn sa-btn-primary" disabled={!canNext()} onClick={submitCreate}>
+                Create student
+              </button>
             )}
           </div>
         </aside>
+        </div>
       )}
     </div>
   );

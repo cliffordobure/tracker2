@@ -10,6 +10,11 @@ const schoolOutingSchema = new mongoose.Schema(
     endAt: { type: Date, default: null },
     grade: { type: String, default: '', trim: true, index: true },
     audience: { type: String, default: '', trim: true },
+    routeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Route', default: null },
+    busId: { type: mongoose.Schema.Types.ObjectId, ref: 'Bus', default: null },
+    driverId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    tripId: { type: mongoose.Schema.Types.ObjectId, ref: 'Trip', default: null },
+    kidIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Kid' }],
     busCount: { type: Number, default: 1, min: 0, max: 50 },
     teacherCount: { type: Number, default: 1, min: 0, max: 50 },
     status: {

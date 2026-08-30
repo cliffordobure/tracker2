@@ -602,9 +602,6 @@ router.get('/announcements', async (req, res) => {
   try {
     const { schoolId } = await teacherContext(req);
     if (!schoolId) return res.json({ announcements: [], important: [], grades: [] });
-    if (req.query.archived !== '1' && req.query.archived !== 'true') {
-      await ensureSchoolAnnouncements(schoolId);
-    }
     const kids = await Kid.find({ schoolId, active: true }).select('grade');
     const grades = [...new Set(kids.map((k) => k.grade).filter(Boolean))].sort();
     const archived = req.query.archived === '1' || req.query.archived === 'true';
@@ -612,6 +609,7 @@ router.get('/announcements', async (req, res) => {
       schoolId,
       active: true,
       archived: archived ? true : { $ne: true },
+      sourceKey: { $not: /^sample:/ },
       $or: [
         { scope: { $ne: 'class' } },
         { scope: 'class', teacherId: req.user.id },
@@ -641,11 +639,11 @@ router.get('/announcements/important', async (req, res) => {
   try {
     const { schoolId } = await teacherContext(req);
     if (!schoolId) return res.json({ announcements: [] });
-    await ensureSchoolAnnouncements(schoolId);
     const rows = await Announcement.find({
       schoolId,
       active: true,
       archived: { $ne: true },
+      sourceKey: { $not: /^sample:/ },
       kind: 'important',
     })
       .sort({ publishedAt: -1 })
@@ -1276,41 +1274,6 @@ router.get('/reports', async (req, res) => {
     const termIndex = terms.findIndex((t) => t._id.toString() === String(term?._id || ''));
     const prevTerm = termIndex > 0 ? terms[termIndex - 1] : null;
     const reportType = ['progress', 'midterm', 'endterm'].includes(req.query.type) ? req.query.type : 'progress';
-
-    await ensureClassAssessments({
-      schoolId,
-      teacherId: req.user.id,
-      kids,
-      term,
-      kind: 'academic',
-      catalog: REPORT_SUBJECTS,
-    });
-    await ensureClassAssessments({
-      schoolId,
-      teacherId: req.user.id,
-      kids,
-      term,
-      kind: 'skill',
-      catalog: REPORT_SKILLS,
-    });
-    await ensureClassAssessments({
-      schoolId,
-      teacherId: req.user.id,
-      kids,
-      term,
-      kind: 'behaviour',
-      catalog: REPORT_BEHAVIOUR,
-    });
-    if (prevTerm) {
-      await ensureClassAssessments({
-        schoolId,
-        teacherId: req.user.id,
-        kids,
-        term: prevTerm,
-        kind: 'academic',
-        catalog: REPORT_SUBJECTS.map((s) => ({ ...s, base: s.base - 4 })),
-      });
-    }
 
     const from = term ? startOfDay(term.startDate) : profileRange('term').from;
     const to = term ? endOfDay(term.endDate) : profileRange('term').to;
@@ -2654,17 +2617,16 @@ router.get('/resources', async (req, res) => {
       });
     }
 
-    await ensureTeacherResources(schoolId, req.user.id);
-
     const kids = await Kid.find({ schoolId, active: true }).select('grade');
     const grades = [...new Set(kids.map((k) => k.grade).filter(Boolean))].sort();
     const q = String(req.query.q || '').trim();
     const rx = q ? new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') : null;
 
-    const planFilter = { schoolId, teacherId: req.user.id, active: { $ne: false } };
+    const planFilter = { schoolId, teacherId: req.user.id, active: { $ne: false }, sourceKey: { $not: /^sample:/ } };
     const resourceFilter = {
       schoolId,
       active: { $ne: false },
+      sourceKey: { $not: /^sample:/ },
       $or: [{ teacherId: req.user.id }, { teacherId: null }, { kind: { $in: ['shared', 'recommended', 'template'] } }],
     };
     if (rx) {

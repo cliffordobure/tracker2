@@ -1,25 +1,27 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, Outlet, Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../lib/api';
 import { getSocket } from '../lib/socket';
+import { useTripTab } from '../lib/tripTabs';
 
 const navItems = [
   { to: '/school-admin', label: 'Dashboard', end: true, icon: 'dashboard' },
+  { to: '/school-admin/classes', label: 'Classes', icon: 'classes' },
   { to: '/school-admin/students', label: 'Students', icon: 'students' },
-  { to: '/school-admin/parents', label: 'Parents', icon: 'parents' },
-  { to: '/school-admin/teachers', label: 'Teachers', icon: 'teachers' },
-  { to: '/school-admin/drivers', label: 'Drivers', icon: 'drivers' },
   { to: '/school-admin/buses', label: 'Buses / Vehicles', icon: 'buses' },
+  { to: '/school-admin/drivers', label: 'Drivers', icon: 'drivers' },
+  { to: '/school-admin/teachers', label: 'Teachers', icon: 'teachers' },
   { to: '/school-admin/routes', label: 'Routes', icon: 'routes' },
   { to: '/school-admin/stops', label: 'Stops', icon: 'stops' },
   { to: '/school-admin/trip-instances', label: 'Trips', icon: 'trips' },
   { to: '/school-admin/live-tracking', label: 'Live Tracking', icon: 'live' },
+  { to: '/school-admin/parents', label: 'Parents', icon: 'parents' },
   { to: '/school-admin/attendance', label: 'Attendance', icon: 'attendance' },
   { to: '/school-admin/reports', label: 'Reports & Analytics', icon: 'reports' },
-  { to: '/school-admin/notifications', label: 'Notifications', icon: 'bell' },
-  { to: '/school-admin/incidents', label: 'Incidents', icon: 'incidents' },
-  { to: '/school-admin/messages', label: 'Messages', icon: 'messages' },
+  { to: '/school-admin/notifications', label: 'Notifications', icon: 'bell', badge: 'unread' },
+  { to: '/school-admin/incidents', label: 'Incidents', icon: 'incidents', badge: 'incidents' },
+  { to: '/school-admin/messages', label: 'Messages', icon: 'messages', badge: 'messages' },
   { to: '/school-admin/calendar', label: 'Calendar', icon: 'calendar' },
   { to: '/school-admin/users', label: 'Users & Roles', icon: 'users' },
 ];
@@ -27,12 +29,9 @@ const navItems = [
 const extraItems = [
   { to: '/school-admin/leave-requests', label: 'Leave Requests', icon: 'leave' },
   { to: '/school-admin/noticeboard', label: 'Noticeboard', icon: 'notice' },
-  { to: '/school-admin/trip-scheduling', label: 'Trip Scheduling', icon: 'schedule' },
-  { to: '/school-admin/classes', label: 'Classes', icon: 'students' },
   { to: '/school-admin/subjects', label: 'Subjects', icon: 'reports' },
   { to: '/school-admin/examinations', label: 'Examinations', icon: 'reports' },
   { to: '/school-admin/assignments', label: 'Assignments', icon: 'reports' },
-  { to: '/school-admin/attendance/bulk', label: 'Bulk Attendance', icon: 'attendance' },
 ];
 
 const pageMeta = {
@@ -45,7 +44,6 @@ const pageMeta = {
   '/school-admin/buses': { title: 'Buses / Vehicles', crumbs: ['Dashboard', 'Buses / Vehicles'] },
   '/school-admin/routes': { title: 'Routes', crumbs: ['Dashboard', 'Routes'] },
   '/school-admin/stops': { title: 'Stops', crumbs: ['Dashboard', 'Stops'] },
-  '/school-admin/trip-scheduling': { title: 'Trip Scheduling', crumbs: ['Dashboard', 'Trip Scheduling'] },
   '/school-admin/trip-instances': { title: 'Trips', crumbs: ['Dashboard', 'Trips'] },
   '/school-admin/live-tracking': { title: 'Live Tracking', crumbs: ['Dashboard', 'Live Tracking'] },
   '/school-admin/reports': { title: 'Reports & Analytics', crumbs: ['Dashboard', 'Reports & Analytics'] },
@@ -59,9 +57,8 @@ const pageMeta = {
   '/school-admin/examinations': { title: 'Examinations', crumbs: ['Dashboard', 'Examinations'] },
   '/school-admin/assignments': { title: 'Assignments', crumbs: ['Dashboard', 'Assignments'] },
   '/school-admin/attendance': { title: 'Attendance', crumbs: ['Dashboard', 'Attendance'] },
-  '/school-admin/attendance/bulk': { title: 'Bulk Attendance', crumbs: ['Dashboard', 'Attendance', 'Bulk Attendance'] },
-  '/school-admin/leave-requests': { title: 'Leave Requests' },
-  '/school-admin/noticeboard': { title: 'Noticeboard' },
+  '/school-admin/leave-requests': { title: 'Leave Requests', crumbs: ['Dashboard', 'Leave Requests'] },
+  '/school-admin/noticeboard': { title: 'Noticeboard', crumbs: ['Dashboard', 'Noticeboard'] },
 };
 
 const bottomItems = [
@@ -72,8 +69,22 @@ const bottomItems = [
   { to: '/school-admin/school', label: 'Settings', icon: 'settings' },
 ];
 
+function prettyName(value) {
+  return String(value || '')
+    .trim()
+    .split(/\s+/)
+    .map((word) => (word ? word[0].toUpperCase() + word.slice(1) : ''))
+    .join(' ');
+}
+
+function greetingFor(name) {
+  const hour = new Date().getHours();
+  const part = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+  return `${part}, ${prettyName(name)}! 👋`;
+}
+
 function NavIcon({ name }) {
-  const common = { width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8 };
+  const common = { width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.75, strokeLinecap: 'round', strokeLinejoin: 'round' };
   switch (name) {
     case 'dashboard':
       return (
@@ -84,17 +95,55 @@ function NavIcon({ name }) {
           <rect x="3" y="13" width="8" height="8" rx="2" />
         </svg>
       );
+    case 'classes':
+      return (
+        <svg {...common}>
+          <rect x="4" y="5" width="16" height="11" rx="1.6" />
+          <path d="M8 20h8M12 16v4" />
+          <path d="M8 9.2h8M8 12.2h5" />
+        </svg>
+      );
     case 'students':
+      return (
+        <svg {...common}>
+          <circle cx="9" cy="8" r="3.2" />
+          <path d="M3.6 19c.7-2.8 2.6-4.2 5.4-4.2S13.7 16.2 14.4 19" />
+          <circle cx="17" cy="9" r="2.3" />
+          <path d="M16.2 14.6c1.8.3 3.2 1.5 3.8 4.4" />
+        </svg>
+      );
     case 'teachers':
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="8" r="3.2" />
+          <path d="M5 19c.9-3.1 3.2-4.6 7-4.6S18.1 15.9 19 19" />
+          <path d="M16 4.5 20 6.2v2.2" />
+        </svg>
+      );
     case 'parents':
+      return (
+        <svg {...common}>
+          <circle cx="8" cy="9" r="2.8" />
+          <circle cx="16" cy="9" r="2.8" />
+          <path d="M3.8 19c.6-2.6 2.2-3.8 4.2-3.8s3.6 1.2 4.2 3.8" />
+          <path d="M12 19c.6-2.6 2.2-3.8 4.2-3.8s3.6 1.2 4.2 3.8" />
+        </svg>
+      );
     case 'drivers':
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="8" />
+          <circle cx="12" cy="12" r="3" />
+          <path d="M12 4v3M12 17v3M4 12h3M17 12h3" />
+        </svg>
+      );
     case 'users':
       return (
         <svg {...common}>
-          <circle cx="9" cy="8" r="3.5" />
-          <path d="M3.5 19c.8-3 2.8-4.5 5.5-4.5S13.7 16 14.5 19" />
-          <circle cx="17" cy="9" r="2.5" />
-          <path d="M16 14.5c2 .3 3.5 1.6 4 4.5" />
+          <circle cx="9" cy="8" r="3.2" />
+          <path d="M3.6 19c.7-2.8 2.6-4.2 5.4-4.2S13.7 16.2 14.4 19" />
+          <circle cx="17" cy="9" r="2.3" />
+          <path d="M16.2 14.6c1.8.3 3.2 1.5 3.8 4.4" />
         </svg>
       );
     case 'buses':
@@ -193,20 +242,38 @@ export default function SchoolAdminLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const tripTab = useTripTab();
   const [open, setOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const [schoolName, setSchoolName] = useState('School Admin');
   const [schoolLogo, setSchoolLogo] = useState('');
   const [search, setSearch] = useState('');
   const [unread, setUnread] = useState(0);
+  const [incidentCount, setIncidentCount] = useState(0);
+  const [messageCount, setMessageCount] = useState(0);
+  const searchRef = useRef(null);
 
   useEffect(() => {
     setOpen(false);
   }, [location.pathname]);
 
+  function toggleSidebar() {
+    if (window.matchMedia('(max-width: 1099px)').matches) {
+      setOpen((v) => !v);
+      return;
+    }
+    setCollapsed((v) => !v);
+  }
+
   useEffect(() => {
-    document.body.style.overflow = open ? 'hidden' : '';
+    const lock = () => {
+      document.body.style.overflow = open && window.matchMedia('(max-width: 1099px)').matches ? 'hidden' : '';
+    };
+    lock();
+    window.addEventListener('resize', lock);
     return () => {
       document.body.style.overflow = '';
+      window.removeEventListener('resize', lock);
     };
   }, [open]);
 
@@ -219,14 +286,33 @@ export default function SchoolAdminLayout() {
       })
       .catch(() => {});
     api('/admin/inbox')
-      .then((d) => setUnread(Number(d.unread) || 0))
+      .then((d) => {
+        setUnread(Number(d.unread) || 0);
+        setIncidentCount(Number(d.incidents) || 0);
+        setMessageCount(Number(d.messages) || 0);
+      })
       .catch(() => {});
   }, [location.pathname]);
 
   useEffect(() => {
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+        e.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  useEffect(() => {
     const refresh = () => {
       api('/admin/inbox')
-        .then((d) => setUnread(Number(d.unread) || 0))
+        .then((d) => {
+          setUnread(Number(d.unread) || 0);
+          setIncidentCount(Number(d.incidents) || 0);
+          setMessageCount(Number(d.messages) || 0);
+        })
         .catch(() => {});
     };
     const s = getSocket();
@@ -333,8 +419,7 @@ export default function SchoolAdminLayout() {
   const isMessages =
     location.pathname === '/school-admin/messages' || location.pathname.startsWith('/school-admin/messages/');
   const isUsers = location.pathname === '/school-admin/users';
-  const isAttendance =
-    location.pathname === '/school-admin/attendance' || location.pathname === '/school-admin/attendance/bulk';
+  const isAttendance = location.pathname === '/school-admin/attendance';
   const isAcademics =
     location.pathname === '/school-admin/classes' ||
     location.pathname === '/school-admin/subjects' ||
@@ -357,7 +442,6 @@ export default function SchoolAdminLayout() {
   const isStops = location.pathname === '/school-admin/stops';
   const isTrips = location.pathname === '/school-admin/trip-instances';
   const isParents = location.pathname === '/school-admin/parents';
-  const isScheduling = location.pathname === '/school-admin/trip-scheduling';
   const dateLabel = new Date().toLocaleDateString(undefined, {
     weekday: 'long',
     day: 'numeric',
@@ -389,7 +473,7 @@ export default function SchoolAdminLayout() {
       navigate('/school-admin/routes');
       return;
     }
-    if (isStudents || isTeachers || isDrivers || isBuses || isRoutes || isStops || isTrips || isLivePage || isReports || isCalendar || isNotifications || isIncidents || isMessages || isUsers || isAcademics || isParents || isScheduling) return;
+    if (isStudents || isTeachers || isDrivers || isBuses || isRoutes || isStops || isTrips || isLivePage || isReports || isCalendar || isNotifications || isIncidents || isMessages || isUsers || isAcademics || isParents) return;
     const q = search.trim().toLowerCase();
     if (q.length < 2) return;
     const hit =
@@ -402,7 +486,7 @@ export default function SchoolAdminLayout() {
   }
 
   return (
-    <div className={`sa-shell sa-shell--navy sa-shell--drawer${open ? ' is-nav-open' : ''}${isLiveMap ? ' sa-shell--live-map' : ''}`}>
+    <div className={`sa-shell sa-shell--navy sa-shell--drawer${open ? ' is-nav-open' : ''}${collapsed ? ' is-collapsed' : ''}${isLiveMap ? ' sa-shell--live-map' : ''}`}>
       {open && (
         <button type="button" className="sa-backdrop" aria-label="Close menu" onClick={() => setOpen(false)} />
       )}
@@ -413,44 +497,43 @@ export default function SchoolAdminLayout() {
             {schoolLogo ? (
               <img src={schoolLogo} alt="" />
             ) : (
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 2 3 6v6c0 5.25 3.4 10.15 9 11.5 5.6-1.35 9-6.25 9-11.5V6l-9-4Z" />
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                <path d="M12 2 3.5 6v6.2c0 5.1 3.3 9.8 8.5 11.3 5.2-1.5 8.5-6.2 8.5-11.3V6L12 2Z" fill="currentColor" />
+                <path d="M7.8 11.2 12 8.8l4.2 2.4v2.1c0 2.2-1.6 4.1-4.2 4.8-2.6-.7-4.2-2.6-4.2-4.8v-2.1Z" fill="#fff" opacity="0.95" />
+                <path d="M9.2 11.8h5.6M12 9.4v5.6" stroke="#5b5bf0" strokeWidth="1.2" strokeLinecap="round" />
               </svg>
             )}
           </span>
           <div className="sa-brand-copy">
-            <strong>{schoolName}</strong>
+            <strong>{prettyName(schoolName)}</strong>
             <small>Transport Management System</small>
           </div>
         </div>
 
         <nav className="sa-nav" aria-label="School admin">
-          {navItems.map((item) => (
-            <NavLink key={item.to + item.label} to={item.to} end={item.end} className="sa-nav-link" title={item.label}>
-              <span className="sa-nav-icon" aria-hidden="true">
-                <NavIcon name={item.icon} />
-              </span>
-              <span>{item.label}</span>
-              {item.icon === 'bell' && unread > 0 && (
-                <i className="sa-nav-badge">{unread > 9 ? '9+' : unread}</i>
-              )}
-            </NavLink>
-          ))}
+          {navItems.map((item) => {
+            const count =
+              item.badge === 'unread' ? unread : item.badge === 'incidents' ? incidentCount : item.badge === 'messages' ? messageCount : 0;
+            return (
+              <NavLink key={item.to + item.label} to={item.to} end={item.end} className="sa-nav-link" title={item.label}>
+                <span className="sa-nav-icon" aria-hidden="true">
+                  <NavIcon name={item.icon} />
+                </span>
+                <span>{item.label}</span>
+                {item.icon === 'live' && <em className="sa-nav-live">Live</em>}
+                {item.badge && count > 0 && <i className="sa-nav-badge">{count > 9 ? '9+' : count}</i>}
+              </NavLink>
+            );
+          })}
           <p className="sa-nav-section-title">More</p>
           {extraItems.map((item) => (
-            <NavLink key={item.to} to={item.to} className="sa-nav-link" title={item.label}>
+            <NavLink key={item.to} to={item.to} title={item.label} className="sa-nav-link">
               <span className="sa-nav-icon" aria-hidden="true">
                 <NavIcon name={item.icon} />
               </span>
               <span>{item.label}</span>
             </NavLink>
           ))}
-          <a className="sa-nav-link" href="/handover.html" target="_blank" rel="noreferrer" title="Handover & QA">
-            <span className="sa-nav-icon" aria-hidden="true">
-              <NavIcon name="reports" />
-            </span>
-            <span>Handover &amp; QA</span>
-          </a>
           <NavLink to="/school-admin/school" className="sa-nav-link" title="Settings">
             <span className="sa-nav-icon" aria-hidden="true">
               <NavIcon name="settings" />
@@ -460,10 +543,18 @@ export default function SchoolAdminLayout() {
         </nav>
 
         <div className="sa-sidebar-foot">
-          <button type="button" className="sa-btn sa-btn-ghost" onClick={() => setOpen(false)}>
-            Hide menu
-          </button>
-          <button type="button" className="sa-btn sa-btn-ghost" onClick={logout}>
+          <div className="sa-side-user">
+            <span className="sa-user-avatar">{prettyName(user?.name || 'A').slice(0, 1)}</span>
+            <div>
+              <strong>{prettyName(user?.name || 'Admin')}</strong>
+              <small>{user?.role === 'super_admin' ? 'Super Admin' : 'Administrator'}</small>
+            </div>
+          </div>
+          <button type="button" className="sa-signout" onClick={logout}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <path d="M9 7V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-8a2 2 0 0 1-2-2v-2" />
+              <path d="M15 12H3m0 0 3-3m-3 3 3 3" />
+            </svg>
             Sign out
           </button>
         </div>
@@ -475,20 +566,46 @@ export default function SchoolAdminLayout() {
             <button
               type="button"
               className="sa-menu-btn"
-              aria-label={open ? 'Hide menu' : 'Open menu'}
-              aria-expanded={open}
-              onClick={() => setOpen((v) => !v)}
+              aria-label={collapsed || !open ? 'Open menu' : 'Hide menu'}
+              aria-expanded={!collapsed}
+              onClick={toggleSidebar}
             >
               <span />
               <span />
               <span />
             </button>
             <div>
-              <h1 className="sa-page-title">{meta.title}</h1>
-              {isDashboard && (
-                <p className="sa-page-welcome">Welcome back, {user?.name?.split(' ')[0] || 'Admin'}! Here&apos;s what&apos;s happening today.</p>
+              <h1 className="sa-page-title">
+                {isDashboard || isLivePage || isBuses || isBusDetails || isRoutes || isRouteDetails || isStops || isTrips || isStudents || isStudentDetails || isParents || isTeachers || isTeacherDetails || isDrivers || isDriverDetails ? greetingFor(user?.name?.split(' ')[0] || 'Admin') : meta.title}
+              </h1>
+              {(isDashboard || isLivePage || isBuses || isBusDetails || isRoutes || isRouteDetails || isStops || isTrips || isStudents || isStudentDetails || isParents || isTeachers || isTeacherDetails || isDrivers || isDriverDetails) && (
+                <p className="sa-page-welcome">
+                  {isBuses || isBusDetails
+                    ? "Here's what's happening with your school buses today."
+                    : isRoutes || isRouteDetails
+                      ? "Here's what's happening with your school routes today."
+                      : isStops
+                        ? "Here's what's happening with your school stops today."
+                        : isTrips
+                          ? tripTab === 'schedules'
+                            ? 'Create recurring schedules and generate daily trips here.'
+                            : tripTab === 'tours'
+                              ? "Plan educational tours separately from the regular school run."
+                              : "Here's what's happening with your trips today."
+                          : isStudents
+                            ? "Here's an overview of your students."
+                            : isStudentDetails
+                              ? "Here's your student overview and details."
+                              : isParents
+                                ? "Here's an overview of your parents."
+                                : isTeachers || isTeacherDetails
+                                  ? "Here's an overview of your teachers."
+                                  : isDrivers || isDriverDetails
+                                    ? "Here's an overview of your drivers."
+                          : "Here's what's happening with school transport today."}
+                </p>
               )}
-              {meta.crumbs && (
+              {meta.crumbs && !isDashboard && !isLivePage && !isBuses && !isBusDetails && !isRoutes && !isRouteDetails && !isStops && !isTrips && !isStudents && !isStudentDetails && !isParents && !isTeachers && !isTeacherDetails && !isDrivers && !isDriverDetails && (
                 <p className="sa-crumbs">
                   {meta.crumbs.map((c, i) => {
                     const label = typeof c === 'string' ? c : c.label;
@@ -507,8 +624,12 @@ export default function SchoolAdminLayout() {
           </div>
 
           <form className="sa-search" onSubmit={onSearch}>
-            <span aria-hidden="true">⌕</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-3.2-3.2" />
+            </svg>
             <input
+              ref={searchRef}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={
@@ -516,16 +637,16 @@ export default function SchoolAdminLayout() {
                   ? 'Search students, parents...'
                   : isTeacherDetails
                     ? 'Search students, teachers, routes...'
-                    : isDriverDetails || isBusDetails || isRouteDetails
+                    : isDriverDetails || isRouteDetails
                       ? 'Search students, staff, routes...'
                       : isStudents
-                        ? 'Search students...'
+                        ? 'Search students by name, admission no. or parent...'
                         : isTeachers
                           ? 'Search teachers...'
                           : isDrivers
                             ? 'Search drivers...'
-                            : isBuses
-                              ? 'Search buses...'
+                            : isBuses || isBusDetails
+                              ? 'Search buses by name, number plate or model...'
                               : isRoutes
                                 ? 'Search students, staff, routes...'
                                 : isStops
@@ -534,31 +655,35 @@ export default function SchoolAdminLayout() {
                                     ? 'Search students, staff, routes...'
                                     : isMessages
                                       ? 'Search students, staff, routes, vehicles...'
-                                    : isLivePage || isReports || isCalendar || isNotifications || isIncidents || isUsers || isSettings || isAcademics || isParents || isScheduling
+                                    : isLivePage || isReports || isCalendar || isNotifications || isIncidents || isUsers || isSettings || isAcademics || isParents
                                       ? 'Search students, staff, routes...'
-                                      : 'Search anything...'
+                                      : 'Search students, staff, routes...'
               }
             />
+            <kbd>Ctrl /</kbd>
           </form>
 
           <div className="sa-topbar-right">
-            <span className="sa-date-chip">{dateLabel}</span>
+            <span className="sa-date-chip">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                <rect x="3" y="5" width="18" height="16" rx="2" />
+                <path d="M8 3v4M16 3v4M3 11h18" />
+              </svg>
+              {dateLabel}
+            </span>
             <button
               type="button"
               className="sa-icon-btn"
               aria-label="Notifications"
               onClick={() => navigate('/school-admin/notifications')}
             >
-              <span aria-hidden="true">🔔</span>
-              {unread > 0 && <i>{unread > 9 ? '9+' : unread}</i>}
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                <path d="M6 8a6 6 0 1 1 12 0c0 7 3 7 3 9H3c0-2 3-2 3-9" />
+                <path d="M10 21h4" />
+              </svg>
+              {unread > 0 && <i className="sa-bell-dot" />}
             </button>
-            <div className="sa-user">
-              <span className="sa-user-avatar">{(user?.name || 'A').slice(0, 1)}</span>
-              <div>
-                <strong>{user?.name || 'Admin'}</strong>
-                <small>{user?.role === 'super_admin' ? 'Super Admin' : 'Administrator'}</small>
-              </div>
-            </div>
+            <span className="sa-user-avatar sa-top-avatar">{prettyName(user?.name || 'A').slice(0, 1)}</span>
           </div>
         </header>
 

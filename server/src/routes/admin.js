@@ -23,6 +23,7 @@ import {
   AcademicTerm,
   Assignment,
   Assessment,
+  VehicleRecord,
 } from '../models/index.js';
 import { authenticate, requireSchoolStaff, requireSuperAdmin } from '../middleware/auth.js';
 import adminTripOps from './adminTripOps.js';
@@ -104,6 +105,42 @@ function routePathLabel(routeStops) {
   const last = school || routeStops[routeStops.length - 1];
   if (!last || String(last._id) === String(first._id)) return first.name || '';
   return `${first.name} → ${last.name}`;
+}
+
+function haversineKm(a, b) {
+  if (a?.lat == null || a?.lng == null || b?.lat == null || b?.lng == null) return null;
+  const R = 6371;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+}
+
+function routeDistanceKm(stops) {
+  if (!stops?.length || stops.length < 2) return null;
+  const ordered = [...stops].sort((a, b) => (a.order || 0) - (b.order || 0));
+  let sum = 0;
+  let used = 0;
+  for (let i = 1; i < ordered.length; i += 1) {
+    const d = haversineKm(ordered[i - 1].location, ordered[i].location);
+    if (d != null) {
+      sum += d;
+      used += 1;
+    }
+  }
+  return used ? Math.round(sum * 10) / 10 : null;
+}
+
+function vehiclePayload(bus) {
+  if (!bus || typeof bus !== 'object') return null;
+  return {
+    _id: String(bus._id),
+    plate: bus.plate || '',
+    label: bus.label || '',
+    vehicleType: bus.vehicleType || '',
+  };
 }
 
 function scheduleAppliesOn(schedule, date = new Date()) {
@@ -328,7 +365,7 @@ router.get('/dashboard', async (req, res) => {
         drivers: addedDrivers,
       },
       today: {
-        trips: { completed, inProgress, upcoming: notStarted, cancelled },
+        trips: { completed, inProgress, upcoming: notStarted, cancelled, noShow: checkAbsent },
         transport: { onTime, delayed, notStarted, completed, inProgress },
         busesOnRoute,
         busTotal: buses,
@@ -358,6 +395,11 @@ router.get('/dashboard', async (req, res) => {
         important: n.important === true,
         read: n.read === true,
         at: n.createdAt,
+        tripId: n.tripId || null,
+        kidId: n.kidId || null,
+        key: n.key || '',
+        link: n.link || '',
+        incident: String(n.key || '').includes(':incident:'),
       })),
       unread,
     });
@@ -459,12 +501,24 @@ function serializeAdminNotification(n) {
 
 router.get('/inbox', async (req, res) => {
   try {
-    const unread = await Notification.countDocuments({
-      userId: req.user.id,
-      read: { $ne: true },
-      archived: { $ne: true },
-    });
-    res.json({ unread });
+    const schoolId = resolveSchoolId(req);
+    const [unread, incidents, messages] = await Promise.all([
+      Notification.countDocuments({
+        userId: req.user.id,
+        read: { $ne: true },
+        archived: { $ne: true },
+      }),
+      Notification.countDocuments({
+        userId: req.user.id,
+        archived: { $ne: true },
+        read: { $ne: true },
+        $or: [{ key: /:incident:/i }, { type: /incident/i }],
+      }),
+      schoolId
+        ? Conversation.countDocuments({ schoolId, archived: { $ne: true }, staffUnreadCount: { $gt: 0 } })
+        : 0,
+    ]);
+    res.json({ unread, incidents, messages });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1174,6 +1228,9 @@ function serializeSchoolUser(row) {
   return {
     ...u,
     roleLabel: ROLE_LABELS[u.role] || u.role,
+    lastLoginAt: u.lastLoginAt || row.lastLoginAt || null,
+    updatedAt: u.updatedAt || row.updatedAt || null,
+    createdAt: u.createdAt || row.createdAt || null,
   };
 }
 
@@ -1628,26 +1685,107 @@ function serializeAssignedDriver(profile) {
     name: user.name || '',
     phone: user.phone || '',
     photoUrl: user.photoUrl || '',
+    employeeId: user.employeeId || '',
     licenseNumber: profile.licenseNumber || '',
+    assignedAt: profile.updatedAt || profile.createdAt || null,
   };
+}
+
+function actorFromReq(req) {
+  const role = req.user?.role === 'driver' ? 'Driver' : req.user?.role === 'teacher' ? 'Teacher' : 'Administrator';
+  return { actorName: req.user?.name || req.user?.email || 'Staff', actorRole: role };
+}
+
+function serializeVehicleRecord(doc) {
+  const json = doc.toObject ? doc.toObject() : doc;
+  return {
+    id: String(json._id || json.id || ''),
+    kind: json.kind,
+    title: json.title || '',
+    detail: json.detail || '',
+    actorName: json.actorName || '',
+    actorRole: json.actorRole || '',
+    amount: json.amount ?? null,
+    liters: json.liters ?? null,
+    occurredAt: json.occurredAt || json.createdAt || null,
+    url: json.url || '',
+    fileName: json.fileName || '',
+    createdAt: json.createdAt || null,
+  };
+}
+
+async function logVehicle(req, payload) {
+  try {
+    const actor = actorFromReq(req);
+    const doc = await VehicleRecord.create({
+      schoolId: payload.schoolId,
+      busId: payload.busId,
+      kind: payload.kind,
+      title: payload.title || '',
+      detail: String(payload.detail || '').slice(0, 800),
+      actorName: actor.actorName,
+      actorRole: actor.actorRole,
+      amount: payload.amount ?? null,
+      liters: payload.liters ?? null,
+      occurredAt: payload.occurredAt || new Date(),
+      url: payload.url || '',
+      fileName: payload.fileName || '',
+      publicId: payload.publicId || '',
+    });
+    return serializeVehicleRecord(doc);
+  } catch (err) {
+    console.warn('vehicle record failed', err.message);
+    return null;
+  }
+}
+
+function sameDay(a, b) {
+  if (!a || !b) return false;
+  const da = new Date(a);
+  const db = new Date(b);
+  if (Number.isNaN(da.getTime()) || Number.isNaN(db.getTime())) return false;
+  return da.getFullYear() === db.getFullYear() && da.getMonth() === db.getMonth() && da.getDate() === db.getDate();
 }
 
 // ——— Buses ———
 router.get('/buses', async (req, res) => {
   try {
     const buses = await Bus.find(schoolFilter(req)).populate('schoolId', 'name').sort({ label: 1, plate: 1 });
-    const profiles = await DriverProfile.find({ busId: { $in: buses.map((b) => b._id) } }).populate(
-      'userId',
-      'name phone photoUrl active'
-    );
+    const profiles = await DriverProfile.find({ busId: { $in: buses.map((b) => b._id) } })
+      .populate('userId', 'name phone photoUrl active')
+      .populate('assignedRouteIds', 'name');
     const extraByBus = {};
     const driverByBus = {};
+    const routesByBus = {};
+    const routeIds = [];
+    const seenRoute = new Set();
     for (const p of profiles) {
       const bid = String(p.busId);
       const driver = serializeAssignedDriver(p);
-      if (!driver) continue;
-      if (!driverByBus[bid]) driverByBus[bid] = driver;
-      else extraByBus[bid] = (extraByBus[bid] || 0) + 1;
+      if (driver) {
+        if (!driverByBus[bid]) driverByBus[bid] = driver;
+        else extraByBus[bid] = (extraByBus[bid] || 0) + 1;
+      }
+      if (!routesByBus[bid]) routesByBus[bid] = [];
+      for (const r of p.assignedRouteIds || []) {
+        const rid = String(r?._id || r || '');
+        if (!rid) continue;
+        if (!routesByBus[bid].some((x) => x.id === rid)) {
+          routesByBus[bid].push({ id: rid, name: r.name || 'Route' });
+        }
+        if (!seenRoute.has(rid)) {
+          seenRoute.add(rid);
+          routeIds.push(rid);
+        }
+      }
+    }
+    const kids = routeIds.length
+      ? await Kid.find({ ...schoolFilter(req), routeId: { $in: routeIds } }).select('routeId')
+      : [];
+    const kidsByRoute = {};
+    for (const k of kids) {
+      const rid = String(k.routeId);
+      kidsByRoute[rid] = (kidsByRoute[rid] || 0) + 1;
     }
 
     const today = new Date();
@@ -1672,8 +1810,12 @@ router.get('/buses', async (req, res) => {
       const json = b.toObject();
       json.status = status;
       json.insuranceStatus = insuranceStatus;
+      const routes = routesByBus[String(b._id)] || [];
       json.driver = driverByBus[String(b._id)] || null;
       json.extraDrivers = extraByBus[String(b._id)] || 0;
+      json.routes = routes;
+      json.routeName = routes.map((r) => r.name).filter(Boolean).join(', ');
+      json.studentCount = routes.reduce((n, r) => n + (kidsByRoute[r.id] || 0), 0);
       return json;
     });
 
@@ -1728,6 +1870,106 @@ router.get('/buses/:id', async (req, res) => {
       .sort({ serviceDate: -1, scheduledFor: -1, startedAt: -1, createdAt: -1 })
       .limit(40);
 
+    const kids = routes.length
+      ? await Kid.find({ ...schoolFilter(req), routeId: { $in: routes.map((r) => r.id) } }).select('_id')
+      : [];
+
+    const stored = await VehicleRecord.find({ busId: bus._id }).sort({ occurredAt: -1, createdAt: -1 }).limit(200);
+    const records = stored.map(serializeVehicleRecord);
+
+    const activity = records.map((r) => ({
+      id: r.id,
+      kind: r.kind,
+      title: r.title,
+      detail: r.detail,
+      actorName: r.actorName,
+      actorRole: r.actorRole,
+      occurredAt: r.occurredAt,
+    }));
+
+    for (const t of trips) {
+      const at = t.endedAt || t.startedAt || t.serviceDate || t.scheduledFor || t.createdAt;
+      const tripTitle =
+        t.status === 'completed'
+          ? 'Trip completed'
+          : t.status === 'active'
+            ? 'Trip in progress'
+            : t.status === 'cancelled'
+              ? 'Trip cancelled'
+              : 'Trip scheduled';
+      activity.push({
+        id: `trip:${t._id}`,
+        kind: 'trip',
+        title: tripTitle,
+        detail: [t.routeId?.name, t.driverId?.name].filter(Boolean).join(' · ') || 'Trip recorded',
+        actorName: t.driverId?.name || '',
+        actorRole: t.driverId?.name ? 'Driver' : 'System',
+        occurredAt: at,
+      });
+    }
+
+    if (!activity.some((a) => a.title === 'Vehicle added')) {
+      activity.push({
+        id: `created:${bus._id}`,
+        kind: 'activity',
+        title: 'Vehicle added',
+        detail: 'Vehicle was added to the fleet',
+        actorName: '',
+        actorRole: 'Administrator',
+        occurredAt: bus.createdAt,
+      });
+    }
+    if (bus.lastServiceAt && !records.some((r) => r.kind === 'maintenance' && sameDay(r.occurredAt, bus.lastServiceAt))) {
+      activity.push({
+        id: `svc:${bus._id}`,
+        kind: 'maintenance',
+        title: 'Service completed',
+        detail: 'Service date recorded on this vehicle',
+        actorName: '',
+        actorRole: 'Driver',
+        occurredAt: bus.lastServiceAt,
+      });
+    }
+    if (
+      (bus.insuranceExpiry || bus.insuranceProvider || bus.insurancePolicyNo) &&
+      !records.some((r) => r.kind === 'insurance')
+    ) {
+      activity.push({
+        id: `ins:${bus._id}`,
+        kind: 'insurance',
+        title: 'Insurance updated',
+        detail: [bus.insuranceProvider, bus.insurancePolicyNo ? `Policy ${bus.insurancePolicyNo}` : '']
+          .filter(Boolean)
+          .join(' · ') || 'Insurance details saved',
+        actorName: '',
+        actorRole: 'Administrator',
+        occurredAt: bus.insuranceExpiry || bus.updatedAt,
+      });
+    }
+    if (drivers[0] && !records.some((r) => r.kind === 'assignment')) {
+      activity.push({
+        id: `drv:${drivers[0].id}`,
+        kind: 'assignment',
+        title: 'Driver assigned',
+        detail: `Driver ${drivers[0].name} was assigned to this vehicle`,
+        actorName: '',
+        actorRole: 'Administrator',
+        occurredAt: drivers[0].assignedAt || bus.updatedAt,
+      });
+    }
+
+    activity.sort((a, b) => new Date(b.occurredAt || 0) - new Date(a.occurredAt || 0));
+
+    const fuelMonthStart = new Date();
+    fuelMonthStart.setDate(1);
+    fuelMonthStart.setHours(0, 0, 0, 0);
+    const fuelThisMonth = records.filter((r) => r.kind === 'fuel' && r.occurredAt && new Date(r.occurredAt) >= fuelMonthStart);
+    const fuelSummary = {
+      fills: fuelThisMonth.length,
+      liters: fuelThisMonth.reduce((n, r) => n + (Number(r.liters) || 0), 0),
+      cost: fuelThisMonth.reduce((n, r) => n + (Number(r.amount) || 0), 0),
+    };
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const soon = new Date(today);
@@ -1739,10 +1981,14 @@ router.get('/buses/:id', async (req, res) => {
         ...bus.toObject(),
         status,
         insuranceStatus: licenseStatusOf(bus.insuranceExpiry, today, soon),
+        studentCount: kids.length,
       },
       schoolName: bus.schoolId?.name || '',
       drivers,
       routes,
+      records,
+      activity,
+      fuelSummary,
       recentTrips: trips.map((t) => ({
         id: String(t._id),
         status: t.status,
@@ -1804,6 +2050,13 @@ router.post('/buses', async (req, res) => {
       active: req.body.serviceStatus
         ? req.body.serviceStatus === 'active'
         : req.body.active !== false,
+    });
+    await logVehicle(req, {
+      schoolId: bus.schoolId,
+      busId: bus._id,
+      kind: 'activity',
+      title: 'Vehicle added',
+      detail: `${bus.label || bus.plate || 'Vehicle'} was added to the fleet`,
     });
     res.status(201).json({ bus });
   } catch (err) {
@@ -1874,6 +2127,45 @@ router.put('/buses/:id', async (req, res) => {
     }
 
     const bus = await Bus.findByIdAndUpdate(req.params.id, updates, { new: true });
+    const insuranceChanged = ['insuranceExpiry', 'insuranceProvider', 'insurancePolicyNo'].some((k) => updates[k] !== undefined);
+    const serviceChanged = updates.lastServiceAt !== undefined || updates.nextServiceAt !== undefined;
+    if (insuranceChanged) {
+      await logVehicle(req, {
+        schoolId: bus.schoolId,
+        busId: bus._id,
+        kind: 'insurance',
+        title: 'Insurance updated',
+        detail: [bus.insuranceProvider, bus.insurancePolicyNo ? `Policy ${bus.insurancePolicyNo}` : '']
+          .filter(Boolean)
+          .join(' · ') || 'Insurance details were updated',
+        occurredAt: bus.insuranceExpiry || new Date(),
+      });
+    } else if (serviceChanged && updates.lastServiceAt) {
+      await logVehicle(req, {
+        schoolId: bus.schoolId,
+        busId: bus._id,
+        kind: 'maintenance',
+        title: 'Service completed',
+        detail: 'Service date was updated',
+        occurredAt: bus.lastServiceAt || new Date(),
+      });
+    } else if (updates.serviceStatus) {
+      await logVehicle(req, {
+        schoolId: bus.schoolId,
+        busId: bus._id,
+        kind: 'activity',
+        title: 'Status changed',
+        detail: `Vehicle marked ${updates.serviceStatus.replace(/_/g, ' ')}`,
+      });
+    } else {
+      await logVehicle(req, {
+        schoolId: bus.schoolId,
+        busId: bus._id,
+        kind: 'activity',
+        title: 'Vehicle updated',
+        detail: 'Vehicle details were updated',
+      });
+    }
     res.json({ bus });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -1890,6 +2182,53 @@ router.delete('/buses/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
+router.post('/buses/:id/records', async (req, res) => {
+  try {
+    if (!/^[a-f0-9]{24}$/i.test(String(req.params.id || ''))) {
+      return res.status(400).json({ error: 'Invalid vehicle' });
+    }
+    const bus = await Bus.findById(req.params.id);
+    if (!bus) return res.status(404).json({ error: 'Vehicle not found' });
+    if (!assertSchoolAccess(req, bus.schoolId)) {
+      return res.status(403).json({ error: 'Cannot update vehicle from another school' });
+    }
+    const kind = String(req.body.kind || '');
+    if (!['maintenance', 'fuel', 'document', 'note', 'insurance', 'assignment', 'activity'].includes(kind)) {
+      return res.status(400).json({ error: 'Invalid record type' });
+    }
+    const titles = {
+      maintenance: 'Service completed',
+      fuel: 'Fuel added',
+      document: 'Document uploaded',
+      note: 'Note added',
+      insurance: 'Insurance updated',
+      assignment: 'Assignment updated',
+      activity: 'Vehicle updated',
+    };
+    const liters = req.body.liters === '' || req.body.liters == null ? null : Number(req.body.liters);
+    const amount = req.body.amount === '' || req.body.amount == null ? null : Number(req.body.amount);
+    const record = await logVehicle(req, {
+      schoolId: bus.schoolId,
+      busId: bus._id,
+      kind,
+      title: req.body.title || titles[kind],
+      detail: req.body.detail || '',
+      occurredAt: parseOptionalDate(req.body.occurredAt) || new Date(),
+      liters: Number.isFinite(liters) ? liters : null,
+      amount: Number.isFinite(amount) ? amount : null,
+      url: req.body.url || '',
+      fileName: req.body.fileName || '',
+      publicId: req.body.publicId || '',
+    });
+    if (kind === 'maintenance' && req.body.occurredAt) {
+      await Bus.findByIdAndUpdate(bus._id, { lastServiceAt: parseOptionalDate(req.body.occurredAt) || bus.lastServiceAt });
+    }
+    res.status(201).json({ record });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // ——— Routes ———
 router.get('/routes', async (req, res) => {
   try {
@@ -1901,12 +2240,12 @@ router.get('/routes', async (req, res) => {
       ids.length
         ? DriverProfile.find({ assignedRouteIds: { $in: ids } })
             .populate('userId', 'name phone photoUrl')
-            .populate('busId', 'plate label')
+            .populate('busId', 'plate label vehicleType')
         : [],
       ids.length
         ? TripSchedule.find({ routeId: { $in: ids }, active: { $ne: false } })
             .populate('driverId', 'name phone photoUrl')
-            .populate('busId', 'plate label')
+            .populate('busId', 'plate label vehicleType')
         : [],
     ]);
 
@@ -1933,10 +2272,7 @@ router.get('/routes', async (req, res) => {
             photoUrl: p.userId.photoUrl || '',
           }
         : null;
-      const vehicle =
-        p.busId && typeof p.busId === 'object'
-          ? { _id: String(p.busId._id), plate: p.busId.plate || '', label: p.busId.label || '' }
-          : null;
+      const vehicle = vehiclePayload(p.busId);
       for (const rid of p.assignedRouteIds || []) {
         const key = String(rid);
         if (driver) {
@@ -1957,12 +2293,19 @@ router.get('/routes', async (req, res) => {
           photoUrl: d.photoUrl || '',
         };
       }
-      if (!vehicleByRoute[key] && sch.busId && typeof sch.busId === 'object') {
-        vehicleByRoute[key] = {
-          _id: String(sch.busId._id),
-          plate: sch.busId.plate || '',
-          label: sch.busId.label || '',
-        };
+      if (!vehicleByRoute[key] && sch.busId) {
+        const vehicle = vehiclePayload(sch.busId);
+        if (vehicle) vehicleByRoute[key] = vehicle;
+      }
+    }
+
+    const periodRank = { morning: 0, afternoon: 1, evening: 2 };
+    const periodByRoute = {};
+    for (const sch of schedules) {
+      const key = String(sch.routeId);
+      if (!sch.period) continue;
+      if (periodByRoute[key] == null || (periodRank[sch.period] ?? 9) < (periodRank[periodByRoute[key]] ?? 9)) {
+        periodByRoute[key] = sch.period;
       }
     }
 
@@ -1989,6 +2332,8 @@ router.get('/routes', async (req, res) => {
       json.driver = driverByRoute[key] || null;
       json.extraDrivers = extraDrivers[key] || 0;
       json.vehicle = vehicleByRoute[key] || null;
+      json.period = periodByRoute[key] || null;
+      json.distanceKm = routeDistanceKm(routeStops);
       return json;
     });
     for (const s of stops) {
@@ -2191,6 +2536,7 @@ router.get('/routes/:id', async (req, res) => {
         endName: endStop && String(endStop._id) !== String(firstHome?._id) ? endStop.name : '',
         stopCount: stops.length,
         studentCount: assignedKids.length,
+        distanceKm: routeDistanceKm(stops),
         driver,
         extraDrivers,
         vehicle,
@@ -2206,6 +2552,7 @@ router.get('/routes/:id', async (req, res) => {
         admissionNo: k.admissionNo || '',
         active: k.active !== false,
         homeStopName: k.homeStopId?.name || '',
+        createdAt: k.createdAt || null,
       })),
       schedules: schedules.map(serializeSchedule),
       todayTrips: todayTrips.map(serializeTrip),
@@ -2930,6 +3277,15 @@ router.post('/drivers', async (req, res) => {
       licenseNumber: licenseNumber || '',
       licenseExpiry: parseOptionalDate(licenseExpiry) || null,
     });
+    if (busId) {
+      await logVehicle(req, {
+        schoolId,
+        busId,
+        kind: 'assignment',
+        title: 'Driver assigned',
+        detail: `Driver ${name} was assigned to this vehicle`,
+      });
+    }
     res.status(201).json({ driver: { ...user.toSafeJSON(), profile } });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -2962,6 +3318,7 @@ router.put('/drivers/:id', async (req, res) => {
     if (req.body.photoPublicId !== undefined) updates.photoPublicId = req.body.photoPublicId || '';
     const user = await User.findByIdAndUpdate(req.params.id, updates, { new: true });
 
+    const previous = await DriverProfile.findOne({ userId: user._id }).select('busId');
     const profileUpdates = {};
     if (req.body.vehiclePlate != null) profileUpdates.vehiclePlate = req.body.vehiclePlate;
     if (req.body.vehicleModel != null) profileUpdates.vehicleModel = req.body.vehicleModel;
@@ -2977,6 +3334,18 @@ router.put('/drivers/:id', async (req, res) => {
     })
       .populate('assignedRouteIds', 'name')
       .populate('busId', 'plate label seats');
+
+    const nextBusId = req.body.busId ? String(req.body.busId) : '';
+    const prevBusId = previous?.busId ? String(previous.busId) : '';
+    if (req.body.busId !== undefined && nextBusId && nextBusId !== prevBusId) {
+      await logVehicle(req, {
+        schoolId: existing.schoolId,
+        busId: nextBusId,
+        kind: 'assignment',
+        title: 'Driver assigned',
+        detail: `Driver ${user.name} was assigned to this vehicle`,
+      });
+    }
 
     res.json({ driver: { ...user.toSafeJSON(), profile } });
   } catch (err) {
@@ -3748,6 +4117,114 @@ router.post('/kids/onboard', async (req, res) => {
   }
 });
 
+router.put('/kids/:id/fee-statement', async (req, res) => {
+  try {
+    if (!/^[a-f0-9]{24}$/i.test(String(req.params.id || ''))) {
+      return res.status(400).json({ error: 'Invalid student' });
+    }
+    const kid = await Kid.findById(req.params.id);
+    if (!kid) return res.status(404).json({ error: 'Student not found' });
+    if (!assertSchoolAccess(req, kid.schoolId)) {
+      return res.status(403).json({ error: 'Cannot update fees for a student from another school' });
+    }
+
+    const lines = Array.isArray(req.body?.lines)
+      ? req.body.lines
+          .map((line) => ({
+            description: String(line?.description || '').trim(),
+            category: String(line?.category || '').trim(),
+            total: Math.max(0, Number(line?.total) || 0),
+            paid: Math.max(0, Number(line?.paid) || 0),
+          }))
+          .filter((line) => line.description)
+      : [];
+    if (!lines.length) return res.status(400).json({ error: 'At least one fee line is required' });
+
+    const payments = Array.isArray(req.body?.payments)
+      ? req.body.payments
+          .map((p) => ({
+            at: p?.at ? new Date(p.at) : new Date(),
+            description: String(p?.description || '').trim(),
+            method: String(p?.method || '').trim(),
+            amount: Math.max(0, Number(p?.amount) || 0),
+            reference: String(p?.reference || '').trim(),
+          }))
+          .filter((p) => p.description && !Number.isNaN(p.at.getTime()))
+      : [];
+
+    const upcoming = Array.isArray(req.body?.upcoming)
+      ? req.body.upcoming
+          .map((u) => ({
+            dueDate: u?.dueDate ? new Date(u.dueDate) : null,
+            description: String(u?.description || '').trim(),
+            subtitle: String(u?.subtitle || '').trim(),
+            amount: Math.max(0, Number(u?.amount) || 0),
+          }))
+          .filter((u) => u.description && u.dueDate && !Number.isNaN(u.dueDate.getTime()))
+      : [];
+
+    let termId = req.body?.termId || null;
+    if (termId && !/^[a-f0-9]{24}$/i.test(String(termId))) termId = null;
+    const termLabel = String(req.body?.termLabel || '').trim();
+    const note = String(req.body?.note || '').trim();
+    const statementUrl = String(req.body?.statementUrl || '').trim();
+    const year = Number(req.body?.year) || new Date().getFullYear();
+    const nextDueDate = req.body?.nextDueDate ? new Date(req.body.nextDueDate) : null;
+    if (nextDueDate && Number.isNaN(nextDueDate.getTime())) {
+      return res.status(400).json({ error: 'Invalid next due date' });
+    }
+
+    const payload = {
+      schoolId: kid.schoolId,
+      kidId: kid._id,
+      termId,
+      termLabel,
+      year,
+      currency: String(req.body?.currency || 'KES').trim() || 'KES',
+      nextDueDate,
+      lines,
+      payments,
+      upcoming,
+      note,
+      statementUrl,
+    };
+
+    const filter = termId ? { kidId: kid._id, termId } : { kidId: kid._id };
+    let statement = await FeeStatement.findOne(filter).sort({ updatedAt: -1 });
+    if (statement) {
+      Object.assign(statement, payload);
+      await statement.save();
+    } else {
+      statement = await FeeStatement.create(payload);
+    }
+
+    const billed = lines.reduce((s, l) => s + l.total, 0);
+    const paid = payments.length
+      ? payments.reduce((s, p) => s + p.amount, 0)
+      : lines.reduce((s, l) => s + l.paid, 0);
+
+    res.json({
+      fee: {
+        _id: statement._id,
+        termLabel: statement.termLabel || '',
+        year: statement.year,
+        currency: statement.currency || 'KES',
+        nextDueDate: statement.nextDueDate || null,
+        note: statement.note || '',
+        statementUrl: statement.statementUrl || '',
+        lines: statement.lines || [],
+        payments: statement.payments || [],
+        upcoming: statement.upcoming || [],
+        billed,
+        paid,
+        balance: Math.max(0, billed - paid),
+      },
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 router.put('/kids/:id', async (req, res) => {
   try {
     const existing = await Kid.findById(req.params.id);
@@ -3959,6 +4436,31 @@ router.post('/dispatch', async (req, res) => {
   }
 });
 
+function announcementMeta(category) {
+  const cat = ['general', 'class', 'transport', 'events', 'urgent'].includes(category)
+    ? category
+    : 'general';
+  const kind =
+    cat === 'urgent'
+      ? 'important'
+      : cat === 'events'
+        ? 'event'
+        : cat === 'transport'
+          ? 'information'
+          : 'general';
+  const icon =
+    cat === 'urgent'
+      ? 'megaphone'
+      : cat === 'events'
+        ? 'trophy'
+        : cat === 'class'
+          ? 'book'
+          : cat === 'transport'
+            ? 'bus'
+            : 'people';
+  return { category: cat, kind, icon };
+}
+
 router.get('/announcements', async (req, res) => {
   try {
     const filter = { ...schoolFilter(req), active: true };
@@ -3978,32 +4480,15 @@ router.post('/announcements', async (req, res) => {
     if (!title?.trim() || !body?.trim()) {
       return res.status(400).json({ error: 'title and body are required' });
     }
+    const meta = announcementMeta(category);
     const announcement = await Announcement.create({
       schoolId,
-      title: title.trim(),
-      body: body.trim(),
-      category: ['general', 'class', 'transport', 'events', 'urgent'].includes(category)
-        ? category
-        : 'general',
-      kind:
-        category === 'urgent'
-          ? 'important'
-          : category === 'events'
-            ? 'event'
-            : category === 'transport'
-              ? 'information'
-              : 'general',
-      icon:
-        category === 'urgent'
-          ? 'megaphone'
-          : category === 'events'
-            ? 'trophy'
-            : category === 'transport'
-              ? 'bus'
-              : 'calendar',
+      title: title.trim().slice(0, 160),
+      body: body.trim().slice(0, 1000),
+      ...meta,
       scope: 'school',
       audience: 'All Teachers, Parents & Students',
-      authorName: authorName?.trim() || req.user.name || 'Admin',
+      authorName: authorName?.trim() || 'School Admin',
       attachmentName: attachmentName || '',
       attachmentUrl: attachmentUrl || '',
       attachmentPublicId: attachmentPublicId || '',
@@ -4024,6 +4509,43 @@ router.post('/announcements', async (req, res) => {
       );
     }
     res.status(201).json({ announcement });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/announcements/:id', async (req, res) => {
+  try {
+    const schoolId = resolveSchoolId(req, { required: true });
+    if (!schoolId) return res.status(400).json({ error: 'schoolId is required' });
+    const item = await Announcement.findOne({ _id: req.params.id, schoolId, active: true });
+    if (!item) return res.status(404).json({ error: 'Announcement not found' });
+    if (req.body?.title !== undefined) item.title = String(req.body.title || '').trim().slice(0, 160);
+    if (req.body?.body !== undefined) item.body = String(req.body.body || '').trim().slice(0, 1000);
+    if (req.body?.category !== undefined) Object.assign(item, announcementMeta(req.body.category));
+    if (req.body?.attachmentName !== undefined) item.attachmentName = String(req.body.attachmentName || '');
+    if (req.body?.attachmentUrl !== undefined) item.attachmentUrl = String(req.body.attachmentUrl || '');
+    if (req.body?.attachmentPublicId !== undefined) {
+      item.attachmentPublicId = String(req.body.attachmentPublicId || '');
+    }
+    if (!item.title || !item.body) return res.status(400).json({ error: 'title and body are required' });
+    await item.save();
+    res.json({ announcement: item });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/announcements/:id', async (req, res) => {
+  try {
+    const schoolId = resolveSchoolId(req, { required: true });
+    if (!schoolId) return res.status(400).json({ error: 'schoolId is required' });
+    const item = await Announcement.findOne({ _id: req.params.id, schoolId, active: true });
+    if (!item) return res.status(404).json({ error: 'Announcement not found' });
+    item.active = false;
+    item.archived = true;
+    await item.save();
+    res.json({ announcement: item });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

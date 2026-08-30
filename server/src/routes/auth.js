@@ -35,6 +35,9 @@ router.post('/login', async (req, res) => {
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
 
+    user.lastLoginAt = new Date();
+    await user.save();
+
     const token = signToken(user);
     return res.json({ token, user: user.toSafeJSON() });
   } catch (err) {

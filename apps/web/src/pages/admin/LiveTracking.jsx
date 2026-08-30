@@ -3,11 +3,14 @@ import { Link, useOutletContext, useSearchParams } from 'react-router-dom';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { api } from '../../lib/api';
+import { setBoltCarSelected } from '../../lib/mapMarkers';
 import {
-  createBoltCarElement,
-  setBoltCarHeading,
-  setBoltCarSelected,
-} from '../../lib/mapMarkers';
+  attachFleetPlates,
+  busMapLocation,
+  startSmoothFleetLoop,
+  subscribeFleetLocations,
+  syncFleetVehicles,
+} from '../../lib/smoothFleet';
 
 const TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
 const DONUT = {
@@ -56,9 +59,51 @@ function gpsMeta(status, phase) {
   return { key: 'muted', label: 'No GPS' };
 }
 
+function LiveKpiGlyph({ name }) {
+  const common = { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' };
+  if (name === 'online') {
+    return (
+      <svg {...common}>
+        <rect x="3" y="7" width="18" height="10" rx="2" />
+        <path d="M7 17v2M17 17v2M3 12h18" />
+      </svg>
+    );
+  }
+  if (name === 'route') {
+    return (
+      <svg {...common}>
+        <circle cx="6" cy="6" r="2.4" />
+        <circle cx="18" cy="18" r="2.4" />
+        <path d="M8 8c4 0 4 8 8 8" />
+      </svg>
+    );
+  }
+  if (name === 'eta') {
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="12" r="8" />
+        <path d="M12 8v4l3 2" />
+      </svg>
+    );
+  }
+  if (name === 'students') {
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="8" r="3.2" />
+        <path d="M5 19c.9-3.1 3.2-4.6 7-4.6S18.1 15.9 19 19" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common}>
+      <path d="M12 3 4.8 19h14.4L12 3Z" />
+      <path d="M12 10v4M12 17h.01" />
+    </svg>
+  );
+}
+
 function busLocation(item) {
-  const t = item?.trip;
-  return t?.latestLocation || t?.startLocation || item?.schoolLocation || null;
+  return busMapLocation(item);
 }
 
 function donutStyle(items, total) {
@@ -75,8 +120,11 @@ function donutStyle(items, total) {
 function LiveFleetMap({ buses, selectedId, onSelect, className, showLegend }) {
   const mapRef = useRef(null);
   const markersRef = useRef(new Map());
+  const targetsRef = useRef(new Map());
   const containerRef = useRef(null);
   const selectedRef = useRef(null);
+  const fittedRef = useRef(false);
+  const [mapReady, setMapReady] = useState(false);
 
   useEffect(() => {
     selectedRef.current = selectedId;
@@ -102,81 +150,75 @@ function LiveFleetMap({ buses, selectedId, onSelect, className, showLegend }) {
     const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(onResize) : null;
     ro?.observe(containerRef.current);
     requestAnimationFrame(onResize);
+    const markReady = () => setMapReady(true);
+    if (map.loaded()) markReady();
+    else map.once('load', markReady);
 
     return () => {
       window.removeEventListener('resize', onResize);
       ro?.disconnect();
-      markersRef.current.forEach((m) => m.remove());
+      markersRef.current.forEach((entry) => entry.marker.remove());
       markersRef.current.clear();
+      targetsRef.current.clear();
       map.remove();
       mapRef.current = null;
+      setMapReady(false);
     };
   }, []);
 
   useEffect(() => {
+    if (!mapReady) return undefined;
+    return startSmoothFleetLoop({
+      mapRef,
+      markersRef,
+      targetsRef,
+      selectedRef,
+      followSelected: false,
+    });
+  }, [mapReady]);
+
+  const tripIdsKey = buses.map((item) => String(item?.trip?._id || '')).filter(Boolean).sort().join(',');
+
+  useEffect(() => {
+    return subscribeFleetLocations(tripIdsKey ? tripIdsKey.split(',') : [], targetsRef);
+  }, [tripIdsKey]);
+
+  useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
+    if (!map || !mapReady) return;
 
-    const seen = new Set();
-    const coords = [];
+    const coords = syncFleetVehicles({
+      map,
+      buses,
+      markersRef,
+      targetsRef,
+      selectedId,
+      onSelect,
+    });
 
-    for (const item of buses) {
-      const trip = item.trip;
-      const loc = busLocation(item);
-      if (loc?.lat == null || loc?.lng == null) continue;
-      const id = String(trip._id);
-      seen.add(id);
-      coords.push([loc.lng, loc.lat]);
-
-      const label = tripLabel(trip);
-      const selected = selectedRef.current === id;
-      const heading = loc.heading;
-
-      let marker = markersRef.current.get(id);
-      if (!marker) {
-        const el = createBoltCarElement({ heading, selected, label, pulse: true });
-        el.style.cursor = 'pointer';
-        el.addEventListener('click', (e) => {
-          e.stopPropagation();
-          onSelect(id);
-        });
-        marker = new mapboxgl.Marker({ element: el, anchor: 'center' })
-          .setLngLat([loc.lng, loc.lat])
-          .addTo(map);
-        markersRef.current.set(id, marker);
-      } else {
-        marker.setLngLat([loc.lng, loc.lat]);
-        const el = marker.getElement();
-        setBoltCarHeading(el, heading);
-        setBoltCarSelected(el, selected);
-        const labelEl = el.querySelector('.marker-bolt-label');
-        if (labelEl) labelEl.textContent = label;
-      }
-    }
-
-    for (const [id, marker] of markersRef.current) {
-      if (!seen.has(id)) {
-        marker.remove();
-        markersRef.current.delete(id);
-      }
-    }
-
-    if (coords.length && !selectedRef.current) {
+    if (coords.length && !selectedRef.current && !fittedRef.current) {
+      fittedRef.current = true;
       const bounds = new mapboxgl.LngLatBounds(coords[0], coords[0]);
       coords.forEach((c) => bounds.extend(c));
       map.fitBounds(bounds, { padding: 80, maxZoom: 14.5, duration: 600 });
     }
-  }, [buses, onSelect]);
+  }, [buses, onSelect, selectedId, mapReady]);
 
   useEffect(() => {
     if (!selectedId || !mapRef.current) return;
-    const item = buses.find((b) => String(b.trip._id) === selectedId);
-    const loc = busLocation(item);
-    if (loc?.lat != null) {
-      mapRef.current.easeTo({ center: [loc.lng, loc.lat], zoom: 15.2, duration: 700 });
+    const entry = markersRef.current.get(selectedId);
+    const pos = entry?.marker?.getLngLat();
+    if (pos) {
+      mapRef.current.easeTo({ center: [pos.lng, pos.lat], zoom: 15.2, duration: 700 });
+    } else {
+      const item = buses.find((b) => String(b.trip._id) === selectedId);
+      const loc = busLocation(item);
+      if (loc?.lat != null) {
+        mapRef.current.easeTo({ center: [loc.lng, loc.lat], zoom: 15.2, duration: 700 });
+      }
     }
-    for (const [id, marker] of markersRef.current) {
-      setBoltCarSelected(marker.getElement(), id === selectedId);
+    for (const [id, entry] of markersRef.current) {
+      setBoltCarSelected(entry.marker.getElement(), id === selectedId);
     }
   }, [selectedId, buses]);
 
@@ -219,10 +261,21 @@ export default function LiveTracking({ endpoint = '/admin/live-tracking' } = {})
   const [showFilters, setShowFilters] = useState(false);
   const [q, setQ] = useState('');
 
+  const fleetRef = useRef(null);
   const load = useCallback(async () => {
     try {
-      const data = await api(endpoint);
-      setBuses(data.buses || []);
+      const [data, fleet] = await Promise.all([
+        api(endpoint),
+        fleetRef.current
+          ? Promise.resolve(fleetRef.current)
+          : api('/admin/buses')
+              .then((d) => {
+                fleetRef.current = d;
+                return d;
+              })
+              .catch(() => ({ buses: [] })),
+      ]);
+      setBuses(attachFleetPlates(data.buses || [], fleet.buses || []));
       setStats(data.stats || null);
       setAlerts(data.alerts || []);
       setActivity(data.activity || []);
@@ -280,31 +333,36 @@ export default function LiveTracking({ endpoint = '/admin/live-tracking' } = {})
       label: 'Vehicles Online',
       value: stats?.online ?? 0,
       hint: fleet ? `${pct(stats?.online ?? 0, fleet)} of ${fleet}` : 'Live GPS',
-      tint: 'purple',
+      tint: 'green',
+      icon: 'online',
     },
     {
       label: 'On Route',
       value: stats?.onRoute ?? buses.length,
       hint: fleet ? `${pct(stats?.onRoute ?? 0, fleet)} of ${fleet}` : 'Active trips',
-      tint: 'green',
+      tint: 'blue',
+      icon: 'route',
     },
     {
       label: 'Arriving Soon',
       value: '—',
       hint: 'ETA not tracked',
       tint: 'orange',
+      icon: 'eta',
     },
     {
       label: 'Students On Board',
       value: stats?.studentsOnBoard ?? 0,
       hint: 'Checked in, not dropped',
       tint: 'violet',
+      icon: 'students',
     },
     {
       label: 'Avg. Speed',
-      value: stats?.avgSpeedKmh != null ? `${stats.avgSpeedKmh} km/h` : '—',
-      hint: stats?.avgSpeedKmh != null ? 'Live GPS' : 'Not tracked',
-      tint: 'sky',
+      value: stats?.avgSpeedKmh != null ? `${stats.avgSpeedKmh}` : '—',
+      hint: stats?.avgSpeedKmh != null ? 'km/h live GPS' : 'Not tracked',
+      tint: 'pink',
+      icon: 'speed',
     },
   ];
   const gpsDonut = [
@@ -327,24 +385,27 @@ export default function LiveTracking({ endpoint = '/admin/live-tracking' } = {})
   );
 
   const listBlock = (
-    <article className={`sa-card sa-live-list${full ? ' is-overlay' : ''}`}>
-      <div className="sa-rd-card-head">
-        <h3>Live Vehicles ({filtered.length})</h3>
-        <label className="sa-live-refresh">
-          <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} />
-          Auto refresh: {autoRefresh ? 'On' : 'Off'}
-        </label>
-      </div>
-      <div className="sa-live-list-tools">
-        <button type="button" className="sa-btn sa-btn-outline" onClick={() => setShowFilters((v) => !v)}>
-          Filters
-        </button>
-        <Link to="/school-admin/trip-instances" className="sa-text-link">
-          View All
-        </Link>
-      </div>
+    <article className={`sa-home-card sa-live-list${full ? ' is-overlay' : ''}`}>
+      <header>
+        <div>
+          <h3>Live Vehicles</h3>
+          <p>{filtered.length} active {filtered.length === 1 ? 'vehicle' : 'vehicles'}</p>
+        </div>
+        <div className="sa-live-list-tools">
+          <button type="button" className="sa-home-link-btn" onClick={() => setShowFilters((v) => !v)}>
+            Filters
+          </button>
+          <label className="sa-live-refresh">
+            <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} />
+            Auto refresh {autoRefresh ? 'On' : 'Off'}
+          </label>
+          <Link to="/school-admin/trip-instances" className="sa-text-link">
+            View All
+          </Link>
+        </div>
+      </header>
       {showFilters && (
-        <div className="sa-tch-more">
+        <div className="sa-live-filter-row">
           <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="GPS status">
             <option value="">All GPS states</option>
             <option value="live">On Route</option>
@@ -362,6 +423,7 @@ export default function LiveTracking({ endpoint = '/admin/live-tracking' } = {})
               <th>Route</th>
               <th>Last Update</th>
               <th>Status</th>
+              <th>Speed</th>
             </tr>
           </thead>
           <tbody>
@@ -383,21 +445,17 @@ export default function LiveTracking({ endpoint = '/admin/live-tracking' } = {})
                     <strong>{t.routeId?.name || '—'}</strong>
                     <small className="sa-stu-phone">{item.path || directionLabel(t.direction) || '—'}</small>
                   </td>
-                  <td>
-                    {ago(item.lastGpsAt)}
-                    <small className="sa-stu-phone">
-                      {item.speedKmh != null ? `${item.speedKmh} km/h` : 'No speed'}
-                    </small>
-                  </td>
+                  <td>{ago(item.lastGpsAt)}</td>
                   <td>
                     <span className={`sa-stu-status is-${meta.key}`}>{meta.label}</span>
                   </td>
+                  <td>{item.speedKmh != null ? `${item.speedKmh} km/h` : '—'}</td>
                 </tr>
               );
             })}
             {!filtered.length && (
               <tr>
-                <td colSpan={4} className="sa-stu-empty">
+                <td colSpan={5} className="sa-stu-empty">
                   No active or boarding trips right now.
                 </td>
               </tr>
@@ -437,116 +495,123 @@ export default function LiveTracking({ endpoint = '/admin/live-tracking' } = {})
   }
 
   return (
-    <div className="sa-students sa-live">
+    <div className="sa-live">
       {error && <div className="alert">{error}</div>}
 
-      <section className="sa-stu-kpis sa-tch-kpis sa-live-kpis" aria-label="Live tracking metrics">
+      <section className="sa-home-kpis sa-live-kpis" aria-label="Live tracking metrics">
         {kpis.map((m) => (
-          <article key={m.label} className={`sa-stu-kpi tint-${m.tint}`}>
-            <div>
+          <article key={m.label} className={`sa-home-kpi tint-${m.tint}`}>
+            <span className="sa-home-kpi-icon" aria-hidden="true">
+              <LiveKpiGlyph name={m.icon} />
+            </span>
+            <div className="sa-home-kpi-copy">
               <span>{m.label}</span>
               <strong>{m.value}</strong>
               <em>{m.hint}</em>
             </div>
-            <i className="sa-stu-kpi-icon" aria-hidden="true" />
           </article>
         ))}
       </section>
 
       <section className="sa-live-mid">
-        <article className="sa-card sa-live-map-card">
-          <div className="sa-rd-card-head">
-            <h3>Live Map</h3>
-            <button
-              type="button"
-              className="sa-text-link"
-              onClick={() => setParams({ full: '1' })}
-            >
+        <article className="sa-home-card sa-live-map-card">
+          <header>
+            <div>
+              <h3>Live Map</h3>
+              <p>Follow buses in real time</p>
+            </div>
+            <button type="button" className="sa-home-link-btn" onClick={() => setParams({ full: '1' })}>
               View Full Map
             </button>
-          </div>
+          </header>
           {mapBlock}
         </article>
         {listBlock}
       </section>
 
       <section className="sa-live-widgets">
-        <article className="sa-card">
-          <h3>GPS Summary</h3>
+        <article className="sa-home-card">
+          <header>
+            <div>
+              <h3>GPS Summary</h3>
+              <p>Current vehicle GPS state</p>
+            </div>
+          </header>
           {donutTotal ? (
-            <div className="sa-stops-donut-wrap">
+            <div className="sa-live-donut">
               <div className="sa-live-donut-ring">
                 <div className="sa-stops-donut" style={donutStyle(gpsDonut, donutTotal)} />
                 <div className="sa-live-donut-center">
                   <strong>{donutTotal}</strong>
-                  <span>Vehicles</span>
+                  <span>Total</span>
                 </div>
               </div>
-              <ul className="sa-stops-donut-key">
+              <ul className="sa-home-legend">
                 {gpsDonut.map((item) => (
                   <li key={item.key}>
                     <i style={{ background: item.color }} />
-                    {item.label}
+                    <span>{item.label}</span>
                     <strong>{item.count}</strong>
                   </li>
                 ))}
               </ul>
             </div>
           ) : (
-            <p className="sa-muted">No active trips right now.</p>
+            <p className="sa-home-empty sa-home-empty-compact">No active trips right now.</p>
           )}
-          <p className="sa-muted">On-time / delay ETAs are not stored.</p>
-          <Link to="/school-admin/reports" className="sa-text-link">
-            View Report
-          </Link>
         </article>
 
-        <article className="sa-card">
-          <h3>Delays &amp; Alerts ({alerts.length})</h3>
+        <article className="sa-home-card">
+          <header>
+            <div>
+              <h3>Delays &amp; Alerts ({alerts.length})</h3>
+              <p>Incidents on live trips</p>
+            </div>
+          </header>
           {alerts.length ? (
-            <ul className="sa-stops-alerts">
+            <ul className="sa-live-activity">
               {alerts.map((a, i) => (
                 <li key={`${a.text}-${i}`} className={`is-${a.tone}`}>
-                  {a.text}
-                  <small className="sa-stu-phone">{ago(a.at)}</small>
+                  <strong>{a.text}</strong>
+                  <small>{ago(a.at)}</small>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="sa-muted">No incident reports on active trips.</p>
+            <p className="sa-home-empty sa-home-empty-compact">No incident reports on active trips.</p>
           )}
-          <Link to="/school-admin/incidents" className="sa-text-link">
+          <Link to="/school-admin/incidents" className="sa-home-link-btn">
             View All Alerts
           </Link>
         </article>
 
-        <article className="sa-card">
-          <h3>Speed Overview</h3>
+        <article className="sa-home-card">
+          <header>
+            <div>
+              <h3>Speed Overview</h3>
+              <p>Live GPS average</p>
+            </div>
+          </header>
           {stats?.avgSpeedKmh != null ? (
-            <>
-              <div
-                className="sa-live-gauge"
-                style={{
-                  '--sa-live-gauge': `${Math.min(50, (stats.avgSpeedKmh / 80) * 50)}%`,
-                }}
-              >
-                <span className="sa-live-gauge-arc" />
-              </div>
-              <p className="sa-trips-gauge">
-                <strong>{stats.avgSpeedKmh} km/h</strong>
-                <span>Live GPS average</span>
-              </p>
-            </>
+            <p className="sa-live-speed-stat">
+              <strong>{stats.avgSpeedKmh}</strong>
+              <span>km/h</span>
+            </p>
           ) : (
-            <p className="sa-muted">No live speed readings right now.</p>
+            <p className="sa-home-empty sa-home-empty-compact">No live speed readings right now.</p>
           )}
-          <Link to="/school-admin/reports" className="sa-text-link">
+          <Link to="/school-admin/reports" className="sa-home-link-btn">
             View Report
           </Link>
         </article>
 
-        <article className="sa-card">
-          <h3>Tracking Activity</h3>
+        <article className="sa-home-card">
+          <header>
+            <div>
+              <h3>Tracking Activity</h3>
+              <p>Latest trip events</p>
+            </div>
+          </header>
           {activity.length ? (
             <ul className="sa-live-activity">
               {activity.map((a, i) => (
@@ -557,9 +622,9 @@ export default function LiveTracking({ endpoint = '/admin/live-tracking' } = {})
               ))}
             </ul>
           ) : (
-            <p className="sa-muted">No live trip events yet.</p>
+            <p className="sa-home-empty sa-home-empty-compact">No live trip events yet.</p>
           )}
-          <Link to="/school-admin/trip-instances" className="sa-text-link">
+          <Link to="/school-admin/trip-instances" className="sa-home-link-btn">
             View Logs
           </Link>
         </article>

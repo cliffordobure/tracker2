@@ -2378,6 +2378,7 @@ async function driverSendMessage(convo, driver, body) {
         type: 'message',
         title: driver.name || 'Driver',
         body,
+        link: `messages/${convo._id}`,
       },
     ]);
   }

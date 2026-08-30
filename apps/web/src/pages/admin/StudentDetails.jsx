@@ -3,15 +3,27 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 
 const TABS = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'transport', label: 'Transport' },
-  { id: 'attendance', label: 'Attendance' },
-  { id: 'payments', label: 'Payments' },
-  { id: 'documents', label: 'Documents' },
-  { id: 'health', label: 'Health' },
-  { id: 'notes', label: 'Notes' },
-  { id: 'activity', label: 'Activity Log' },
+  { id: 'overview', label: 'Overview', icon: 'home' },
+  { id: 'transport', label: 'Transport', icon: 'bus' },
+  { id: 'attendance', label: 'Attendance', icon: 'check' },
+  { id: 'payments', label: 'Payments', icon: 'card' },
+  { id: 'documents', label: 'Documents', icon: 'file' },
+  { id: 'health', label: 'Health', icon: 'heart' },
+  { id: 'notes', label: 'Notes', icon: 'note' },
+  { id: 'activity', label: 'Activity Log', icon: 'clock' },
 ];
+
+function TabIcon({ name }) {
+  const p = { width: 13, height: 13, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' };
+  if (name === 'bus') return <svg {...p}><rect x="4" y="5" width="16" height="12" rx="2" /><path d="M4 12h16M8 17v2M16 17v2" /></svg>;
+  if (name === 'check') return <svg {...p}><circle cx="12" cy="12" r="8" /><path d="m8.5 12.2 2.4 2.4 4.6-5" /></svg>;
+  if (name === 'card') return <svg {...p}><rect x="3.5" y="6" width="17" height="12" rx="2" /><path d="M3.5 10h17" /></svg>;
+  if (name === 'file') return <svg {...p}><path d="M7 4h7l5 5v11H7z" /><path d="M14 4v5h5" /></svg>;
+  if (name === 'heart') return <svg {...p}><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2 4 4 0 0 1 7 2c0 5.6-7 10-7 10z" /></svg>;
+  if (name === 'note') return <svg {...p}><path d="M8 4h8a2 2 0 0 1 2 2v14l-6-3-6 3V6a2 2 0 0 1 2-2z" /></svg>;
+  if (name === 'clock') return <svg {...p}><circle cx="12" cy="12" r="8" /><path d="M12 8v4.2l2.4 1.6" /></svg>;
+  return <svg {...p}><rect x="4" y="4" width="16" height="16" rx="2" /><path d="M8 10h8M8 14h5" /></svg>;
+}
 
 function dash(value) {
   if (value == null) return '—';
@@ -117,6 +129,22 @@ function fmtStamp(value) {
   });
 }
 
+function blankFeeForm(fee) {
+  return {
+    termLabel: fee?.termLabel || '',
+    nextDueDate: fee?.nextDueDate ? String(fee.nextDueDate).slice(0, 10) : '',
+    note: fee?.note || '',
+    statementUrl: fee?.statementUrl || '',
+    lines: fee?.lines?.length
+      ? fee.lines.map((line) => ({
+          description: line.description || '',
+          total: line.total ?? '',
+          paid: line.paid ?? '',
+        }))
+      : [{ description: '', total: '', paid: '' }],
+  };
+}
+
 export default function StudentDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -127,6 +155,9 @@ export default function StudentDetails() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [noteForm, setNoteForm] = useState({ title: '', body: '', category: 'general' });
   const [savingNote, setSavingNote] = useState(false);
+  const [feeForm, setFeeForm] = useState(null);
+  const [savingFee, setSavingFee] = useState(false);
+  const [payOpen, setPayOpen] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -144,6 +175,81 @@ export default function StudentDetails() {
   useEffect(() => {
     load();
   }, [id]);
+
+  useEffect(() => {
+    setFeeForm(blankFeeForm(data?.fee));
+  }, [data?.fee]);
+
+  const openPayModal = () => {
+    setFeeForm(blankFeeForm(data?.fee));
+    setError('');
+    setPayOpen(true);
+  };
+
+  const closePayModal = () => {
+    if (savingFee) return;
+    setPayOpen(false);
+    setFeeForm(blankFeeForm(data?.fee));
+  };
+
+  const patchFeeLine = (i, key, value) => {
+    setFeeForm((f) => ({
+      ...f,
+      lines: f.lines.map((row, idx) => (idx === i ? { ...row, [key]: value } : row)),
+    }));
+  };
+
+  const saveFeeStatement = async (e) => {
+    e.preventDefault();
+    if (!feeForm) return;
+    if (!String(feeForm.termLabel || '').trim()) {
+      setError('Term label is required.');
+      return;
+    }
+    if (!feeForm.nextDueDate) {
+      setError('Next due date is required.');
+      return;
+    }
+    const lines = feeForm.lines
+      .filter((line) => String(line.description || '').trim())
+      .map((line) => ({
+        description: line.description,
+        total: Number(line.total) || 0,
+        paid: Number(line.paid) || 0,
+      }));
+    if (!lines.length) {
+      setError('Add at least one fee line with a description.');
+      return;
+    }
+    setSavingFee(true);
+    setError('');
+    try {
+      const res = await api(`/admin/kids/${id}/fee-statement`, {
+        method: 'PUT',
+        body: {
+          termLabel: feeForm.termLabel,
+          nextDueDate: feeForm.nextDueDate || null,
+          note: feeForm.note,
+          statementUrl: feeForm.statementUrl,
+          lines,
+          payments: (data?.fee?.payments || []).map((p) => ({
+            at: p.at,
+            description: p.description,
+            method: p.method,
+            amount: p.amount,
+            reference: p.reference,
+          })),
+          upcoming: data?.fee?.upcoming || [],
+        },
+      });
+      setData((prev) => (prev ? { ...prev, fee: res.fee } : prev));
+      setPayOpen(false);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingFee(false);
+    }
+  };
 
   const kid = data?.kid;
   const parent = kid?.parentIds?.[0];
@@ -240,7 +346,7 @@ export default function StudentDetails() {
 
   return (
     <div className="sa-sd">
-      {error && <div className="alert">{error}</div>}
+      {error && !payOpen && <div className="alert">{error}</div>}
 
       <div className="sa-sd-top">
         <Link to="/school-admin/students" className="sa-text-link">
@@ -257,9 +363,20 @@ export default function StudentDetails() {
             {menuOpen && (
               <div className="sa-stu-menu sa-sd-menu">
                 <button type="button" onClick={() => setActive(kid.active === false)}>
+                  <i aria-hidden="true">
+                    {kid.active === false ? (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="8" /><path d="m9 12 2.2 2.2L15.5 10" /></svg>
+                    ) : (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="8" /><path d="M10 9v6M14 9v6" /></svg>
+                    )}
+                  </i>
                   {kid.active === false ? 'Activate' : 'Deactivate'}
                 </button>
+                <span className="sa-stu-menu-sep" />
                 <button type="button" className="is-danger" onClick={remove}>
+                  <i aria-hidden="true">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 7h14M10 7V5h4v2M8 7l.7 12h6.6L16 7" /></svg>
+                  </i>
                   Delete
                 </button>
               </div>
@@ -275,6 +392,7 @@ export default function StudentDetails() {
             <div className="sa-sd-name">
               <h2>{kid.name}</h2>
               <em className={`sa-stu-status is-${status.key}`}>{status.label}</em>
+              <span className="sa-role-pill">Student</span>
             </div>
             {headerBits.length ? <p className="sa-sd-meta">{headerBits.join('  ·  ')}</p> : null}
           </div>
@@ -302,6 +420,7 @@ export default function StudentDetails() {
       <nav className="sa-sd-tabs" aria-label="Student sections">
         {TABS.map((t) => (
           <button key={t.id} type="button" className={tab === t.id ? 'is-active' : ''} onClick={() => setTab(t.id)}>
+            <TabIcon name={t.icon} />
             {t.label}
           </button>
         ))}
@@ -398,19 +517,43 @@ export default function StudentDetails() {
       )}
 
       {tab === 'payments' && (
-        <section className="sa-card sa-sd-tab">
-          <h3>Payments</h3>
+        <section className="sa-card sa-sd-tab sa-pay-tab">
+          <header className="sa-pay-tab-head">
+            <div>
+              <h3>Payments</h3>
+              <p>{data.fee ? dash(data.fee.termLabel) : 'No fee statement published yet.'}</p>
+            </div>
+            <button type="button" className="sa-btn sa-btn-primary" onClick={openPayModal}>
+              {data.fee ? 'Edit payment details' : 'Add payment details'}
+            </button>
+          </header>
+
           {data.fee ? (
             <>
-              <dl className="sa-sd-dl">
-                <div><dt>Term</dt><dd>{dash(data.fee.termLabel)}</dd></div>
-                <div><dt>Year</dt><dd>{dash(data.fee.year)}</dd></div>
-                <div><dt>Billed</dt><dd>{money(data.fee.billed)}</dd></div>
-                <div><dt>Paid</dt><dd>{money(data.fee.paid)}</dd></div>
-                <div><dt>Balance</dt><dd>{money(data.fee.balance)}</dd></div>
-                <div><dt>Next due</dt><dd>{dash(fmtDate(data.fee.nextDueDate))}</dd></div>
-              </dl>
+              <div className="sa-pay-summary">
+                <article>
+                  <span>Billed</span>
+                  <strong>{money(data.fee.billed)}</strong>
+                </article>
+                <article>
+                  <span>Paid</span>
+                  <strong>{money(data.fee.paid)}</strong>
+                </article>
+                <article>
+                  <span>Balance</span>
+                  <strong>{money(data.fee.balance)}</strong>
+                </article>
+                <article>
+                  <span>Next due</span>
+                  <strong>{dash(fmtDate(data.fee.nextDueDate))}</strong>
+                </article>
+              </div>
               {data.fee.note ? <p className="sa-sd-remarks">{data.fee.note}</p> : null}
+              {data.fee.statementUrl ? (
+                <a className="sa-text-link" href={data.fee.statementUrl} target="_blank" rel="noreferrer">
+                  Open statement PDF
+                </a>
+              ) : null}
               {data.fee.lines?.length ? (
                 <table className="sa-table">
                   <thead>
@@ -448,7 +591,19 @@ export default function StudentDetails() {
               )}
             </>
           ) : (
-            <p className="sa-muted">No fee statement is stored for this student.</p>
+            <div className="sa-pay-empty">
+              <i aria-hidden="true">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <rect x="3.5" y="6" width="17" height="12" rx="2" />
+                  <path d="M3.5 10h17" />
+                </svg>
+              </i>
+              <strong>No fee statement published yet</strong>
+              <p>Create one for this student so parents can see billed, paid, and balance.</p>
+              <button type="button" className="sa-btn sa-btn-primary" onClick={openPayModal}>
+                Add payment details
+              </button>
+            </div>
           )}
         </section>
       )}
@@ -604,7 +759,7 @@ export default function StudentDetails() {
 
       {tab === 'overview' && (
         <>
-          <section className="sa-sd-grid">
+          <section className="sa-sd-overview-grid">
             <article className="sa-card">
               <h3>Personal Information</h3>
               <dl className="sa-sd-dl">
@@ -640,7 +795,29 @@ export default function StudentDetails() {
               </dl>
               {kid.about ? <p className="sa-sd-remarks">{kid.about}</p> : null}
             </article>
+          </section>
 
+          <section className="sa-card">
+            <div className="sa-rd-card-head">
+              <h3>Recent Activity</h3>
+              <button type="button" className="sa-btn sa-btn-outline" onClick={() => setTab('activity')}>View all activity</button>
+            </div>
+            {activity.length ? (
+              <ul className="sa-sd-activity-row">
+                {activity.slice(0, 4).map((item, i) => (
+                  <li key={`${item.at}-${i}`}>
+                    <i className={`sa-sd-act-icon ${i % 4 === 0 ? 'is-green' : i % 4 === 1 ? 'is-blue' : i % 4 === 2 ? 'is-orange' : 'is-purple'}`} aria-hidden="true" />
+                    <strong>{item.title}</strong>
+                    <small>{fmtDate(item.at)}{item.detail ? ` · ${item.detail}` : ''}</small>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="sa-muted">No recent activity yet.</p>
+            )}
+          </section>
+
+          <section className="sa-sd-grid">
             <article className="sa-card">
               <h3>Transport Information</h3>
               <dl className="sa-sd-dl">
@@ -765,6 +942,156 @@ export default function StudentDetails() {
         <span>© {year} {kid.schoolId?.name || 'School'} Transport</span>
         <span>Transport Management System v1.0.0</span>
       </footer>
+
+      {payOpen && feeForm && (
+        <div className="sa-action-overlay" onClick={closePayModal} role="presentation">
+          <aside className="sa-action-modal sa-pay-modal" aria-label="Payments" onClick={(e) => e.stopPropagation()}>
+            <header className="sa-stop-detail-bar">
+              <h2>Payments</h2>
+              <button type="button" className="sa-icon-ghost" aria-label="Close" onClick={closePayModal}>×</button>
+            </header>
+            <form className="sa-pay-form" onSubmit={saveFeeStatement}>
+              {error ? <div className="alert">{error}</div> : null}
+              <div className="sa-pay-grid">
+                <label className="sa-field">
+                  <span>Term label <em>*</em></span>
+                  <input
+                    required
+                    value={feeForm.termLabel}
+                    onChange={(e) => setFeeForm((f) => ({ ...f, termLabel: e.target.value }))}
+                    placeholder="e.g. Term 2 2025"
+                  />
+                </label>
+                <label className="sa-field">
+                  <span>Next due date <em>*</em></span>
+                  <input
+                    required
+                    type="date"
+                    value={feeForm.nextDueDate}
+                    onChange={(e) => setFeeForm((f) => ({ ...f, nextDueDate: e.target.value }))}
+                  />
+                </label>
+              </div>
+
+              <div className="sa-pay-lines">
+                <div className="sa-pay-lines-head">
+                  <span>Description <em>*</em></span>
+                  <span>Total (KES) <em>*</em></span>
+                  <span>Paid (KES)</span>
+                  <span>Actions</span>
+                </div>
+                {feeForm.lines.map((line, i) => (
+                  <div key={`fee-line-${i}`} className="sa-pay-line">
+                    <input
+                      value={line.description}
+                      onChange={(e) => patchFeeLine(i, 'description', e.target.value)}
+                      placeholder="e.g. Tuition Fees"
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      value={line.total}
+                      onChange={(e) => patchFeeLine(i, 'total', e.target.value)}
+                      placeholder="e.g. 10000"
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      value={line.paid}
+                      onChange={(e) => patchFeeLine(i, 'paid', e.target.value)}
+                      placeholder="e.g. 2500"
+                    />
+                    <button
+                      type="button"
+                      className="sa-pay-trash"
+                      aria-label="Remove fee line"
+                      disabled={feeForm.lines.length === 1}
+                      onClick={() =>
+                        setFeeForm((f) => ({
+                          ...f,
+                          lines: f.lines.filter((_, idx) => idx !== i),
+                        }))
+                      }
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                        <path d="M5 7h14M10 7V5h4v2M8 7l.7 12h6.6L16 7" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  className="sa-pay-add"
+                  onClick={() =>
+                    setFeeForm((f) => ({
+                      ...f,
+                      lines: [...f.lines, { description: '', total: '', paid: '' }],
+                    }))
+                  }
+                >
+                  + Add fee line
+                </button>
+              </div>
+
+              <label className="sa-field">
+                <span>Note for parents</span>
+                <textarea
+                  rows={3}
+                  value={feeForm.note}
+                  onChange={(e) => setFeeForm((f) => ({ ...f, note: e.target.value }))}
+                  placeholder="Add a note for parents..."
+                />
+              </label>
+
+              <label className="sa-field">
+                <span>Statement PDF URL (optional)</span>
+                <span className="sa-pay-url">
+                  <i aria-hidden="true">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                      <path d="M10 13a5 5 0 0 0 7.1 0l2.1-2.1a5 5 0 0 0-7.1-7.1L10.6 5.3" />
+                      <path d="M14 11a5 5 0 0 0-7.1 0L4.8 13.1a5 5 0 0 0 7.1 7.1l1.5-1.5" />
+                    </svg>
+                  </i>
+                  <input
+                    value={feeForm.statementUrl}
+                    onChange={(e) => setFeeForm((f) => ({ ...f, statementUrl: e.target.value }))}
+                    placeholder="https://..."
+                  />
+                </span>
+              </label>
+
+              {!data.fee ? (
+                <div className="sa-pay-info">
+                  <p>
+                    <i aria-hidden="true">i</i>
+                    No fee statement published yet. Use the form above to create one for this student.
+                  </p>
+                  <button type="submit" className="sa-btn sa-btn-outline" disabled={savingFee}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+                      <path d="M14 3v5h5M12 17v-6M9.5 13.5 12 11l2.5 2.5" />
+                    </svg>
+                    {savingFee ? 'Publishing…' : 'Publish fee statement'}
+                  </button>
+                </div>
+              ) : null}
+
+              <div className="sa-pay-foot">
+                <button type="button" className="sa-btn sa-btn-outline" onClick={closePayModal} disabled={savingFee}>
+                  Cancel
+                </button>
+                <button type="submit" className="sa-btn sa-btn-primary" disabled={savingFee}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                    <path d="M5 5h12l3 3v11H5z" />
+                    <path d="M8 5v5h8V5M8 19v-6h8v6" />
+                  </svg>
+                  {savingFee ? 'Saving…' : 'Save Payment Details'}
+                </button>
+              </div>
+            </form>
+          </aside>
+        </div>
+      )}
     </div>
   );
 }

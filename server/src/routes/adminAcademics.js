@@ -52,6 +52,7 @@ function serializeClass(doc, extras = {}) {
     academicYear: row.academicYear || '',
     teacherId: teacher?._id ? String(teacher._id) : row.teacherId ? String(row.teacherId) : '',
     teacherName: teacher?.name || '',
+    teacherPhotoUrl: teacher?.photoUrl || '',
     assistantName: row.assistantName || '',
     capacity: row.capacity || 30,
     description: row.description || '',
@@ -116,7 +117,7 @@ router.get('/classes', async (req, res) => {
     ]);
     await syncClassesFromStudentGrades(schoolId, kids);
     const classes = await SchoolClass.find({ schoolId, active: { $ne: false } })
-      .populate('teacherId', 'name')
+      .populate('teacherId', 'name photoUrl')
       .sort({ grade: 1 });
     const byGrade = new Map();
     const houses = new Set();
@@ -130,18 +131,25 @@ router.get('/classes', async (req, res) => {
         houses.add(k.house);
       }
     }
+    const serialized = classes.map((c) => {
+      const bucket = byGrade.get(c.grade) || { students: 0, houses: new Set() };
+      return serializeClass(c, {
+        studentCount: bucket.students,
+        houses: [...bucket.houses].sort(),
+      });
+    });
+    const assignedTeachers = new Set(serialized.map((c) => c.teacherId).filter(Boolean));
     res.json({
-      classes: classes.map((c) => {
-        const bucket = byGrade.get(c.grade) || { students: 0, houses: new Set() };
-        return serializeClass(c, {
-          studentCount: bucket.students,
-          houses: [...bucket.houses].sort(),
-        });
-      }),
-      teachers: teachers.map((t) => ({ id: String(t._id), name: t.name, jobTitle: t.jobTitle || '' })),
+      classes: serialized,
+      teachers: teachers.map((t) => ({ id: String(t._id), name: t.name, jobTitle: t.jobTitle || '', photoUrl: t.photoUrl || '' })),
       grades: [...new Set(kids.map((k) => k.grade).filter(Boolean))].sort(),
       houses: [...houses].sort(),
       unassigned: kids.filter((k) => !k.grade).length,
+      stats: {
+        total: serialized.length,
+        teachers: assignedTeachers.size,
+        houses: houses.size,
+      },
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -286,19 +294,29 @@ router.get('/subjects', async (req, res) => {
     for (const a of assignments) add(a.subject, { assignment: true, classLabel: a.grade || '' });
     for (const a of assessments) add(a.subject, { assessment: true });
 
+    const subjects = [...map.values()]
+      .map((s) => ({
+        name: s.name,
+        classes: s.classes.filter(Boolean).sort(),
+        teachers: [...s.teachers].filter(Boolean).sort(),
+        studentCount: s.studentCount,
+        assignmentCount: s.assignmentCount,
+        assessmentCount: s.assessmentCount,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const assignedTeachers = new Set(subjects.flatMap((s) => s.teachers));
     res.json({
-      subjects: [...map.values()]
-        .map((s) => ({
-          name: s.name,
-          classes: s.classes.filter(Boolean).sort(),
-          teachers: [...s.teachers].filter(Boolean).sort(),
-          studentCount: s.studentCount,
-          assignmentCount: s.assignmentCount,
-          assessmentCount: s.assessmentCount,
-        }))
-        .sort((a, b) => a.name.localeCompare(b.name)),
+      subjects,
       classes: classes.map((c) => serializeClass(c)),
       teachers: teachers.map((t) => ({ id: String(t._id), name: t.name })),
+      stats: {
+        total: subjects.length,
+        classes: classes.length,
+        teachers: assignedTeachers.size,
+        students: subjects.reduce((n, s) => n + s.studentCount, 0),
+        assignments: subjects.reduce((n, s) => n + s.assignmentCount, 0),
+        assessments: subjects.reduce((n, s) => n + s.assessmentCount, 0),
+      },
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -471,6 +489,16 @@ router.get('/assignments', async (req, res) => {
       Kid.find({ schoolId, active: { $ne: false } }).select('name grade').sort({ name: 1 }).limit(300),
     ]);
     const now = Date.now();
+    const today = new Date();
+    const sameDay = (value) => {
+      if (!value) return false;
+      const d = new Date(value);
+      return (
+        d.getFullYear() === today.getFullYear() &&
+        d.getMonth() === today.getMonth() &&
+        d.getDate() === today.getDate()
+      );
+    };
     const assignments = rows.map((row) => {
       const due = row.dueDate ? new Date(row.dueDate).getTime() : null;
       return {
@@ -485,6 +513,7 @@ router.get('/assignments', async (req, res) => {
         teacherName: row.teacherId?.name || '—',
         studentCount: row.kidIds?.length || 0,
         overdue: Boolean(due && due < now && row.status === 'published'),
+        dueToday: sameDay(row.dueDate),
         createdAt: row.createdAt,
       };
     });
@@ -492,11 +521,13 @@ router.get('/assignments', async (req, res) => {
       assignments,
       teachers: teachers.map((t) => ({ id: String(t._id), name: t.name })),
       grades: [...new Set(kids.map((k) => k.grade).filter(Boolean))].sort(),
+      subjects: [...new Set(assignments.map((a) => a.subject).filter(Boolean))].sort(),
       stats: {
         total: assignments.length,
         published: assignments.filter((a) => a.status === 'published').length,
         draft: assignments.filter((a) => a.status === 'draft').length,
         overdue: assignments.filter((a) => a.overdue).length,
+        dueToday: assignments.filter((a) => a.dueToday).length,
       },
     });
   } catch (err) {
@@ -527,7 +558,7 @@ router.post('/assignments', async (req, res) => {
       subject: String(req.body.subject || '').trim().slice(0, 80),
       grade: String(req.body.grade || '').trim(),
       description: String(req.body.description || '').trim().slice(0, 1000),
-      dueDate: req.body.dueDate ? new Date(req.body.dueDate) : null,
+      dueDate: req.body.dueDate ? startOfDay(req.body.dueDate) : null,
       status: req.body.status === 'draft' ? 'draft' : 'published',
     });
     res.status(201).json({ assignment: row });
@@ -550,7 +581,7 @@ router.put('/assignments/:id', async (req, res) => {
     if (req.body.subject !== undefined) row.subject = String(req.body.subject || '').trim().slice(0, 80);
     if (req.body.grade !== undefined) row.grade = String(req.body.grade || '').trim();
     if (req.body.description !== undefined) row.description = String(req.body.description || '').trim().slice(0, 1000);
-    if (req.body.dueDate !== undefined) row.dueDate = req.body.dueDate ? new Date(req.body.dueDate) : null;
+    if (req.body.dueDate !== undefined) row.dueDate = req.body.dueDate ? startOfDay(req.body.dueDate) : null;
     if (req.body.status === 'draft' || req.body.status === 'published') row.status = req.body.status;
     if (isOid(req.body.teacherId)) {
       const teacher = await User.findOne({ _id: req.body.teacherId, schoolId, role: 'teacher' });
@@ -647,12 +678,20 @@ router.post('/attendance', async (req, res) => {
     if (!schoolId) return res.status(400).json({ error: 'schoolId is required' });
     const kidId = String(req.body.kidId || '');
     const status = String(req.body.status || '');
-    if (!isOid(kidId) || !ATTENDANCE_STATUSES.includes(status)) {
+    const clear = Boolean(req.body.clear) || status === 'unmarked' || status === '';
+    if (!isOid(kidId) || (!clear && !ATTENDANCE_STATUSES.includes(status))) {
       return res.status(400).json({ error: 'kidId and a valid status are required' });
     }
     const kid = await Kid.findOne({ _id: kidId, schoolId, active: { $ne: false } });
     if (!kid) return res.status(404).json({ error: 'Student not found' });
     const day = startOfDay(req.body.date);
+    if (clear) {
+      await AttendanceRecord.deleteMany({
+        kidId: kid._id,
+        date: { $gte: day, $lte: endOfDay(day) },
+      });
+      return res.json({ record: null, cleared: true });
+    }
     const record = await AttendanceRecord.findOneAndUpdate(
       { kidId: kid._id, date: day },
       {

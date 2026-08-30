@@ -44,6 +44,7 @@ const userSchema = new mongoose.Schema(
       notifyArrivalTripIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Trip' }],
     },
     active: { type: Boolean, default: true },
+    lastLoginAt: { type: Date, default: null },
   },
   { timestamps: true }
 );
@@ -88,7 +89,9 @@ userSchema.methods.toSafeJSON = function toSafeJSON() {
       notifyArrivalTripIds: (this.preferences?.notifyArrivalTripIds || []).map((id) => id.toString()),
     },
     active: this.active,
+    lastLoginAt: this.lastLoginAt || null,
     createdAt: this.createdAt,
+    updatedAt: this.updatedAt || null,
   };
 };
 

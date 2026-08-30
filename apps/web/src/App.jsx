@@ -33,7 +33,6 @@ import Kids from './pages/admin/Kids';
 import StudentDetails from './pages/admin/StudentDetails';
 import Buses from './pages/admin/Buses';
 import VehicleDetails from './pages/admin/VehicleDetails';
-import TripScheduling from './pages/admin/TripScheduling';
 import TripInstances from './pages/admin/TripInstances';
 import LiveTracking from './pages/admin/LiveTracking';
 import Reports from './pages/admin/Reports';
@@ -50,7 +49,6 @@ import Subjects from './pages/admin/Subjects';
 import Examinations from './pages/admin/Examinations';
 import AssignmentsAdmin from './pages/admin/AssignmentsAdmin';
 import Attendance from './pages/admin/Attendance';
-import BulkAttendance from './pages/admin/BulkAttendance';
 import ComingSoon from './pages/admin/ComingSoon';
 import DriverHome from './pages/driver/DriverHome';
 import ParentHome from './pages/parent/ParentHome';
@@ -131,7 +129,6 @@ export default function App() {
         <Route path="parents" element={<Parents />} />
         <Route path="drivers" element={<Drivers />} />
         <Route path="drivers/:id" element={<DriverDetails />} />
-        <Route path="trip-scheduling" element={<TripScheduling />} />
         <Route path="trip-instances" element={<TripInstances />} />
         <Route path="live-tracking" element={<LiveTracking />} />
         <Route path="reports" element={<Reports />} />
@@ -148,10 +145,8 @@ export default function App() {
         <Route path="examinations" element={<Examinations />} />
         <Route path="assignments" element={<AssignmentsAdmin />} />
         <Route path="attendance" element={<Attendance />} />
-        <Route path="attendance/bulk" element={<BulkAttendance />} />
-        <Route path="handover" element={<PublicHandoverRedirect />} />
         <Route path="coming-soon/:feature" element={<ComingSoon />} />
-        <Route path="dispatch" element={<Navigate to="/school-admin/trip-scheduling" replace />} />
+        <Route path="dispatch" element={<Navigate to="/school-admin/trip-instances?tab=schedules" replace />} />
       </Route>
 
       <Route
@@ -198,13 +193,6 @@ export default function App() {
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
-}
-
-function PublicHandoverRedirect() {
-  if (typeof window !== 'undefined') {
-    window.location.replace('/handover.html');
-  }
-  return <div className="loading-screen">Opening handover…</div>;
 }
 
 function HomeRedirect() {

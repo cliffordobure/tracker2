@@ -713,7 +713,6 @@ router.get('/kids/:id/attendance', async (req, res) => {
     }
     const kid = await assertParentKid(req.user.id, req.params.id);
     if (!kid) return res.status(404).json({ error: 'Child not found' });
-    await ensureParentAttendanceSample(kid);
     const now = new Date();
     const schoolId = kid.schoolId?._id || kid.schoolId;
     const term = schoolId
@@ -955,9 +954,8 @@ router.get('/kids/:id/health', async (req, res) => {
     if (!/^[a-fA-F0-9]{24}$/.test(String(req.params.id))) {
       return res.status(404).json({ error: 'Child not found' });
     }
-    let kid = await assertParentKid(req.user.id, req.params.id);
+    const kid = await assertParentKid(req.user.id, req.params.id);
     if (!kid) return res.status(404).json({ error: 'Child not found' });
-    kid = await ensureParentHealthSample(kid);
     const parent = await User.findById(req.user.id).select('name phone email photoUrl');
     res.json(serializeParentHealth(kid, parent));
   } catch (err) {
@@ -1055,8 +1053,6 @@ async function buildParentDocuments(parentId, query = {}) {
   let kids = await Kid.find({ parentIds: parentId, active: true })
     .populate('schoolId', 'name')
     .populate('routeId', 'name');
-  kids = await ensureParentDocumentsSample(kids);
-
   const kidFilter = query.kidId ? String(query.kidId) : '';
   const scopedKids = kidFilter ? kids.filter((k) => String(k._id) === kidFilter) : kids;
   const schoolIds = [...new Set(scopedKids.map((k) => k.schoolId?._id || k.schoolId).filter(Boolean))];
@@ -1339,56 +1335,6 @@ function dueInLabel(days) {
   return `${Math.abs(days)} days overdue`;
 }
 
-async function ensureParentPaymentSample(kid, term) {
-  const existing = await FeeStatement.findOne({ kidId: kid._id });
-  if (existing) return existing;
-  const due = addDays(startOfDay(), 18);
-  const paidA = addDays(due, -26);
-  const paidB = addDays(due, -44);
-  const first = String(kid.name || 'your child').trim().split(/\s+/)[0];
-  try {
-    return await FeeStatement.create({
-      schoolId: kid.schoolId?._id || kid.schoolId,
-      kidId: kid._id,
-      termId: term?._id || null,
-      termLabel: term?.name ? `This Term (${term.name})` : 'This Term (Term 2)',
-      year: term?.year || due.getFullYear(),
-      currency: 'KES',
-      nextDueDate: due,
-      lines: [
-        { description: 'Tuition Fees', category: 'tuition', total: 25000, paid: 10000 },
-        { description: 'Transport Fees', category: 'transport', total: 10000, paid: 10000 },
-        { description: 'Activity Fees', category: 'activity', total: 5000, paid: 0 },
-        { description: 'Development Levy', category: 'levy', total: 5000, paid: 0 },
-      ],
-      payments: [
-        {
-          at: paidA,
-          description: 'Tuition Fees (Part Payment)',
-          method: 'MPESA Payment',
-          amount: 10000,
-          reference: 'QGX7K2M91A',
-        },
-        {
-          at: paidB,
-          description: 'Transport Fees',
-          method: 'Bank Transfer',
-          amount: 10000,
-          reference: 'BT-44821',
-        },
-      ],
-      upcoming: [
-        { dueDate: due, description: 'Tuition Fees', subtitle: `${term?.name || 'Term 2'} Balance`, amount: 15000 },
-        { dueDate: due, description: 'Activity Fees', subtitle: term?.name || 'Term 2', amount: 5000 },
-      ],
-      note: `Please ensure all fees for ${first} are paid before the due date to avoid late payment charges. For payment plans or queries, contact the school accounts office.`,
-      statementUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
-    });
-  } catch (_) {
-    return FeeStatement.findOne({ kidId: kid._id });
-  }
-}
-
 function serializeFeeStatement(row, { kid, school, terms = [] }) {
   const doc = row.toObject ? row.toObject() : row;
   const lines = (doc.lines || []).map((line) => {
@@ -1513,7 +1459,6 @@ router.get('/kids/:id/payments', async (req, res) => {
       ? await FeeStatement.findOne({ kidId: kid._id, termId })
       : await FeeStatement.findOne({ kidId: kid._id, ...(current?._id ? { termId: current._id } : {}) }).sort({ createdAt: -1 });
     if (!statement) statement = await FeeStatement.findOne({ kidId: kid._id }).sort({ createdAt: -1 });
-    if (!statement) statement = await ensureParentPaymentSample(kid, current);
     if (!statement) return res.status(404).json({ error: 'No fee statement found' });
     const school = kid.schoolId && typeof kid.schoolId === 'object' ? kid.schoolId : null;
     res.json(serializeFeeStatement(statement, { kid, school, terms }));
@@ -1557,7 +1502,6 @@ router.get('/kids/:id/bus', async (req, res) => {
     if (bus && (typeof bus !== 'object' || bus.plate == null && bus.seats == null && !bus.label)) {
       bus = await Bus.findById(bus._id || bus);
     }
-    bus = await ensureParentBusDisplay(bus);
 
     if (!bus && !routeId && !latestTrip) {
       return res.json({
@@ -2056,7 +2000,6 @@ async function ensureSampleTicket(parentId, schoolId) {
 router.get('/support', async (req, res) => {
   try {
     const { schoolId, school } = await parentSupportContext(req.user.id);
-    await ensureSampleTicket(req.user.id, schoolId);
     const [tickets, unread] = await Promise.all([
       SupportTicket.find({ parentId: req.user.id }).sort({ createdAt: -1 }).limit(40),
       Notification.countDocuments({ userId: req.user.id, read: { $ne: true } }),
@@ -2429,7 +2372,7 @@ router.get('/overview', async (req, res) => {
         category: a.category || 'general',
         publishedAt: a.publishedAt || a.createdAt,
       })),
-      events: events.length ? events : sampleEvents(),
+      events: events,
       notifications: notifications.slice(0, 12),
       school: featured?.schoolId || null,
     });
@@ -2619,10 +2562,19 @@ function serializeDiaryKid(kid) {
   };
 }
 
+function formatKidGrade(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  if (/^grade/i.test(s)) {
+    const rest = s.replace(/^grade\s*/i, '').trim();
+    return rest ? `Grade ${rest}` : 'Grade';
+  }
+  return `Grade ${s}`;
+}
+
 function diaryKidCard(kid) {
   if (!kid) return null;
-  const rawGrade = String(kid.grade || '').trim();
-  const grade = !rawGrade ? '' : /^grade\b/i.test(rawGrade) ? rawGrade : `Grade ${rawGrade}`;
+  const grade = formatKidGrade(kid.grade);
   const classLabel = kidClassLabel(kid);
   const roll = kid.rollNo || kid.house || '';
   return {
@@ -3738,6 +3690,10 @@ function serializeOuting(outing, permission, extra = {}) {
     busCount: outing.busCount ?? 1,
     teacherCount: outing.teacherCount ?? 1,
     status: outing.status || 'upcoming',
+    tripId: outing.tripId?._id || outing.tripId || extra.tripId || null,
+    routeName: outing.routeId?.name || extra.routeName || '',
+    driverName: outing.driverId?.name || extra.driverName || '',
+    plate: outing.busId?.plate || extra.plate || '',
     permission: permission
       ? { status: permission.status, decidedAt: permission.decidedAt }
       : { status: 'pending', decidedAt: null },
@@ -4177,7 +4133,11 @@ router.get('/trips', async (req, res) => {
         : [],
       Notification.find({ userId: req.user.id }).sort({ createdAt: -1 }).limit(80),
       schoolIds.length
-        ? SchoolOuting.find({ schoolId: { $in: schoolIds }, active: true }).sort({ startAt: 1 })
+        ? SchoolOuting.find({ schoolId: { $in: schoolIds }, active: true })
+            .populate('routeId', 'name')
+            .populate('busId', 'plate label')
+            .populate('driverId', 'name')
+            .sort({ startAt: 1 })
         : [],
     ]);
 
@@ -4202,11 +4162,13 @@ router.get('/trips', async (req, res) => {
       .filter((o) => o.status === 'completed' || new Date(o.endAt || o.startAt) < today)
       .map((o) => serializeOuting(o, permByOuting.get(o._id.toString()), { status: 'completed' }));
 
-    const samples = sampleOutings(kids);
-    const upcoming = upcomingOutings.length ? upcomingOutings : [...samples.upcoming];
+    const upcoming = upcomingOutings;
+
+    const isOutingTrip = (t) => Boolean(t.outingId) || t.kind === 'outing';
 
     const scheduledBus = trips
       .filter((t) => t.status === 'scheduled')
+      .filter((t) => !isOutingTrip(t))
       .filter((t) => !isEveningTrip(t))
       .map((t) => {
         const my = kids.find((k) => (t.kidIds || []).some((id) => String(id?._id || id) === String(k._id)));
@@ -4264,6 +4226,7 @@ router.get('/trips', async (req, res) => {
 
     const busHistory = trips
       .filter((t) => t.status === 'completed' || t.status === 'cancelled' || t.status === 'canceled')
+      .filter((t) => !isOutingTrip(t))
       .map((t) => {
         const my = kids.find((k) => (t.kidIds || []).some((id) => String(id?._id || id) === String(k._id)));
         return { ...serializeBusTrip(t), kid: serializeKidSnippet(my) };
@@ -4271,7 +4234,7 @@ router.get('/trips', async (req, res) => {
     const history = [...outingHistory, ...busHistory].sort(
       (a, b) => new Date(b.startAt || 0) - new Date(a.startAt || 0)
     );
-    const historyOut = history.length ? history : [...samples.history, ...busHistory];
+    const historyOut = history;
 
     res.json({
       upcoming,
@@ -4291,15 +4254,6 @@ router.get('/trips/:id', async (req, res) => {
       .populate('schoolId', 'name address location')
       .populate('homeStopId', 'name location');
     const id = String(req.params.id);
-
-    if (id.startsWith('sample-')) {
-      const samples = sampleOutings(kids);
-      const found = [...samples.upcoming, ...samples.history].find((o) => o._id === id);
-      if (!found) return res.status(404).json({ error: 'Trip not found' });
-      return res.json({
-        trip: serializeOutingDetail(found, found.permission, kids, { status: found.status, sample: true }),
-      });
-    }
 
     if (!/^[a-fA-F0-9]{24}$/.test(id)) {
       return res.status(404).json({ error: 'Trip not found' });
@@ -4422,12 +4376,6 @@ router.post('/trips/:id/notify-arrival', async (req, res) => {
 router.get('/outings/:id', async (req, res) => {
   try {
     const kids = await Kid.find({ parentIds: req.user.id, active: true });
-    if (String(req.params.id).startsWith('sample-')) {
-      const samples = sampleOutings(kids);
-      const found = [...samples.upcoming, ...samples.history].find((o) => o._id === req.params.id);
-      if (!found) return res.status(404).json({ error: 'Trip not found' });
-      return res.json({ outing: found });
-    }
     if (!/^[a-fA-F0-9]{24}$/.test(String(req.params.id))) {
       return res.status(404).json({ error: 'Trip not found' });
     }
@@ -4450,9 +4398,6 @@ router.get('/outings/:id', async (req, res) => {
 
 router.post('/outings/:id/permission', async (req, res) => {
   try {
-    if (String(req.params.id).startsWith('sample-')) {
-      return res.status(400).json({ error: 'This sample trip is already approved' });
-    }
     if (!/^[a-fA-F0-9]{24}$/.test(String(req.params.id))) {
       return res.status(404).json({ error: 'Trip not found' });
     }
@@ -4648,7 +4593,6 @@ router.get('/leave-requests', async (req, res) => {
     const { kidId } = req.query;
     const kids = await Kid.find({ parentIds: req.user.id, active: true }).select('_id');
     const kidIds = kids.map((k) => k._id);
-    await ensureParentLeaveSample(req.user.id);
     const filter = { parentId: req.user.id, kidId: { $in: kidIds } };
     if (kidId) {
       if (!kidIds.some((id) => id.toString() === String(kidId))) {
@@ -5118,10 +5062,6 @@ router.get('/announcements', async (req, res) => {
       });
     }
 
-    for (const id of schoolIds) {
-      await ensureParentNotices(id);
-    }
-
     const { category, tab, q } = req.query;
     const page = Math.max(1, Number(req.query.page) || 1);
     const pageSize = Math.min(20, Math.max(4, Number(req.query.pageSize) || 8));
@@ -5130,6 +5070,7 @@ router.get('/announcements', async (req, res) => {
       schoolId: { $in: schoolIds },
       active: true,
       archived: { $ne: true },
+      sourceKey: { $not: /^sample:/ },
       $and: [
         {
           $or: [
@@ -5165,6 +5106,7 @@ router.get('/announcements', async (req, res) => {
       schoolId: { $in: schoolIds },
       active: true,
       archived: { $ne: true },
+      sourceKey: { $not: /^sample:/ },
       readBy: { $ne: req.user.id },
       $or: [
         { scope: { $ne: 'class' } },
@@ -6158,12 +6100,6 @@ router.get('/calendar', async (req, res) => {
     const kidId = String(req.query.kidId || '');
     const selectedKid = kids.find((k) => String(k._id) === kidId) || null;
 
-    if (schoolIds.length) {
-      for (const id of schoolIds) {
-        await ensureParentCalendarEvents(id);
-      }
-    }
-
     const { from, to } = monthRange(req.query.month);
     const windowFrom = new Date(from);
     windowFrom.setDate(windowFrom.getDate() - 7);
@@ -6181,6 +6117,7 @@ router.get('/calendar', async (req, res) => {
         ? CalendarEvent.find({
             schoolId: { $in: schoolIds },
             active: { $ne: false },
+            sourceKey: { $not: /^sample:/ },
             startAt: { $gte: windowFrom, $lte: windowTo },
             ...kidFilter,
           }).sort({ startAt: 1 })
@@ -6205,6 +6142,7 @@ router.get('/calendar', async (req, res) => {
             schoolId: { $in: schoolIds },
             active: true,
             archived: { $ne: true },
+            sourceKey: { $not: /^sample:/ },
             $or: [{ kind: 'event' }, { category: 'events' }],
             publishedAt: { $gte: windowFrom, $lte: windowTo },
           }).sort({ publishedAt: 1 })
@@ -6505,6 +6443,7 @@ router.post('/messages', async (req, res) => {
             type: NOTIFICATION_TYPES.MESSAGE,
             title: parent?.name || 'Parent',
             body,
+            link: `messages/${convo._id}`,
           },
         ]);
       }
@@ -6578,6 +6517,7 @@ router.post('/messages/:id', async (req, res) => {
           type: NOTIFICATION_TYPES.MESSAGE,
           title: parent?.name || 'Parent',
           body,
+          link: `messages/${convo._id}`,
         },
       ]);
     }

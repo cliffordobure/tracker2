@@ -246,9 +246,19 @@ export function createVehicleMotion() {
       const movedFromLast = state.lastRaw ? haversineMeters(state.lastRaw, raw) : 999;
 
       if (!route?.length || route.length < 2) {
-        state.display = raw;
-        state.lastRaw = raw;
-        state.lastGpsAt = now;
+        if (!state.display) state.display = raw;
+        const moved = state.lastRaw ? haversineMeters(state.lastRaw, raw) : 0;
+        const dt = state.lastGpsAt ? (now - state.lastGpsAt) / 1000 : 0;
+        if (moved > 0.5 && dt > 0.2 && dt < 10) {
+          state.speedMps = state.speedMps * 0.55 + Math.max(1.5, Math.min(28, moved / dt)) * 0.45;
+        }
+        if (Number.isFinite(gpsSpeedMps) && gpsSpeedMps >= 0.8 && gpsSpeedMps <= 30) {
+          state.speedMps = state.speedMps * 0.6 + gpsSpeedMps * 0.4;
+        }
+        if (!state.lastRaw || moved > 0.15) {
+          state.lastRaw = raw;
+          state.lastGpsAt = now;
+        }
         state.needsReroute = true;
         return 'offRoute';
       }

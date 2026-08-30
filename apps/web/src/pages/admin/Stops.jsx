@@ -48,7 +48,106 @@ function kindLabel(s) {
   if (s.kind === 'start') return 'Start Point';
   if (s.kind === 'end') return 'End Point';
   if (s.type === 'school') return 'School';
-  return '';
+  return 'Intermediate';
+}
+
+function prettySchool(name) {
+  const raw = String(name || 'School').trim();
+  return raw.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function pctBar(part, total) {
+  if (!total) return 0;
+  return Math.min(100, Math.round(((Number(part) || 0) / total) * 100));
+}
+
+function StopKpiGlyph({ name }) {
+  const common = {
+    width: 16,
+    height: 16,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.8,
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+  };
+  if (name === 'pin') return <svg {...common}><path d="M12 21s7-6.2 7-11.2A7 7 0 0 0 5 9.8C5 14.8 12 21 12 21Z" /><circle cx="12" cy="10" r="2.2" /></svg>;
+  if (name === 'shield') return <svg {...common}><path d="M12 3 4.5 6.2v5.4c0 4.4 2.9 8.4 7.5 9.6 4.6-1.2 7.5-5.2 7.5-9.6V6.2L12 3Z" /></svg>;
+  if (name === 'clock') return <svg {...common}><circle cx="12" cy="12" r="8.2" /><path d="M12 8v4.2l2.6 1.6" /></svg>;
+  if (name === 'users') return <svg {...common}><circle cx="9" cy="8" r="3" /><path d="M3 19c.8-2.8 2.8-4.2 6-4.2S14.2 16.2 15 19" /><circle cx="17" cy="9" r="2.2" /></svg>;
+  return <svg {...common}><rect x="3" y="7" width="18" height="10" rx="2" /><path d="M7 17v2M17 17v2M3 12h18" /></svg>;
+}
+
+function StopKpiMark({ name }) {
+  const common = {
+    width: 11,
+    height: 11,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 2.2,
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+  };
+  if (name === 'up') return <svg {...common}><path d="M12 18V6M7 11l5-5 5 5" /></svg>;
+  if (name === 'check') return <svg {...common}><path d="M5 12.5 10 17.5 19 7" /></svg>;
+  if (name === 'clock') return <svg {...common}><circle cx="12" cy="12" r="8" /><path d="M12 8v4l2.4 1.4" /></svg>;
+  return <svg {...common}><rect x="3" y="7" width="18" height="10" rx="2" /></svg>;
+}
+
+function fmtStopStamp(value) {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+  const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  return `${date} - ${time}`;
+}
+
+function StopDetailGlyph({ name }) {
+  const common = {
+    width: 15,
+    height: 15,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.7,
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+  };
+  if (name === 'bus') return <svg {...common}><rect x="3" y="7" width="18" height="10" rx="2" /><path d="M7 17v2M17 17v2M3 12h18" /></svg>;
+  if (name === 'area') return <svg {...common}><path d="M9 4h6l4 6-7 10L5 10 9 4Z" /><path d="M8.2 10h7.6" /></svg>;
+  if (name === 'pin') return <svg {...common}><path d="M12 21s7-6.2 7-11.2A7 7 0 0 0 5 9.8C5 14.8 12 21 12 21Z" /><circle cx="12" cy="10" r="2.2" /></svg>;
+  if (name === 'users') return <svg {...common}><circle cx="9" cy="8" r="3" /><path d="M3 19c.8-2.8 2.8-4.2 6-4.2S14.2 16.2 15 19" /><circle cx="17" cy="9" r="2.2" /></svg>;
+  if (name === 'type') return <svg {...common}><circle cx="6" cy="12" r="2.1" /><circle cx="18" cy="7" r="2.1" /><circle cx="18" cy="17" r="2.1" /><path d="M8 12h7.2M16.2 8.7 8.7 11.2M16.2 15.3 8.7 12.8" /></svg>;
+  if (name === 'shield') return <svg {...common}><path d="M12 3 4.5 6.2v5.4c0 4.4 2.9 8.4 7.5 9.6 4.6-1.2 7.5-5.2 7.5-9.6V6.2L12 3Z" /></svg>;
+  if (name === 'cal') return <svg {...common}><rect x="4" y="5" width="16" height="15" rx="2" /><path d="M8 3v4M16 3v4M4 10h16" /></svg>;
+  if (name === 'note') return <svg {...common}><path d="M7 3h8l5 5v13H7V3Z" /><path d="M15 3v5h5M9 13h6M9 17h4" /></svg>;
+  if (name === 'edit') return <svg {...common}><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" /></svg>;
+  return <svg {...common}><circle cx="6" cy="12" r="2.1" /><circle cx="18" cy="7" r="2.1" /><circle cx="18" cy="17" r="2.1" /><path d="M8 12h7.2M16.2 8.7 8.7 11.2M16.2 15.3 8.7 12.8" /></svg>;
+}
+
+function ActionGlyph({ name }) {
+  const common = {
+    width: 14,
+    height: 14,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.8,
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+  };
+  if (name === 'edit') return <svg {...common}><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" /></svg>;
+  if (name === 'view') return <svg {...common}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></svg>;
+  return (
+    <svg {...common}>
+      <circle cx="12" cy="5" r="1.35" />
+      <circle cx="12" cy="12" r="1.35" />
+      <circle cx="12" cy="19" r="1.35" />
+    </svg>
+  );
 }
 
 function isActive(s) {
@@ -84,7 +183,7 @@ function donutStyle(items, total) {
 }
 
 export default function StopsPage() {
-  const { globalSearch = '' } = useOutletContext() || {};
+  const { globalSearch = '', schoolName } = useOutletContext() || {};
   const navigate = useNavigate();
   const [stops, setStops] = useState([]);
   const [routes, setRoutes] = useState([]);
@@ -130,10 +229,15 @@ export default function StopsPage() {
   }, [globalSearch]);
 
   useEffect(() => {
-    const close = () => setMenuId('');
-    window.addEventListener('click', close);
-    return () => window.removeEventListener('click', close);
-  }, []);
+    if (!menuId && panel !== 'view' && panel !== 'form') return undefined;
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      if (menuId) setMenuId('');
+      else closePanel();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [menuId, panel]);
 
   const areas = useMemo(() => {
     const set = new Set();
@@ -203,7 +307,7 @@ export default function StopsPage() {
     setError('');
     setSuccess('');
     setEditingId(null);
-    setForm({ ...emptyForm, routeId: routes[0]?._id || '' });
+    setForm({ ...emptyForm, routeId: '', type: '' });
     setViewing(null);
     setPanel('form');
   };
@@ -300,7 +404,7 @@ export default function StopsPage() {
   };
 
   const year = new Date().getFullYear();
-  const canSave = Boolean(form.name.trim() && form.routeId && form.location?.lat != null);
+  const canSave = Boolean(form.name.trim() && form.routeId && form.type && form.location?.lat != null);
   const mapStops = filtered.map((s) => ({ ...s, pinLabel: '' }));
   const breakdownItems = (breakdown?.items || []).map((item, i) => ({
     ...item,
@@ -318,50 +422,84 @@ export default function StopsPage() {
   }
   const extraRoutes = seen.size - legendRoutes.length;
 
+  const total = stats?.total ?? stops.length;
+  const activeCount = stats?.active ?? 0;
+  const studentCount = stats?.studentsAssigned ?? 0;
+  const withBus = stats?.withBus ?? 0;
   const kpis = [
     {
+      key: 'total',
       label: 'Total Stops',
-      value: stats?.total ?? stops.length,
+      value: total,
       hint: stats?.addedThisMonth ? `↑ ${stats.addedThisMonth} this month` : 'Saved stops',
-      up: Boolean(stats?.addedThisMonth),
       tint: 'purple',
+      icon: 'pin',
+      mark: 'up',
+      bar: 100,
     },
     {
+      key: 'active',
       label: 'Active Stops',
-      value: stats?.active ?? 0,
-      hint: pct(stats?.active ?? 0, stats?.total || stops.length),
+      value: `${activeCount}`,
+      hint: total ? `${pct(activeCount, total)} of total` : 'No stops yet',
       tint: 'green',
+      icon: 'shield',
+      mark: 'check',
+      bar: pctBar(activeCount, total),
     },
     {
+      key: 'wait',
       label: 'Avg. Wait Time',
       value: '—',
       hint: 'Not tracked',
       tint: 'orange',
+      icon: 'clock',
+      mark: 'clock',
+      bar: 0,
     },
     {
+      key: 'students',
       label: 'Total Students',
-      value: stats?.studentsAssigned ?? 0,
+      value: studentCount,
       hint: stats?.addedStudentsThisMonth ? `↑ ${stats.addedStudentsThisMonth} this month` : 'On a stop or route',
-      up: Boolean(stats?.addedStudentsThisMonth),
       tint: 'violet',
+      icon: 'users',
+      mark: 'up',
+      bar: pctBar(studentCount, Math.max(studentCount, 1)),
     },
     {
+      key: 'buses',
       label: 'Stops with Buses',
-      value: stats?.withBus ?? 0,
-      hint: pct(stats?.withBus ?? 0, stats?.total || stops.length),
+      value: withBus,
+      hint: total ? `${pct(withBus, total)} of total` : 'No stops yet',
       tint: 'sky',
+      icon: 'bus',
+      mark: 'check',
+      bar: pctBar(withBus, total),
     },
   ];
+  const menuStop = stops.find((s) => stopId(s) === menuId);
 
   return (
-    <div className="sa-students">
+    <div className="sa-buses sa-stops">
       {error && <div className="alert">{error}</div>}
       {success && <div className="alert alert-ok">{success}</div>}
 
-      <div className="sa-sd-top">
-        <span />
-        <div className="sa-sd-top-actions">
-          <button type="button" className="sa-btn sa-btn-outline sa-stu-export" onClick={exportRows}>
+      <div className="sa-bus-head">
+        <div>
+          <h2>Stops</h2>
+          <p className="sa-vd-crumbs">
+            <Link to="/school-admin">Dashboard</Link>
+            <span>›</span>
+            <em>Stops</em>
+          </p>
+        </div>
+        <div className="sa-bus-head-actions">
+          <button type="button" className="sa-btn sa-btn-outline sa-bus-export" onClick={exportRows}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+              <path d="M12 4v10M8 10l4 4 4-4" />
+              <path d="M5 18h14" />
+            </svg>
             Export
           </button>
           <button type="button" className="sa-btn sa-btn-primary" onClick={startCreate}>
@@ -370,35 +508,41 @@ export default function StopsPage() {
         </div>
       </div>
 
-      <section className="sa-stu-kpis sa-tch-kpis sa-stops-kpis" aria-label="Stop metrics">
+      <section className="sa-bus-kpis sa-stops-kpis" aria-label="Stop metrics">
         {kpis.map((m) => (
-          <article key={m.label} className={`sa-stu-kpi tint-${m.tint}`}>
-            <div>
+          <article key={m.key} className={`sa-bus-kpi tint-${m.tint}`}>
+            <i className="sa-bus-kpi-icon" aria-hidden="true">
+              <StopKpiGlyph name={m.icon} />
+            </i>
+            <div className="sa-bus-kpi-copy">
               <span>{m.label}</span>
               <strong>{m.value}</strong>
-              <em className={m.up ? 'is-up' : ''}>{m.hint}</em>
+              <em className={String(m.hint).startsWith('↑') ? 'is-up' : ''}>{m.hint}</em>
             </div>
-            <i className="sa-stu-kpi-icon" aria-hidden="true" />
+            <b className="sa-bus-kpi-mark" aria-hidden="true">
+              <StopKpiMark name={m.mark} />
+            </b>
+            <div className="sa-bus-kpi-bar" aria-hidden="true">
+              <i style={{ width: `${m.bar}%` }} />
+            </div>
           </article>
         ))}
       </section>
 
       <section className="sa-stops-layout">
-        <article className="sa-card sa-stu-table-card">
-          <div className="sa-stu-toolbar sa-drv-toolbar sa-stops-toolbar">
+        <article className="sa-card sa-bus-table-card">
+          <div className="sa-bus-toolbar sa-stops-toolbar">
             <label className="sa-stu-search">
-              <span aria-hidden="true">⌕</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" />
+                <path d="m20 20-3.2-3.2" />
+              </svg>
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Search by stop name or location..."
+                placeholder="Search by stop name..."
               />
             </label>
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Status">
-              <option value="">All Status</option>
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-            </select>
             <select value={routeFilter} onChange={(e) => setRouteFilter(e.target.value)} aria-label="Route">
               <option value="">All Routes</option>
               {routes.map((r) => (
@@ -407,26 +551,34 @@ export default function StopsPage() {
                 </option>
               ))}
             </select>
-            <select value={areaFilter} onChange={(e) => setAreaFilter(e.target.value)} aria-label="Area">
-              <option value="">All Areas</option>
-              <option value="__none">No area set</option>
-              {areas.map((a) => (
-                <option key={a} value={a}>
-                  {a}
-                </option>
-              ))}
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Status">
+              <option value="">All Status</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
             </select>
             <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} aria-label="Type">
               <option value="">All Types</option>
               <option value="home">Home</option>
               <option value="school">School</option>
             </select>
-            <button type="button" className="sa-btn sa-btn-outline" onClick={() => setMoreFilters((v) => !v)}>
+            <button type="button" className="sa-btn sa-btn-outline sa-bus-more-btn" onClick={() => setMoreFilters((v) => !v)}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                <path d="M4 5h16l-6.2 7.2V18l-3.6 2v-7.8L4 5Z" />
+              </svg>
               More Filters
             </button>
           </div>
           {moreFilters && (
-            <div className="sa-tch-more">
+            <div className="sa-bus-more">
+              <select value={areaFilter} onChange={(e) => setAreaFilter(e.target.value)} aria-label="Area">
+                <option value="">All Areas</option>
+                <option value="__none">No area set</option>
+                {areas.map((a) => (
+                  <option key={a} value={a}>
+                    {a}
+                  </option>
+                ))}
+              </select>
               <select value={hasStudents} onChange={(e) => setHasStudents(e.target.value)} aria-label="Students">
                 <option value="">All student states</option>
                 <option value="yes">Has students</option>
@@ -436,7 +588,7 @@ export default function StopsPage() {
           )}
 
           <div className="sa-table-wrap">
-            <table className="sa-table sa-stu-table sa-stops-table">
+            <table className="sa-table sa-bus-table sa-stops-table">
               <thead>
                 <tr>
                   <th>
@@ -445,7 +597,7 @@ export default function StopsPage() {
                   <th>Stop Name</th>
                   <th>Route</th>
                   <th>Students</th>
-                  <th>Area</th>
+                  <th>Type</th>
                   <th>Status</th>
                   <th>Actions</th>
                 </tr>
@@ -466,79 +618,51 @@ export default function StopsPage() {
                         />
                       </td>
                       <td>
-                        <div className="sa-stu-person">
-                          <span className="sa-route-pin" style={{ background: s.pinColor || '#5d3fd3' }} />
-                          <div>
+                        <div className="sa-stops-name">
+                          <i className="sa-stops-pin" aria-hidden="true">
+                            <StopKpiGlyph name="pin" />
+                          </i>
+                          <div className="sa-rt-name">
                             <strong>
                               <button type="button" className="sa-text-link" onClick={() => { setViewing(s); setPanel('view'); }}>
                                 {s.name}
                               </button>
                             </strong>
-                            <small>{extra || s.address || '—'}</small>
+                            <small>{extra}</small>
                           </div>
                         </div>
                       </td>
                       <td>
                         {s.routeId ? (
-                          <Link to={`/school-admin/routes/${s.routeId}`}>{s.routeName || 'Route'}</Link>
+                          <Link to={`/school-admin/routes/${s.routeId}`} className="sa-rt-link" style={{ fontSize: '0.75rem' }}>
+                            {s.routeName || 'Route'}
+                          </Link>
                         ) : (
-                          '—'
+                          <span className="sa-bus-muted">—</span>
                         )}
                       </td>
-                      <td>{s.studentCount ?? 0}</td>
-                      <td>{s.area || '—'}</td>
+                      <td>
+                        <strong>{s.studentCount ?? 0}</strong>
+                      </td>
+                      <td>
+                        <em className="sa-stops-type">{s.type === 'school' ? 'School' : 'Home'}</em>
+                      </td>
                       <td>
                         <span className={`sa-stu-status is-${active ? 'active' : 'muted'}`}>{active ? 'Active' : 'Inactive'}</span>
                       </td>
                       <td>
-                        <div className="sa-stu-actions">
+                        <div className="sa-stu-actions sa-bus-actions">
+                          <button type="button" className="sa-icon-ghost is-edit" aria-label="Edit" onClick={() => startEdit(s)}>
+                            <ActionGlyph name="edit" />
+                          </button>
                           <button
                             type="button"
-                            className="sa-icon-ghost is-view"
-                            aria-label="View"
-                            onClick={() => {
-                              setViewing(s);
-                              setPanel('view');
-                            }}
+                            className="sa-icon-ghost"
+                            aria-label="More"
+                            onClick={() => setMenuId((cur) => (cur === id ? '' : id))}
                           >
-                            ◉
+                            <ActionGlyph name="more" />
                           </button>
-                          <div className="sa-stu-more">
-                            <button
-                              type="button"
-                              className="sa-icon-ghost"
-                              aria-label="More"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                e.nativeEvent.stopImmediatePropagation();
-                                setMenuId((cur) => (cur === id ? '' : id));
-                              }}
-                            >
-                              ⋮
-                            </button>
-                            {menuId === id && (
-                              <div className="sa-stu-menu" onClick={(e) => e.stopPropagation()}>
-                                <button type="button" onClick={() => { setMenuId(''); startEdit(s); }}>
-                                  Edit
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setMenuId('');
-                                    navigate(`/school-admin/routes/${s.routeId}`);
-                                  }}
-                                >
-                                  View route
-                                </button>
-                                <button type="button" onClick={() => { setActive(s, s.active === false); setMenuId(''); }}>
-                                  {s.active === false ? 'Activate' : 'Deactivate'}
-                                </button>
-                                <button type="button" className="is-danger" onClick={() => { setMenuId(''); remove(s); }}>
-                                  Delete
-                                </button>
-                              </div>
-                            )}
-                          </div>
                         </div>
                       </td>
                     </tr>
@@ -594,216 +718,397 @@ export default function StopsPage() {
           </div>
         </article>
 
-        <article className="sa-card sa-stops-map-card">
-          <h3>All Stops Map</h3>
-          {mapStops.length ? (
-            <MapView
-              center={geoCenter(mapStops)}
-              zoom={11.4}
-              stops={mapStops}
-              showRoute={false}
-              className="map-canvas sa-stops-map"
-            />
-          ) : (
-            <p className="sa-muted">No stops to plot for these filters.</p>
-          )}
-          {legendRoutes.length ? (
-            <ul className="sa-stops-legend">
-              {legendRoutes.map((r) => (
-                <li key={r.id}>
-                  <i style={{ background: r.color }} />
-                  {r.name}
-                </li>
-              ))}
-              {extraRoutes > 0 ? <li>Other routes ({extraRoutes})</li> : null}
-            </ul>
-          ) : null}
-        </article>
-      </section>
-
-      <section className="sa-stops-widgets">
-        <article className="sa-card">
-          <h3>Top 5 Busiest Stops</h3>
-          <p className="sa-rd-sub">By students assigned</p>
-          {busiest.length ? (
-            <ol className="sa-stops-busy">
-              {busiest.map((s) => (
-                <li key={s.id}>
-                  <div>
-                    <strong>{s.name}</strong>
-                    <small>{s.routeName || '—'}</small>
-                  </div>
-                  <span>{s.studentCount} students</span>
-                </li>
-              ))}
-            </ol>
-          ) : (
-            <p className="sa-muted">No students are assigned to stops yet.</p>
-          )}
-        </article>
-
-        <article className="sa-card">
-          <h3>{breakdown?.kind === 'area' ? 'Stops by Area' : 'Stops by Type'}</h3>
-          {breakdownTotal ? (
-            <div className="sa-stops-donut-wrap">
-              <div className="sa-stops-donut" style={donutStyle(breakdownItems, breakdownTotal)} />
-              <ul className="sa-stops-donut-key">
-                {breakdownItems.map((item) => (
-                  <li key={item.label}>
-                    <i style={{ background: item.color }} />
-                    {item.label}
-                    <strong>{pct(item.count, breakdownTotal)}</strong>
+        <aside className="sa-stops-side">
+          <article className="sa-card sa-stops-widget">
+            <h3>All Stops Map</h3>
+            {mapStops.length ? (
+              <MapView
+                center={geoCenter(mapStops)}
+                zoom={11.4}
+                stops={mapStops}
+                showRoute={false}
+                className="map-canvas sa-stops-map"
+              />
+            ) : (
+              <p className="sa-muted">No stops to plot for these filters.</p>
+            )}
+            {legendRoutes.length ? (
+              <ul className="sa-stops-legend">
+                {legendRoutes.map((r) => (
+                  <li key={r.id}>
+                    <i style={{ background: r.color }} />
+                    {r.name}
                   </li>
                 ))}
+                {extraRoutes > 0 ? <li>Other routes ({extraRoutes})</li> : null}
               </ul>
+            ) : null}
+          </article>
+
+          <article className="sa-card sa-stops-widget">
+            <h3>Top 5 Busiest Stops</h3>
+            {busiest.length ? (
+              <ol className="sa-stops-busy">
+                {busiest.map((s, i) => (
+                  <li key={s.id}>
+                    <b>{i + 1}</b>
+                    <div>
+                      <strong>{s.name}</strong>
+                      <small>{s.routeName || '—'}</small>
+                    </div>
+                    <span>{s.studentCount} {s.studentCount === 1 ? 'student' : 'students'}</span>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="sa-muted">No students assigned yet.</p>
+            )}
+            <button type="button" className="sa-text-link" onClick={() => { setQ(''); setRouteFilter(''); }}>
+              View all stops
+            </button>
+          </article>
+
+          <article className="sa-card sa-stops-widget">
+            <h3>{breakdown?.kind === 'area' ? 'Stops by Area' : 'Stops by Type'}</h3>
+            {breakdownTotal ? (
+              <div className="sa-stops-donut-wrap">
+                <div className="sa-stops-donut" style={donutStyle(breakdownItems, breakdownTotal)} />
+                <ul className="sa-stops-donut-key">
+                  {breakdownItems.map((item) => (
+                    <li key={item.label}>
+                      <i style={{ background: item.color }} />
+                      {item.label}
+                      <strong>{pct(item.count, breakdownTotal)}</strong>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <p className="sa-muted">No stops to summarise yet.</p>
+            )}
+          </article>
+
+          <article className="sa-card sa-stops-widget sa-stops-facility">
+            <i aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M4 21V7l8-4 8 4v14M9 21v-6h6v6" />
+              </svg>
+            </i>
+            <div>
+              <h3>Facilities at Stops</h3>
+              <p className="sa-muted">Shelter, CCTV, lighting, and seating are not stored yet.</p>
             </div>
-          ) : (
-            <p className="sa-muted">No stops to summarise yet.</p>
-          )}
-          {breakdown?.kind === 'type' ? (
-            <p className="sa-muted">Area is optional. Set it on a stop to group by neighbourhood.</p>
-          ) : null}
-        </article>
+          </article>
 
-        <article className="sa-card">
-          <h3>Facilities at Stops</h3>
-          <p className="sa-muted">Shelter, CCTV, lighting, and seating are not stored for stops yet.</p>
-        </article>
-
-        <article className="sa-card">
-          <h3>Alerts &amp; Issues</h3>
-          {alerts.length ? (
-            <ul className="sa-stops-alerts">
-              {alerts.map((a) => (
-                <li key={a.text} className={`is-${a.tone}`}>
-                  {a.text}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="sa-muted">No stop issues from saved records.</p>
-          )}
-        </article>
+          <article className="sa-card sa-stops-widget sa-stops-alert-card">
+            <i aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M12 9v4M12 17h.01" />
+                <path d="M10.3 4.3 2.8 17.2A2 2 0 0 0 4.5 20h15a2 2 0 0 0 1.7-2.8L13.7 4.3a2 2 0 0 0-3.4 0Z" />
+              </svg>
+            </i>
+            <div>
+              <h3>Alerts &amp; Issues</h3>
+              {alerts.length ? (
+                <ul className="sa-stops-alerts">
+                  {alerts.map((a) => (
+                    <li key={a.text} className={`is-${a.tone}`}>{a.text}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="sa-muted">No stop issues from saved records.</p>
+              )}
+            </div>
+          </article>
+        </aside>
       </section>
 
       {panel === 'view' && viewing && (
-        <aside className="sa-drawer" aria-label="Stop details">
-          <div className="sa-drawer-head">
-            <h2>Stop details</h2>
-            <button type="button" className="sa-btn sa-btn-ghost" onClick={closePanel}>
-              Close
-            </button>
+        <div className="sa-action-overlay" onClick={closePanel} role="presentation">
+          <div
+            className="sa-action-modal sa-stop-detail"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="sa-stop-detail-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <header className="sa-stop-detail-bar">
+              <h2>Stop Details</h2>
+              <button type="button" className="sa-icon-ghost" aria-label="Close" onClick={closePanel}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M6 6l12 12M18 6 6 18" />
+                </svg>
+              </button>
+            </header>
+            <div className="sa-stop-detail-id">
+              <i aria-hidden="true">
+                <StopKpiGlyph name="pin" />
+              </i>
+              <div>
+                <h3 id="sa-stop-detail-title">{viewing.name}</h3>
+                <em>{kindLabel(viewing)}</em>
+              </div>
+            </div>
+            <dl className="sa-stop-detail-grid">
+              {[
+                { icon: 'bus', label: 'Route', value: viewing.routeName || '—' },
+                { icon: 'type', label: 'Type', value: kindLabel(viewing) },
+                { icon: 'area', label: 'Area', value: viewing.area || '—' },
+                { icon: 'shield', label: 'Status', value: isActive(viewing) ? 'Active' : 'Inactive', status: isActive(viewing) },
+                { icon: 'pin', label: 'Address', value: place(viewing) || '—' },
+                { icon: 'cal', label: 'Created', value: fmtStopStamp(viewing.createdAt) },
+                { icon: 'users', label: 'Students', value: viewing.studentCount ?? 0 },
+                { icon: 'cal', label: 'Updated', value: fmtStopStamp(viewing.updatedAt) },
+                { icon: 'bus', label: 'Vehicle on route', value: viewing.hasBus ? 'Yes' : 'No' },
+                { icon: 'note', label: 'Description', value: viewing.description || '—' },
+              ].map((row) => (
+                <div key={row.label} className="sa-stop-detail-field">
+                  <i aria-hidden="true">
+                    <StopDetailGlyph name={row.icon} />
+                  </i>
+                  <div>
+                    <dt>{row.label}</dt>
+                    <dd>
+                      {row.status != null ? (
+                        <span className={`sa-stu-status is-${row.status ? 'active' : 'muted'}`}>{row.value}</span>
+                      ) : (
+                        row.value
+                      )}
+                    </dd>
+                  </div>
+                </div>
+              ))}
+            </dl>
+            <div className="sa-stop-detail-foot">
+              <button type="button" className="sa-btn sa-btn-outline" onClick={() => startEdit(viewing)}>
+                <StopDetailGlyph name="edit" />
+                Edit stop
+              </button>
+              {viewing.routeId ? (
+                <Link to={`/school-admin/routes/${viewing.routeId}`} className="sa-btn sa-btn-primary">
+                  <StopDetailGlyph name="type" />
+                  View route
+                </Link>
+              ) : (
+                <button type="button" className="sa-btn sa-btn-primary" disabled>
+                  <StopDetailGlyph name="type" />
+                  View route
+                </button>
+              )}
+            </div>
           </div>
-          <dl className="sa-drawer-fields">
-            <div><dt>Name</dt><dd>{viewing.name}</dd></div>
-            <div><dt>Type</dt><dd>{kindLabel(viewing) || (viewing.type === 'school' ? 'School' : 'Home')}</dd></div>
-            <div><dt>Route</dt><dd>{viewing.routeName || '—'}</dd></div>
-            <div><dt>Area</dt><dd>{viewing.area || '—'}</dd></div>
-            <div><dt>Address</dt><dd>{place(viewing) || '—'}</dd></div>
-            <div><dt>Students</dt><dd>{viewing.studentCount ?? 0}</dd></div>
-            <div><dt>Vehicle on route</dt><dd>{viewing.hasBus ? 'Yes' : 'No'}</dd></div>
-            <div><dt>Status</dt><dd>{isActive(viewing) ? 'Active' : 'Inactive'}</dd></div>
-          </dl>
-          <div className="sa-drawer-actions">
-            <button type="button" className="sa-btn sa-btn-outline" onClick={() => startEdit(viewing)}>
-              Edit stop
-            </button>
-            {viewing.routeId ? (
-              <Link to={`/school-admin/routes/${viewing.routeId}`} className="sa-btn sa-btn-primary">
-                View route
-              </Link>
-            ) : null}
-          </div>
-        </aside>
+        </div>
       )}
 
       {panel === 'form' && (
-        <aside className="sa-drawer sa-drawer-wide" aria-label={editingId ? 'Edit stop' : 'Add stop'}>
-          <div className="sa-drawer-head">
-            <h2>{editingId ? 'Edit stop' : 'Add stop'}</h2>
-            <button type="button" className="sa-btn sa-btn-ghost" onClick={closePanel}>
-              Close
-            </button>
+        <div className="sa-action-overlay" onClick={closePanel} role="presentation">
+          <div
+            className="sa-action-modal sa-stop-form"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="sa-stop-form-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <header className="sa-stop-detail-bar">
+              <h2 id="sa-stop-form-title">{editingId ? 'Edit Stop' : 'Add Stop'}</h2>
+              <button type="button" className="sa-icon-ghost" aria-label="Close" onClick={closePanel}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M6 6l12 12M18 6 6 18" />
+                </svg>
+              </button>
+            </header>
+            <div className="sa-stop-form-body">
+              <div className="sa-stop-form-intro">
+                <i aria-hidden="true">
+                  <StopKpiGlyph name="pin" />
+                </i>
+                <div>
+                  <strong>{editingId ? 'Edit Stop' : 'Add Stop'}</strong>
+                  <small>
+                    {editingId
+                      ? 'Update this stop for your school transport routes.'
+                      : 'Create a new stop for your school transport routes.'}
+                  </small>
+                </div>
+              </div>
+              {error && <div className="alert">{error}</div>}
+              <label className="sa-field">
+                <span>Stop Name <b className="sa-req">*</b></span>
+                <input
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  placeholder="Enter stop name"
+                  required
+                />
+              </label>
+              <div className="sa-stu-form-row">
+                <label className="sa-field">
+                  <span>Route <b className="sa-req">*</b></span>
+                  <select value={form.routeId} onChange={(e) => setForm({ ...form, routeId: e.target.value })} required>
+                    <option value="">Select route</option>
+                    {routes.map((r) => (
+                      <option key={r._id} value={r._id}>
+                        {r.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="sa-field">
+                  <span>Type <b className="sa-req">*</b></span>
+                  <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} required>
+                    <option value="">Select type</option>
+                    <option value="home">Home</option>
+                    <option value="school">School</option>
+                  </select>
+                </label>
+              </div>
+              <div className="sa-stu-form-row">
+                <label className="sa-field">
+                  <span>Area</span>
+                  <input
+                    value={form.area}
+                    onChange={(e) => setForm({ ...form, area: e.target.value })}
+                    placeholder="Select area (optional)"
+                  />
+                </label>
+                <label className="sa-field">
+                  <span>Order</span>
+                  <div className="sa-stop-order">
+                    <input
+                      type="number"
+                      min="0"
+                      value={form.order}
+                      onChange={(e) => setForm({ ...form, order: Number(e.target.value) })}
+                      placeholder="Stop order"
+                    />
+                    <i title="The sequence of this stop on the selected route." aria-label="Order help">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                        <circle cx="12" cy="12" r="8.2" />
+                        <path d="M12 11v5M12 8h.01" />
+                      </svg>
+                    </i>
+                  </div>
+                </label>
+              </div>
+              <label className="sa-field">
+                <span>Address</span>
+                <input
+                  value={form.address}
+                  onChange={(e) => setForm({ ...form, address: e.target.value })}
+                  placeholder="Enter address"
+                />
+              </label>
+              <div className="sa-field">
+                <span>Location <b className="sa-req">*</b></span>
+                <LocationSearch
+                  proximity={form.location}
+                  placeholder="Search for a location..."
+                  onSelect={(place) => {
+                    setForm((f) => ({
+                      ...f,
+                      location: { lat: place.lat, lng: place.lng },
+                      name: f.name.trim() ? f.name : place.name,
+                      address: f.address.trim() ? f.address : place.name,
+                    }));
+                    setMapFocus({ lat: place.lat, lng: place.lng, zoom: 16.4, at: Date.now() });
+                  }}
+                />
+                <p className="sa-stop-map-hint">
+                  <StopKpiGlyph name="pin" />
+                  Click on the map to set the exact location of the stop
+                </p>
+                <MapView
+                  center={form.location}
+                  stops={[{ _id: 'draft', name: form.name || 'New stop', type: form.type || 'home', location: form.location, pinLabel: '' }]}
+                  focus={mapFocus}
+                  onMapClick={(loc) => setForm((f) => ({ ...f, location: loc }))}
+                  className="map-canvas sa-stop-form-map"
+                />
+              </div>
+              <label className="sa-stop-toggle">
+                <span>
+                  <strong>Active</strong>
+                  <small>This stop will be active and available for selection.</small>
+                </span>
+                <input
+                  type="checkbox"
+                  role="switch"
+                  aria-label="Active"
+                  checked={form.active}
+                  onChange={(e) => setForm({ ...form, active: e.target.checked })}
+                />
+              </label>
+            </div>
+            <div className="sa-stop-form-foot">
+              <button type="button" className="sa-btn sa-btn-outline" onClick={closePanel}>
+                Cancel
+              </button>
+              <button type="button" className="sa-btn sa-btn-primary" disabled={!canSave} onClick={submit}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
+                  <path d="M5 12.5 10 17.5 19 7" />
+                </svg>
+                {editingId ? 'Save Stop' : 'Add Stop'}
+              </button>
+            </div>
           </div>
-          {error && <div className="alert">{error}</div>}
-          <label className="sa-field">
-            <span>Name</span>
-            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-          </label>
-          <div className="sa-stu-form-row">
-            <label className="sa-field">
-              <span>Route</span>
-              <select value={form.routeId} onChange={(e) => setForm({ ...form, routeId: e.target.value })} required>
-                <option value="">Select a route</option>
-                {routes.map((r) => (
-                  <option key={r._id} value={r._id}>
-                    {r.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="sa-field">
-              <span>Type</span>
-              <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
-                <option value="home">Home</option>
-                <option value="school">School</option>
-              </select>
-            </label>
+        </div>
+      )}
+
+      {menuStop && (
+        <div className="sa-action-overlay" onClick={() => setMenuId('')} role="presentation">
+          <div className="sa-action-modal" role="dialog" aria-modal="true" aria-labelledby="sa-stop-action-title" onClick={(e) => e.stopPropagation()}>
+            <header className="sa-action-head">
+              <div>
+                <p className="sa-action-kicker">Stop actions</p>
+                <h3 id="sa-stop-action-title">{menuStop.name}</h3>
+                <small>{menuStop.routeName || 'Unassigned'} · {kindLabel(menuStop)}</small>
+              </div>
+              <button type="button" className="sa-icon-ghost" aria-label="Close" onClick={() => setMenuId('')}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M6 6l12 12M18 6 6 18" />
+                </svg>
+              </button>
+            </header>
+            <div className="sa-action-list">
+              <button type="button" onClick={() => { setMenuId(''); setViewing(menuStop); setPanel('view'); }}>
+                <i aria-hidden="true"><ActionGlyph name="view" /></i>
+                <span><strong>View details</strong><em>See location, students, and route</em></span>
+              </button>
+              <button type="button" onClick={() => { setMenuId(''); startEdit(menuStop); }}>
+                <i aria-hidden="true"><ActionGlyph name="edit" /></i>
+                <span><strong>Edit stop</strong><em>Update name, type, or coordinates</em></span>
+              </button>
+              {menuStop.routeId ? (
+                <button type="button" onClick={() => navigate(`/school-admin/routes/${menuStop.routeId}`)}>
+                  <i aria-hidden="true"><StopKpiGlyph name="pin" /></i>
+                  <span><strong>View route</strong><em>Open {menuStop.routeName || 'the linked route'}</em></span>
+                </button>
+              ) : null}
+              <button type="button" onClick={() => { setActive(menuStop, menuStop.active === false); setMenuId(''); }}>
+                <i aria-hidden="true"><StopKpiGlyph name="shield" /></i>
+                <span>
+                  <strong>{menuStop.active === false ? 'Activate stop' : 'Deactivate stop'}</strong>
+                  <em>{menuStop.active === false ? 'Make this stop available again' : 'Hide this stop from active trips'}</em>
+                </span>
+              </button>
+              <button type="button" className="is-danger" onClick={() => { setMenuId(''); remove(menuStop); }}>
+                <i aria-hidden="true">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                    <path d="M4 7h16M9 7V5h6v2M8 7l1 12h6l1-12" />
+                  </svg>
+                </i>
+                <span><strong>Delete stop</strong><em>Permanently remove this pickup point</em></span>
+              </button>
+            </div>
+            <div className="sa-action-foot">
+              <button type="button" className="sa-btn sa-btn-outline" onClick={() => setMenuId('')}>Close</button>
+            </div>
           </div>
-          <div className="sa-stu-form-row">
-            <label className="sa-field">
-              <span>Area</span>
-              <input value={form.area} onChange={(e) => setForm({ ...form, area: e.target.value })} placeholder="Optional" />
-            </label>
-            <label className="sa-field">
-              <span>Order</span>
-              <input type="number" value={form.order} onChange={(e) => setForm({ ...form, order: Number(e.target.value) })} />
-            </label>
-          </div>
-          <label className="sa-field">
-            <span>Address</span>
-            <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="Optional" />
-          </label>
-          {editingId && (
-            <label className="check">
-              <input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />
-              Active
-            </label>
-          )}
-          <LocationSearch
-            proximity={form.location}
-            placeholder="Search an area to zoom the map…"
-            onSelect={(place) => {
-              setForm((f) => ({
-                ...f,
-                location: { lat: place.lat, lng: place.lng },
-                name: f.name.trim() ? f.name : place.name,
-                address: f.address.trim() ? f.address : place.name,
-              }));
-              setMapFocus({ lat: place.lat, lng: place.lng, zoom: 16.4, at: Date.now() });
-            }}
-          />
-          <MapView
-            center={form.location}
-            stops={[{ _id: 'draft', name: form.name || 'New stop', type: form.type, location: form.location, pinLabel: '' }]}
-            focus={mapFocus}
-            onMapClick={(loc) => setForm((f) => ({ ...f, location: loc }))}
-            className="map-canvas map-md"
-          />
-          <p className="sa-muted">Click the map to set coordinates.</p>
-          <div className="row-actions">
-            <button type="button" className="sa-btn sa-btn-outline" onClick={closePanel}>
-              Cancel
-            </button>
-            <button type="button" className="sa-btn sa-btn-primary" disabled={!canSave} onClick={submit}>
-              {editingId ? 'Save stop' : 'Create stop'}
-            </button>
-          </div>
-        </aside>
+        </div>
       )}
 
       <footer className="sa-home-foot">
-        <span>© {year} Transport</span>
+        <span>© {year} {prettySchool(schoolName)}. All rights reserved.</span>
         <span>Transport Management System v1.0.0</span>
       </footer>
     </div>
