@@ -26,6 +26,7 @@ import {
   VehicleRecord,
 } from '../models/index.js';
 import { authenticate, requireSchoolStaff, requireSuperAdmin } from '../middleware/auth.js';
+import { closeSchool } from '../lib/schoolAccess.js';
 import adminTripOps from './adminTripOps.js';
 import adminAcademics from './adminAcademics.js';
 import adminCampuses, { validCampusId } from './adminCampuses.js';
@@ -1663,7 +1664,8 @@ router.put('/schools/:id', async (req, res) => {
 });
 
 router.delete('/schools/:id', requireSuperAdmin, async (req, res) => {
-  await School.findByIdAndDelete(req.params.id);
+  const school = await closeSchool(req.params.id);
+  if (!school) return res.status(404).json({ error: 'School not found' });
   res.json({ ok: true });
 });
 

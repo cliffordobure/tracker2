@@ -21,6 +21,7 @@ import {
 } from '../models/index.js';
 import { authenticate, requireSuperAdmin } from '../middleware/auth.js';
 import { formatDateKey } from '../lib/clock.js';
+import { closeSchool } from '../lib/schoolAccess.js';
 import { getIO } from '../socket.js';
 
 const router = Router();
@@ -482,9 +483,8 @@ router.put('/schools/:id', async (req, res) => {
 
 router.delete('/schools/:id', async (req, res) => {
   try {
-    const school = await School.findById(req.params.id);
+    const school = await closeSchool(req.params.id);
     if (!school) return res.status(404).json({ error: 'School not found' });
-    await School.findByIdAndDelete(req.params.id);
     await writeAudit(req, {
       action: 'school.delete',
       entity: 'school',

@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { User } from '../models/index.js';
 import { authenticate } from '../middleware/auth.js';
+import { schoolAllowsLogin } from '../lib/schoolAccess.js';
 
 const router = Router();
 
@@ -30,6 +31,13 @@ router.post('/login', async (req, res) => {
     const user = await User.findOne({ email: email.toLowerCase().trim() });
     if (!user || !user.active) {
       return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    if (user.role !== 'super_admin') {
+      const schoolOk = await schoolAllowsLogin(user.schoolId);
+      if (!schoolOk) {
+        return res.status(401).json({ error: 'This school account is no longer available' });
+      }
     }
 
     const ok = await bcrypt.compare(password, user.passwordHash);
@@ -94,7 +102,13 @@ router.post('/register', authenticate, async (req, res) => {
 router.get('/me', authenticate, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
-    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user || !user.active) return res.status(401).json({ error: 'User not found or inactive' });
+    if (user.role !== 'super_admin') {
+      const schoolOk = await schoolAllowsLogin(user.schoolId);
+      if (!schoolOk) {
+        return res.status(401).json({ error: 'This school account is no longer available' });
+      }
+    }
     return res.json({ user: user.toSafeJSON() });
   } catch (err) {
     return res.status(500).json({ error: err.message });

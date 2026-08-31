@@ -82,7 +82,7 @@ export default function SuperSchools() {
   };
 
   const remove = async (id) => {
-    if (!confirm('Delete this school? This does not wipe buses or users automatically.')) return;
+    if (!confirm('Permanently delete this school and all of its data? Users, buses, routes, students, trips, and messages cannot be recovered.')) return;
     await api(`/admin/platform/schools/${id}`, { method: 'DELETE' });
     await load();
   };
