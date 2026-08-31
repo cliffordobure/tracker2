@@ -53,14 +53,11 @@ function ids(docs) {
   return docs.map((doc) => doc._id);
 }
 
-/** Permanently remove a school and every record that belongs to it. */
-export async function closeSchool(schoolId) {
-  const school = await School.findById(schoolId);
-  if (!school) return null;
-
-  const filter = { schoolId: school._id };
+/** Permanently remove every record that belongs to a school id. */
+export async function purgeSchoolData(schoolId) {
+  const filter = { schoolId };
   const [users, trips, routes, announcements, conversations, outings] = await Promise.all([
-    User.find(filter).select('_id'),
+    User.find(filter).select('_id email name role'),
     Trip.find(filter).select('_id'),
     Route.find(filter).select('_id'),
     Announcement.find(filter).select('_id'),
@@ -75,19 +72,19 @@ export async function closeSchool(schoolId) {
   const conversationIds = ids(conversations);
   const outingIds = ids(outings);
 
-  await Promise.all([
-    tripIds.length ? TripEvent.deleteMany({ tripId: { $in: tripIds } }) : null,
-    tripIds.length ? LocationPing.deleteMany({ tripId: { $in: tripIds } }) : null,
-    routeIds.length ? Stop.deleteMany({ routeId: { $in: routeIds } }) : null,
-    announcementIds.length ? AnnouncementComment.deleteMany({ announcementId: { $in: announcementIds } }) : null,
-    conversationIds.length ? Message.deleteMany({ conversationId: { $in: conversationIds } }) : null,
-    outingIds.length ? OutingPermission.deleteMany({ outingId: { $in: outingIds } }) : null,
-    userIds.length ? DriverProfile.deleteMany({ userId: { $in: userIds } }) : null,
-    userIds.length ? DeviceToken.deleteMany({ userId: { $in: userIds } }) : null,
-    userIds.length ? Notification.deleteMany({ userId: { $in: userIds } }) : null,
+  const childDeletes = await Promise.all([
+    tripIds.length ? TripEvent.deleteMany({ tripId: { $in: tripIds } }) : { deletedCount: 0 },
+    tripIds.length ? LocationPing.deleteMany({ tripId: { $in: tripIds } }) : { deletedCount: 0 },
+    routeIds.length ? Stop.deleteMany({ routeId: { $in: routeIds } }) : { deletedCount: 0 },
+    announcementIds.length ? AnnouncementComment.deleteMany({ announcementId: { $in: announcementIds } }) : { deletedCount: 0 },
+    conversationIds.length ? Message.deleteMany({ conversationId: { $in: conversationIds } }) : { deletedCount: 0 },
+    outingIds.length ? OutingPermission.deleteMany({ outingId: { $in: outingIds } }) : { deletedCount: 0 },
+    userIds.length ? DriverProfile.deleteMany({ userId: { $in: userIds } }) : { deletedCount: 0 },
+    userIds.length ? DeviceToken.deleteMany({ userId: { $in: userIds } }) : { deletedCount: 0 },
+    userIds.length ? Notification.deleteMany({ userId: { $in: userIds } }) : { deletedCount: 0 },
   ]);
 
-  await Promise.all([
+  const schoolDeletes = await Promise.all([
     AcademicTerm.deleteMany(filter),
     Announcement.deleteMany(filter),
     Assessment.deleteMany(filter),
@@ -120,6 +117,18 @@ export async function closeSchool(schoolId) {
     User.deleteMany(filter),
   ]);
 
+  const deletedCount =
+    childDeletes.reduce((sum, result) => sum + (result?.deletedCount || 0), 0) +
+    schoolDeletes.reduce((sum, result) => sum + (result?.deletedCount || 0), 0);
+
+  return { users, deletedCount };
+}
+
+/** Permanently remove a school and every record that belongs to it. */
+export async function closeSchool(schoolId) {
+  const school = await School.findById(schoolId);
+  if (!school) return null;
+  await purgeSchoolData(school._id);
   await School.findByIdAndDelete(school._id);
   return school;
 }
