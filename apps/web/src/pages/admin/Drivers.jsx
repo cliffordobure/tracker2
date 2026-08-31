@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import MediaPicker from '../../components/MediaPicker';
+import CampusSelect, { campusRefId } from '../../components/CampusSelect';
 
 const PAGE_SIZES = [10, 25, 50];
 const emptyForm = {
@@ -18,6 +19,7 @@ const emptyForm = {
   vehicleModel: '',
   vehicleColor: '',
   assignedRouteIds: [],
+  campusId: '',
   photo: null,
 };
 
@@ -120,8 +122,21 @@ function driverStatus(d) {
   return { key: 'active', label: 'Active' };
 }
 
+function liveMapHref(id) {
+  return `/school-admin/live-tracking?driver=${encodeURIComponent(id)}`;
+}
+
+function LiveMapGlyph() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 21s7-6.2 7-11.2A7 7 0 0 0 5 9.8C5 14.8 12 21 12 21Z" />
+      <circle cx="12" cy="10" r="2.2" />
+    </svg>
+  );
+}
+
 export default function Drivers() {
-  const { globalSearch = '' } = useOutletContext() || {};
+  const { globalSearch = '', campusFilter = '', campuses } = useOutletContext() || {};
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const openedEdit = useRef('');
@@ -148,7 +163,7 @@ export default function Drivers() {
 
   const load = async () => {
     const [d, r, b] = await Promise.all([
-      api('/admin/drivers'),
+      api(`/admin/drivers${campusFilter ? `?campusId=${campusFilter}` : ''}`),
       api('/admin/routes'),
       api('/admin/buses'),
     ]);
@@ -160,7 +175,7 @@ export default function Drivers() {
 
   useEffect(() => {
     load().catch((e) => setError(e.message));
-  }, []);
+  }, [campusFilter]);
 
   useEffect(() => {
     if (globalSearch) setQ(globalSearch);
@@ -262,6 +277,7 @@ export default function Drivers() {
       vehicleModel: d.profile?.vehicleModel || '',
       vehicleColor: d.profile?.vehicleColor || '',
       assignedRouteIds: routeIdsOf(d.profile),
+      campusId: campusRefId(d.campusId),
       photo: d.photoUrl ? { url: d.photoUrl, publicId: d.photoPublicId || '' } : null,
     });
     setPanel('form');
@@ -307,6 +323,7 @@ export default function Drivers() {
         vehicleModel: form.vehicleModel,
         vehicleColor: form.vehicleColor,
         assignedRouteIds: form.assignedRouteIds,
+        campusId: form.campusId || null,
         photoUrl: form.photo?.url || '',
         photoPublicId: form.photo?.publicId || '',
       };
@@ -579,6 +596,15 @@ export default function Drivers() {
                         <button type="button" className="sa-icon-ghost is-edit" aria-label="Edit" onClick={() => startEdit(d)}>
                           ✎
                         </button>
+                        <button
+                          type="button"
+                          className="sa-icon-ghost is-live"
+                          aria-label="Live map"
+                          title="Live map"
+                          onClick={() => navigate(liveMapHref(id))}
+                        >
+                          <LiveMapGlyph />
+                        </button>
                         <div className={`sa-stu-more${menuId === id ? ' is-open' : ''}${i >= slice.length - 1 ? ' is-up' : ''}`}>
                           <button
                             type="button"
@@ -599,6 +625,10 @@ export default function Drivers() {
                           </button>
                           {menuId === id && (
                             <div className="sa-stu-menu" role="menu" onClick={(e) => e.stopPropagation()}>
+                              <button type="button" role="menuitem" onClick={() => { setMenuId(''); navigate(liveMapHref(id)); }}>
+                                <i aria-hidden="true"><LiveMapGlyph /></i>
+                                Live map
+                              </button>
                               <button type="button" role="menuitem" onClick={() => { setActive(d, d.active === false); setMenuId(''); }}>
                                 <i aria-hidden="true">
                                   {d.active === false ? (
@@ -691,6 +721,7 @@ export default function Drivers() {
             <span>Email</span>
             <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
           </label>
+          <CampusSelect campuses={campuses} value={form.campusId} onChange={(campusId) => setForm({ ...form, campusId })} />
           <div className="sa-stu-form-row">
             <label className="sa-field">
               <span>Phone</span>

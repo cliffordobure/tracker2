@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import MediaPicker from '../../components/MediaPicker';
+import CampusSelect, { campusRefId } from '../../components/CampusSelect';
 
 const PAGE_SIZES = [10, 25, 50];
 const emptyForm = {
@@ -14,6 +15,7 @@ const emptyForm = {
   qualification: '',
   jobTitle: '',
   gender: '',
+  campusId: '',
   active: true,
   photo: null,
 };
@@ -62,7 +64,7 @@ function teacherStatus(t) {
 }
 
 export default function Teachers() {
-  const { globalSearch = '' } = useOutletContext() || {};
+  const { globalSearch = '', campusFilter = '', campuses } = useOutletContext() || {};
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const openedEdit = useRef('');
@@ -85,14 +87,14 @@ export default function Teachers() {
   const [form, setForm] = useState(emptyForm);
 
   const load = async () => {
-    const data = await api('/admin/teachers');
+    const data = await api(`/admin/teachers${campusFilter ? `?campusId=${campusFilter}` : ''}`);
     setTeachers(data.teachers || []);
     setStats(data.stats || null);
   };
 
   useEffect(() => {
     load().catch((e) => setError(e.message));
-  }, []);
+  }, [campusFilter]);
 
   useEffect(() => {
     if (globalSearch) setQ(globalSearch);
@@ -190,6 +192,7 @@ export default function Teachers() {
       qualification: t.qualification || '',
       jobTitle: t.jobTitle || '',
       gender: t.gender || '',
+      campusId: campusRefId(t.campusId),
       active: t.active !== false,
       photo: t.photoUrl ? { url: t.photoUrl, publicId: t.photoPublicId || '' } : null,
     });
@@ -219,6 +222,7 @@ export default function Teachers() {
         qualification: form.qualification,
         jobTitle: form.jobTitle,
         gender: form.gender,
+        campusId: form.campusId || null,
         active: form.active,
         photoUrl: form.photo?.url || '',
         photoPublicId: form.photo?.publicId || '',
@@ -616,6 +620,7 @@ export default function Teachers() {
               </select>
             </label>
           </div>
+          <CampusSelect campuses={campuses} value={form.campusId} onChange={(campusId) => setForm({ ...form, campusId })} />
           <label className="sa-field">
             <span>{editingId ? 'New password (optional)' : 'Password'}</span>
             <input value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />

@@ -6,6 +6,7 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import { api } from '../../lib/api';
 import {
   attachFleetPlates,
+  dedupeLiveFleet,
   startSmoothFleetLoop,
   subscribeFleetLocations,
   syncFleetVehicles,
@@ -273,7 +274,7 @@ export default function SchoolDashboard() {
         ]);
         if (cancelled) return;
         setStats(dash);
-        setLiveBuses(attachFleetPlates(live.buses || [], fleet.buses || []));
+        setLiveBuses(dedupeLiveFleet(attachFleetPlates(live.buses || [], fleet.buses || [])));
       } catch (e) {
         if (!cancelled) setError(e.message);
       } finally {
@@ -286,7 +287,7 @@ export default function SchoolDashboard() {
         api('/admin/buses').catch(() => ({ buses: [] })),
       ])
         .then(([d, fleet]) => {
-          if (!cancelled) setLiveBuses(attachFleetPlates(d.buses || [], fleet.buses || []));
+          if (!cancelled) setLiveBuses(dedupeLiveFleet(attachFleetPlates(d.buses || [], fleet.buses || [])));
         })
         .catch(() => {});
     }, 8000);

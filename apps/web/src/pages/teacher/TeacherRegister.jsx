@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 
@@ -16,19 +17,26 @@ const STATUSES = [
 
 export default function TeacherRegister() {
   const { showToast } = useAuth();
+  const [params] = useSearchParams();
   const [date, setDate] = useState(todayInput());
-  const [grade, setGrade] = useState('');
+  const [grade, setGrade] = useState(params.get('grade') || '');
   const [grades, setGrades] = useState([]);
   const [kids, setKids] = useState([]);
+  const [draft, setDraft] = useState({});
   const [error, setError] = useState('');
-  const [busyId, setBusyId] = useState('');
+  const [busy, setBusy] = useState(false);
 
   const load = async () => {
-    const params = new URLSearchParams({ date });
-    if (grade) params.set('grade', grade);
-    const data = await api(`/teacher/attendance?${params}`);
+    const qs = new URLSearchParams({ date });
+    if (grade) qs.set('grade', grade);
+    const data = await api(`/teacher/attendance?${qs}`);
     setKids(data.kids || []);
     setGrades(data.grades || []);
+    const next = {};
+    for (const k of data.kids || []) {
+      if (k.attendance?.status) next[k._id] = k.attendance.status;
+    }
+    setDraft(next);
     setError('');
   };
 
@@ -40,41 +48,45 @@ export default function TeacherRegister() {
   const summary = useMemo(() => {
     const counts = { present: 0, absent: 0, late: 0, excused: 0, unmarked: 0 };
     for (const k of kids) {
-      const s = k.attendance?.status;
+      const s = draft[k._id];
       if (s && counts[s] != null) counts[s] += 1;
       else counts.unmarked += 1;
     }
     return counts;
-  }, [kids]);
+  }, [kids, draft]);
 
-  const mark = async (kidId, status) => {
-    setBusyId(kidId);
+  const markLocal = (kidId, status) => {
+    setDraft((prev) => ({ ...prev, [kidId]: status }));
+  };
+
+  const save = async (marks) => {
+    setBusy(true);
     setError('');
     try {
-      await api('/teacher/attendance', {
-        method: 'POST',
-        body: { kidId, date, status },
-      });
-      showToast(`${status} saved`, 'success');
+      await api('/teacher/attendance/bulk', { method: 'POST', body: { date, marks } });
+      showToast('Register saved', 'success');
       await load();
     } catch (err) {
       setError(err.message);
     } finally {
-      setBusyId('');
+      setBusy(false);
     }
   };
 
-  const markAllPresent = async () => {
-    const unmarked = kids.filter((k) => !k.attendance).map((k) => ({ kidId: k._id, status: 'present' }));
-    if (!unmarked.length) return;
-    setError('');
-    try {
-      await api('/teacher/attendance/bulk', { method: 'POST', body: { date, marks: unmarked } });
-      showToast('Unmarked students set to present', 'success');
-      await load();
-    } catch (err) {
-      setError(err.message);
+  const saveAll = () => {
+    const marks = kids.filter((k) => draft[k._id]).map((k) => ({ kidId: k._id, status: draft[k._id] }));
+    if (!marks.length) return;
+    return save(marks);
+  };
+
+  const markAllPresent = () => {
+    const next = { ...draft };
+    for (const k of kids) {
+      if (!next[k._id]) next[k._id] = 'present';
     }
+    setDraft(next);
+    const marks = kids.filter((k) => !draft[k._id]).map((k) => ({ kidId: k._id, status: 'present' }));
+    if (marks.length) save(marks);
   };
 
   return (
@@ -82,8 +94,7 @@ export default function TeacherRegister() {
       <div>
         <h2>Class register</h2>
         <p className="tw-lede">
-          Mark who is present, absent, late, or excused. Parents are notified when a child is absent
-          or late.
+          Mark who is present, absent, late, or excused. Parents are notified when a child is absent or late.
         </p>
       </div>
       {error && <div className="tw-alert">{error}</div>}
@@ -104,9 +115,15 @@ export default function TeacherRegister() {
             ))}
           </select>
         </label>
-        <button type="button" className="tw-btn tw-btn-secondary" onClick={markAllPresent}>
+        <button type="button" className="tw-btn tw-btn-secondary" onClick={markAllPresent} disabled={busy}>
           Mark remaining present
         </button>
+        <button type="button" className="tw-btn tw-btn-primary" onClick={saveAll} disabled={busy}>
+          {busy ? 'Saving…' : 'Save register'}
+        </button>
+        <Link className="tw-btn tw-btn-ghost" to="/teacher/notes">
+          Message a parent
+        </Link>
       </div>
 
       <div className="tw-metrics tw-metrics-4">
@@ -135,11 +152,12 @@ export default function TeacherRegister() {
               <th>Student</th>
               <th>Grade</th>
               <th>Mark</th>
+              <th />
             </tr>
           </thead>
           <tbody>
             {kids.map((k) => {
-              const current = k.attendance?.status || '';
+              const current = draft[k._id] || '';
               return (
                 <tr key={k._id}>
                   <td>
@@ -160,20 +178,24 @@ export default function TeacherRegister() {
                           type="button"
                           data-status={s.v}
                           className={`tw-mark ${current === s.v ? 'is-on' : ''}`}
-                          disabled={busyId === k._id}
-                          onClick={() => mark(k._id, s.v)}
+                          onClick={() => markLocal(k._id, s.v)}
                         >
                           {s.l}
                         </button>
                       ))}
                     </div>
                   </td>
+                  <td>
+                    <Link className="tw-btn tw-btn-ghost" to={`/teacher/notes?kidId=${k._id}`}>
+                      Note
+                    </Link>
+                  </td>
                 </tr>
               );
             })}
             {!kids.length && (
               <tr>
-                <td colSpan={3} className="tw-muted">
+                <td colSpan={4} className="tw-muted">
                   No students in this class.
                 </td>
               </tr>

@@ -1,5 +1,6 @@
 export { User } from './User.js';
 export { School } from './School.js';
+export { Campus } from './Campus.js';
 export { Route } from './Route.js';
 export { Stop } from './Stop.js';
 export { Kid } from './Kid.js';

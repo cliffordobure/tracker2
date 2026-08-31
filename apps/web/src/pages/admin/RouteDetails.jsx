@@ -4,6 +4,7 @@ import { api } from '../../lib/api';
 import MapView from '../../components/MapView';
 import { fetchDrivingRoute, formatEtaMinutes } from '../../lib/directions';
 import { orderedStopsForDirection } from '../../lib/geo';
+import { fmtSchoolDate, tripStartLabel } from '../../lib/schoolTime';
 
 const TABS = [
   { id: 'overview', label: 'Overview', icon: 'overview' },
@@ -37,10 +38,7 @@ function prettySchool(name) {
 }
 
 function fmtDate(value) {
-  if (!value) return '';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  return fmtSchoolDate(value);
 }
 
 function fmtDateTime(value) {
@@ -572,7 +570,7 @@ export default function RouteDetails() {
                     const meta = tripStatusMeta(t.status);
                     return (
                       <li key={t.id}>
-                        <strong>{fmtTime(t.scheduledFor || t.startedAt) || periodLabel(t.period) || 'Trip'}</strong>
+                        <strong>{tripStartLabel(t) || periodLabel(t.period) || 'Trip'}</strong>
                         <span>{directionLabel(t.direction) || '—'}</span>
                         <em className={`sa-stu-status is-${meta.key}`}>{meta.label}</em>
                       </li>

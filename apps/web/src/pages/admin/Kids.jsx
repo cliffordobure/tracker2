@@ -4,6 +4,7 @@ import { api } from '../../lib/api';
 import MapView from '../../components/MapView';
 import MediaPicker from '../../components/MediaPicker';
 import LocationSearch from '../../components/LocationSearch';
+import CampusSelect, { campusRefId } from '../../components/CampusSelect';
 
 const emptyParent = { name: '', email: '', phone: '', password: 'parent123' };
 const PAGE_SIZES = [10, 25, 50];
@@ -81,7 +82,7 @@ function pageItems(page, pages) {
 }
 
 export default function Kids() {
-  const { globalSearch = '' } = useOutletContext() || {};
+  const { globalSearch = '', campusFilter = '', campuses } = useOutletContext() || {};
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const openedEdit = useRef('');
@@ -122,11 +123,13 @@ export default function Kids() {
   const [parentMode, setParentMode] = useState('new');
   const [parent, setParent] = useState(emptyParent);
   const [parentIds, setParentIds] = useState([]);
+  const [parentSearch, setParentSearch] = useState('');
   const [photo, setPhoto] = useState(null);
+  const [campusId, setCampusId] = useState('');
 
   const load = async () => {
     const [k, r, p, s, cls] = await Promise.all([
-      api('/admin/kids'),
+      api(`/admin/kids${campusFilter ? `?campusId=${campusFilter}` : ''}`),
       api('/admin/routes'),
       api('/admin/parents'),
       api('/admin/schools'),
@@ -150,7 +153,7 @@ export default function Kids() {
 
   useEffect(() => {
     load().catch((e) => setError(e.message));
-  }, []);
+  }, [campusFilter]);
 
   useEffect(() => {
     if (globalSearch) setQ(globalSearch);
@@ -183,7 +186,9 @@ export default function Kids() {
     setParentMode('new');
     setParent(emptyParent);
     setParentIds([]);
+    setParentSearch('');
     setPhoto(null);
+    setCampusId('');
     setMapFocus(null);
   };
 
@@ -201,6 +206,7 @@ export default function Kids() {
     setEditingId(kid._id);
     setStep(1);
     setName(kid.name || '');
+    setCampusId(campusRefId(kid.campusId));
     setGrade(kid.grade || '');
     setSection(kid.section || '');
     setAdmissionNo(kid.admissionNo || '');
@@ -258,6 +264,7 @@ export default function Kids() {
       const body = {
         name,
         grade,
+        campusId: campusId || null,
         ...extraFields(),
         boarding: {
           lat: boarding.lat,
@@ -287,6 +294,7 @@ export default function Kids() {
       const body = {
         name,
         grade,
+        campusId: campusId || null,
         ...extraFields(),
         active,
         routeId,
@@ -335,6 +343,22 @@ export default function Kids() {
   const toggleParent = (id) => {
     setParentIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
   };
+
+  const selectedParents = useMemo(
+    () => parents.filter((p) => parentIds.includes(p.id)),
+    [parents, parentIds]
+  );
+
+  const parentHits = useMemo(() => {
+    const needle = parentSearch.trim().toLowerCase();
+    if (needle.length < 2) return [];
+    return parents
+      .filter((p) => {
+        const hay = [p.name, p.email, p.phone].filter(Boolean).join(' ').toLowerCase();
+        return hay.includes(needle);
+      })
+      .slice(0, 25);
+  }, [parents, parentSearch]);
 
   const STEPS = [
     { n: 1, label: 'Details' },
@@ -829,6 +853,7 @@ export default function Kids() {
                 <span>Name</span>
                 <input required value={name} onChange={(e) => setName(e.target.value)} />
               </label>
+              <CampusSelect campuses={campuses} value={campusId} onChange={setCampusId} />
               <label className="sa-field">
                 <span>Admission no.</span>
                 <input value={admissionNo} onChange={(e) => setAdmissionNo(e.target.value)} />
@@ -1013,15 +1038,50 @@ export default function Kids() {
               </div>
               )}
               {mode === 'edit' || parentMode === 'existing' ? (
-                <fieldset className="checkbox-set">
-                  <legend>{mode === 'edit' ? 'Linked parents' : 'Select parents'}</legend>
-                  {parents.map((p) => (
-                    <label key={p.id} className="check">
-                      <input type="checkbox" checked={parentIds.includes(p.id)} onChange={() => toggleParent(p.id)} />
-                      {p.name} <span className="muted">({p.email})</span>
-                    </label>
-                  ))}
-                </fieldset>
+                <div className="sa-parent-search">
+                  <label className="sa-field">
+                    <span>{mode === 'edit' ? 'Search to add another parent' : 'Search parents'}</span>
+                    <input
+                      value={parentSearch}
+                      onChange={(e) => setParentSearch(e.target.value)}
+                      placeholder="Type name, phone, or email"
+                      autoComplete="off"
+                    />
+                  </label>
+                  {selectedParents.length > 0 && (
+                    <ul className="sa-parent-picked">
+                      {selectedParents.map((p) => (
+                        <li key={p.id}>
+                          <strong>{p.name}</strong>
+                          <small>{[p.phone, p.email].filter(Boolean).join(' · ')}</small>
+                          <button type="button" aria-label={`Remove ${p.name}`} onClick={() => toggleParent(p.id)}>
+                            ×
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {parentSearch.trim().length < 2 ? (
+                    <p className="sa-muted">Type at least 2 characters to find a parent.</p>
+                  ) : parentHits.length === 0 ? (
+                    <p className="sa-muted">No parents match “{parentSearch.trim()}”.</p>
+                  ) : (
+                    <ul className="sa-parent-hits">
+                      {parentHits.map((p) => {
+                        const on = parentIds.includes(p.id);
+                        return (
+                          <li key={p.id}>
+                            <button type="button" className={on ? 'is-on' : ''} onClick={() => toggleParent(p.id)}>
+                              <strong>{p.name}</strong>
+                              <span>{[p.phone, p.email].filter(Boolean).join(' · ') || 'No contact'}</span>
+                              <em>{on ? 'Selected' : 'Select'}</em>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
               ) : (
                 <>
                   <label className="sa-field">

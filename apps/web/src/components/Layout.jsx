@@ -12,9 +12,9 @@ export default function Layout({ navItems, title, rideMode = false }) {
       {!isRide && (
         <aside className="sidebar">
           <div className="brand">
-            <span className="brand-mark">SK</span>
+            <span className="brand-mark">TT</span>
             <div>
-              <strong>SchoolKids</strong>
+              <strong>Track Toto</strong>
               <small>Tracker</small>
             </div>
           </div>

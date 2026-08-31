@@ -171,7 +171,7 @@ export default function SuperAdminLayout() {
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [search, setSearch] = useState('');
-  const [shell, setShell] = useState({ ticketOpen: 0, unread: 0, settings: { platformName: 'GREENFIELD SCHOOL', tagline: 'Transport Management System' } });
+  const [shell, setShell] = useState({ ticketOpen: 0, unread: 0, settings: { platformName: 'Track Toto', tagline: 'Transport Management System' } });
 
   useEffect(() => {
     api('/admin/platform/shell')
@@ -201,7 +201,7 @@ export default function SuperAdminLayout() {
     return hit?.[1] || pageMeta['/super-admin'];
   }, [location.pathname]);
 
-  const brand = shell.settings?.platformName || 'GREENFIELD SCHOOL';
+  const brand = shell.settings?.platformName || 'Track Toto';
   const tagline = shell.settings?.tagline || 'Transport Management System';
 
   function onSearch(e) {

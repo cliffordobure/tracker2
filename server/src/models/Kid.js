@@ -4,6 +4,7 @@ const kidSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
     schoolId: { type: mongoose.Schema.Types.ObjectId, ref: 'School', required: true },
+    campusId: { type: mongoose.Schema.Types.ObjectId, ref: 'Campus', default: null },
     parentIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     routeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Route' },
     homeStopId: { type: mongoose.Schema.Types.ObjectId, ref: 'Stop' },

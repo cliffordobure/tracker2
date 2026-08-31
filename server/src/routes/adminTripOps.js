@@ -24,7 +24,9 @@ import {
   scheduledForFrom,
   findPeriodConflict,
   nextTripCode,
+  normalizeClock,
 } from '../services/tripScheduleService.js';
+import { formatClock } from '../lib/clock.js';
 import { notifyTripCancelled, createAndEmitNotifications, NOTIFICATION_TYPES } from '../services/notifications.js';
 import { getIO } from '../socket.js';
 
@@ -84,13 +86,27 @@ function durationMinutesOf(trip) {
 
 function hourBucket(date) {
   if (!date) return '';
-  const h = new Date(date).getHours();
+  const clock = formatClock(date);
+  const h = Number(clock.slice(0, 2));
+  if (!Number.isFinite(h)) return '';
   if (h < 6) return '12–6 AM';
   if (h < 8) return '6–8 AM';
   if (h < 12) return '8 AM–12 PM';
   if (h < 15) return '12–3 PM';
   if (h < 17) return '3–5 PM';
   return '5 PM–12 AM';
+}
+
+function plannedClockOf(t) {
+  if (t?.scheduledTime) return normalizeClock(t.scheduledTime);
+  if (t?.scheduleId?.scheduledTime) return normalizeClock(t.scheduleId.scheduledTime);
+  if (t?.scheduledFor) {
+    const d = new Date(t.scheduledFor);
+    if (!Number.isNaN(d.getTime())) {
+      return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+    }
+  }
+  return '';
 }
 
 const HOUR_BUCKETS = ['12–6 AM', '6–8 AM', '8 AM–12 PM', '12–3 PM', '3–5 PM', '5 PM–12 AM'];
@@ -108,6 +124,7 @@ function serializeTrip(t, pathByRoute = {}) {
     path: pathByRoute[rid] || outing?.location || '',
     studentCount: Array.isArray(json.kidIds) ? json.kidIds.length : 0,
     durationMinutes: durationMinutesOf(json),
+    scheduledTime: plannedClockOf(json),
   };
 }
 
@@ -504,7 +521,7 @@ router.get('/trip-instances', async (req, res) => {
     ];
 
     const [trips, monthTrips] = await Promise.all([
-      populateTrip(Trip.find(filter).sort({ serviceDate: -1, scheduledFor: -1, createdAt: -1 })),
+      populateTrip(Trip.find(filter).sort({ createdAt: -1, serviceDate: -1, scheduledFor: -1 })),
       Trip.find(monthFilter).select('status startedAt endedAt routeId scheduledFor serviceDate period createdAt'),
     ]);
 
@@ -619,7 +636,7 @@ router.post('/trip-instances', async (req, res) => {
     }
 
     const serviceDate = startOfDay(req.body.serviceDate || new Date());
-    const scheduledTime = req.body.scheduledTime || '06:30';
+    const scheduledTime = normalizeClock(req.body.scheduledTime || '06:30');
     const period = ['morning', 'afternoon', 'evening'].includes(req.body.period) ? req.body.period : 'morning';
     const direction = req.body.direction === 'to_home' ? 'to_home' : 'to_school';
     const busId = req.body.busId || null;
@@ -654,6 +671,7 @@ router.post('/trip-instances', async (req, res) => {
       period,
       direction,
       serviceDate,
+      scheduledTime,
       scheduledFor: scheduledForFrom(serviceDate, scheduledTime),
       kidIds,
       tripCode: await nextTripCode(),
@@ -738,7 +756,9 @@ router.put('/trip-instances/:id', async (req, res) => {
       trip.driverId = driverId;
       trip.kidIds = kidIds;
       if (scheduledTime && trip.serviceDate) {
-        trip.scheduledFor = scheduledForFrom(trip.serviceDate, scheduledTime);
+        const clock = normalizeClock(scheduledTime);
+        trip.scheduledTime = clock;
+        trip.scheduledFor = scheduledForFrom(trip.serviceDate, clock);
       }
       await trip.save();
       const populated = await populateTrip(Trip.findById(trip._id));
@@ -747,7 +767,7 @@ router.put('/trip-instances/:id', async (req, res) => {
 
     const schedule = await TripSchedule.findById(trip.scheduleId);
     if (!schedule) return res.status(404).json({ error: 'Schedule not found' });
-    const overrideTime = scheduledTime ?? schedule.scheduledTime;
+    const overrideTime = normalizeClock(scheduledTime ?? schedule.scheduledTime);
 
     const conflict = await findPeriodConflict({
       schoolId: trip.schoolId,
@@ -783,6 +803,7 @@ router.put('/trip-instances/:id', async (req, res) => {
     trip.busId = busId;
     trip.driverId = driverId;
     trip.kidIds = kidIds;
+    trip.scheduledTime = overrideTime;
     trip.scheduledFor = scheduledForFrom(day, overrideTime);
     await trip.save();
 
@@ -827,6 +848,50 @@ router.post('/trip-instances/:id/cancel', async (req, res) => {
     await notifyTripCancelled(getIO(), trip);
     const populated = await populateTrip(Trip.findById(trip._id));
     res.json({ trip: populated });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/trip-instances/:id', async (req, res) => {
+  try {
+    const trip = await Trip.findById(req.params.id);
+    if (!trip) return res.status(404).json({ error: 'Trip instance not found' });
+    if (!assertSchoolAccess(req, trip.schoolId)) {
+      return res.status(403).json({ error: 'Cannot delete trip from another school' });
+    }
+    if (trip.status === 'active') {
+      return res.status(400).json({ error: 'Active trips cannot be deleted' });
+    }
+    if (trip.status === 'completed') {
+      return res.status(400).json({ error: 'Completed trips cannot be deleted' });
+    }
+    if (trip.scheduleId && trip.serviceDate) {
+      await ScheduleException.findOneAndUpdate(
+        { scheduleId: trip.scheduleId, serviceDate: startOfDay(trip.serviceDate) },
+        {
+          scheduleId: trip.scheduleId,
+          schoolId: trip.schoolId,
+          serviceDate: startOfDay(trip.serviceDate),
+          type: 'SKIP',
+          busId: null,
+          driverId: null,
+          kidIds: [],
+          scheduledTime: null,
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+    }
+    if (trip.status === 'scheduled') {
+      try {
+        await notifyTripCancelled(getIO(), trip);
+      } catch (err) {
+        console.warn('[notify] trip_cancelled on delete failed:', err.message);
+      }
+    }
+    await TripEvent.deleteMany({ tripId: trip._id });
+    await trip.deleteOne();
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1495,7 +1560,8 @@ router.get('/reports', async (req, res) => {
 function speedToKmh(speed) {
   const n = Number(speed);
   if (!Number.isFinite(n) || n < 0) return null;
-  return n > 40 ? Math.round(n) : Math.round(n * 3.6);
+  const mps = n > 70 ? n / 3.6 : n;
+  return Math.round(Math.min(180, mps * 3.6));
 }
 
 const GPS_STALE_MS = 2 * 60 * 1000;
@@ -1506,6 +1572,15 @@ function gpsStatus(lastGpsAt, speedKmh) {
   if (!Number.isFinite(age) || age > GPS_STALE_MS) return 'stale';
   if (speedKmh != null && speedKmh < 3) return 'stopped';
   return 'live';
+}
+
+function mapPoint(loc) {
+  if (!loc) return null;
+  const lat = Number(loc.lat ?? loc.latitude ?? loc.coordinates?.[1]);
+  const lng = Number(loc.lng ?? loc.longitude ?? loc.coordinates?.[0]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat === 0 && lng === 0) return null;
+  return { lat, lng };
 }
 
 // ——— Live tracking ———
@@ -1567,6 +1642,32 @@ router.get('/live-tracking', async (req, res) => {
         if (fallback) trip.busId = fallback;
       }
     }
+    const byVehicle = new Map();
+    for (const trip of trips) {
+      const busId = trip.busId?._id || trip.busId;
+      const driverId = trip.driverId?._id || trip.driverId;
+      const key = busId ? `bus:${busId}` : driverId ? `drv:${driverId}` : `trip:${trip._id}`;
+      const prev = byVehicle.get(key);
+      if (!prev) {
+        byVehicle.set(key, trip);
+        continue;
+      }
+      const score = (t) =>
+        (t.status === 'active' ? 8 : 0) +
+        (t.latestLocation?.lat != null && t.latestLocation?.lng != null ? 4 : 0) +
+        (t.startedAt ? 2 : 0);
+      const nextScore = score(trip);
+      const prevScore = score(prev);
+      if (nextScore !== prevScore) {
+        byVehicle.set(key, nextScore > prevScore ? trip : prev);
+        continue;
+      }
+      const nextAt = new Date(trip.latestLocation?.at || trip.startedAt || trip.createdAt || 0).getTime();
+      const prevAt = new Date(prev.latestLocation?.at || prev.startedAt || prev.createdAt || 0).getTime();
+      byVehicle.set(key, nextAt >= prevAt ? trip : prev);
+    }
+    const uniqueTrips = [...byVehicle.values()];
+
     const eventsByTrip = {};
     for (const e of events) {
       const key = String(e.tripId);
@@ -1587,7 +1688,7 @@ router.get('/live-tracking', async (req, res) => {
     const alerts = [];
     const activity = [];
 
-    const enriched = trips.map((trip) => {
+    const enriched = uniqueTrips.map((trip) => {
       const tripEvents = eventsByTrip[String(trip._id)] || [];
       const picked = new Set(
         tripEvents.filter((e) => e.type === 'picked_up').map((e) => e.kidId.toString())
@@ -1629,17 +1730,19 @@ router.get('/live-tracking', async (req, res) => {
           at: inc.occurredAt || inc.at,
         });
       }
+      const routeStops = stopsByRoute[String(trip.routeId?._id || trip.routeId)] || [];
+      const schoolStop = routeStops.find((s) => s.type === 'school') || routeStops[0];
       return {
         trip,
         phase: trip.status === 'scheduled' ? 'boarding' : 'live',
-        schoolLocation: trip.schoolId?.location || null,
+        schoolLocation: mapPoint(trip.schoolId?.location) || mapPoint(schoolStop?.location),
         checkedIn,
         checkedOut: dropped.size,
         studentCount: (trip.kidIds || []).length,
         lastGpsAt,
         speedKmh,
         gpsStatus: gps,
-        path: routePathLabel(stopsByRoute[String(trip.routeId?._id || trip.routeId)] || []),
+        path: routePathLabel(routeStops),
       };
     });
 
@@ -1648,7 +1751,7 @@ router.get('/live-tracking', async (req, res) => {
       buses: enriched,
       stats: {
         fleetTotal,
-        onRoute: trips.filter((t) => t.status === 'active').length,
+        onRoute: uniqueTrips.filter((t) => t.status === 'active').length,
         online: statusCounts.live + statusCounts.stopped,
         studentsOnBoard,
         avgSpeedKmh: speedCount ? Math.round(speedSum / speedCount) : null,

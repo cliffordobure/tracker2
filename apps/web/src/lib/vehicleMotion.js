@@ -250,9 +250,9 @@ export function createVehicleMotion() {
         const moved = state.lastRaw ? haversineMeters(state.lastRaw, raw) : 0;
         const dt = state.lastGpsAt ? (now - state.lastGpsAt) / 1000 : 0;
         if (moved > 0.5 && dt > 0.2 && dt < 10) {
-          state.speedMps = state.speedMps * 0.55 + Math.max(1.5, Math.min(28, moved / dt)) * 0.45;
+          state.speedMps = state.speedMps * 0.55 + Math.max(1.5, Math.min(50, moved / dt)) * 0.45;
         }
-        if (Number.isFinite(gpsSpeedMps) && gpsSpeedMps >= 0.8 && gpsSpeedMps <= 30) {
+        if (Number.isFinite(gpsSpeedMps) && gpsSpeedMps >= 0.8 && gpsSpeedMps <= 50) {
           state.speedMps = state.speedMps * 0.6 + gpsSpeedMps * 0.4;
         }
         if (!state.lastRaw || moved > 0.15) {
@@ -320,7 +320,7 @@ export function createVehicleMotion() {
           state.lastRaw = raw;
           state.lastGpsAt = now;
           if (Number.isFinite(gpsSpeedMps) && gpsSpeedMps > 1) {
-            state.speedMps = Math.max(1.5, Math.min(30, gpsSpeedMps));
+            state.speedMps = Math.max(1.5, Math.min(50, gpsSpeedMps));
           }
           if (prevRaw && movedFromLast >= 5) {
             state.heading = bearingDegrees(prevRaw, raw);
@@ -354,7 +354,7 @@ export function createVehicleMotion() {
       }
       state.behindStreak = 0;
 
-      if (m > state.displayM + 80) m = state.displayM + 45;
+      if (m > state.displayM + 140 && (gpsSpeedMps || 0) < 8) m = state.displayM + 80;
       if (
         m <= state.targetM + 0.5 &&
         movedFromLast > 4 &&
@@ -367,11 +367,11 @@ export function createVehicleMotion() {
       if (state.lastGpsAt && m > state.targetM) {
         const dt = (now - state.lastGpsAt) / 1000;
         if (dt > 0.2 && dt < 8) {
-          const measured = Math.max(1.5, Math.min(30, (m - state.targetM) / dt));
+          const measured = Math.max(1.5, Math.min(50, (m - state.targetM) / dt));
           state.speedMps = state.speedMps * 0.55 + measured * 0.45;
         }
       }
-      if (Number.isFinite(gpsSpeedMps) && gpsSpeedMps >= 1 && gpsSpeedMps <= 30) {
+      if (Number.isFinite(gpsSpeedMps) && gpsSpeedMps >= 1 && gpsSpeedMps <= 50) {
         state.speedMps = state.speedMps * 0.6 + gpsSpeedMps * 0.4;
       }
 

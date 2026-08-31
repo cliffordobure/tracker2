@@ -43,7 +43,7 @@ export function PlanBadge({ plan }) {
   return <span className={`pa-plan pa-plan--${p}`}>{p}</span>;
 }
 
-export function PageFoot({ name = 'Greenfield School' }) {
+export function PageFoot({ name = 'Track Toto' }) {
   return (
     <footer className="sa-home-foot">
       <span>© {new Date().getFullYear()} {name}</span>

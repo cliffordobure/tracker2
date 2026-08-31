@@ -30,6 +30,7 @@ function emptyForm(date) {
     grade: '',
     kidIds: [],
     media: [],
+    private: false,
     date: date || ymd(new Date()),
   };
 }
@@ -47,6 +48,7 @@ export default function TeacherDiary() {
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [openId, setOpenId] = useState(null);
+  const [editingId, setEditingId] = useState('');
 
   const load = async (month = monthKey(cursor), date = selected) => {
     const [d, k] = await Promise.all([
@@ -135,9 +137,15 @@ export default function TeacherDiary() {
     setBusy(true);
     setError('');
     try {
-      await api('/teacher/diary', { method: 'POST', body: form });
+      if (editingId) {
+        await api(`/teacher/diary/${editingId}`, { method: 'PUT', body: form });
+        showToast('Diary updated', 'success');
+      } else {
+        await api('/teacher/diary', { method: 'POST', body: form });
+        showToast(form.private ? 'Private note saved.' : 'Diary posted. Parents can read and sign it.', 'success');
+      }
       setForm(emptyForm(selected));
-      showToast('Diary posted. Parents can read and sign it.', 'success');
+      setEditingId('');
       await load();
     } catch (err) {
       setError(err.message);
@@ -250,9 +258,31 @@ export default function TeacherDiary() {
                   {e.teacherId?.name || 'You'}
                   {e.signatureCount > 0 ? ` · ${e.signatureCount} signed` : ' · Awaiting parent signature'}
                 </small>
-                <button type="button" className="tw-btn tw-btn-ghost" onClick={() => remove(e._id)}>
-                  Remove
-                </button>
+                <div className="tw-inline-actions">
+                  <button
+                    type="button"
+                    className="tw-btn tw-btn-ghost"
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      setEditingId(e._id);
+                      setForm({
+                        title: e.title || '',
+                        body: e.body || '',
+                        label: e.label || 'lesson',
+                        grade: e.grade || '',
+                        kidIds: (e.kidIds || []).map((k) => k._id || k),
+                        media: e.media || [],
+                        private: e.private === true,
+                        date: ymd(e.date || selected),
+                      });
+                    }}
+                  >
+                    Edit
+                  </button>
+                  <button type="button" className="tw-btn tw-btn-ghost" onClick={() => remove(e._id)}>
+                    Remove
+                  </button>
+                </div>
               </div>
             </article>
           ))}
@@ -263,7 +293,7 @@ export default function TeacherDiary() {
       </div>
 
       <form className="tw-form" onSubmit={submit}>
-        <h3>Write today’s diary</h3>
+        <h3>{editingId ? 'Edit diary entry' : 'Write today’s diary'}</h3>
         <label>
           Date
           <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
@@ -392,9 +422,27 @@ export default function TeacherDiary() {
           </div>
           <p className="hint">Up to 8 files (photos, PDF, or Word). Parents can view them before signing.</p>
         </div>
-        <button className="tw-btn tw-btn-primary" type="submit" disabled={busy || uploading}>
-          {busy ? 'Posting…' : 'Post to parent diary'}
-        </button>
+        <label className="tw-check">
+          <input type="checkbox" checked={form.private} onChange={(e) => setForm({ ...form, private: e.target.checked })} />
+          Private note (not sent to parents)
+        </label>
+        <div className="tw-inline-actions">
+          <button className="tw-btn tw-btn-primary" type="submit" disabled={busy || uploading}>
+            {busy ? 'Saving…' : editingId ? 'Save changes' : form.private ? 'Save private note' : 'Post to parent diary'}
+          </button>
+          {editingId ? (
+            <button
+              type="button"
+              className="tw-btn tw-btn-ghost"
+              onClick={() => {
+                setEditingId('');
+                setForm(emptyForm(selected));
+              }}
+            >
+              Cancel
+            </button>
+          ) : null}
+        </div>
       </form>
     </div>
   );

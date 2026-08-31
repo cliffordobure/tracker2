@@ -9,6 +9,61 @@ export function tripPlate(trip) {
   return trip?.busId?.label || trip?.tripCode || 'Bus';
 }
 
+export function normalizeMapPoint(value) {
+  if (!value || typeof value !== 'object') return null;
+  const lat = Number(value.lat ?? value.latitude ?? value.coordinates?.[1]);
+  const lng = Number(value.lng ?? value.longitude ?? value.coordinates?.[0]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  if (lat === 0 && lng === 0) return null;
+  return { ...value, lat, lng };
+}
+
+export function fleetVehicleKey(item) {
+  const trip = item?.trip;
+  const busId = trip?.busId?._id || trip?.busId;
+  if (busId) return `bus:${busId}`;
+  const driverId = trip?.driverId?._id || trip?.driverId;
+  if (driverId) return `drv:${driverId}`;
+  if (trip?._id) return `trip:${trip._id}`;
+  return '';
+}
+
+function liveScore(item) {
+  const trip = item?.trip;
+  const loc = normalizeMapPoint(trip?.latestLocation);
+  return (
+    (trip?.status === 'active' ? 8 : 0) +
+    (loc ? 4 : 0) +
+    (trip?.startedAt ? 2 : 0) +
+    (item?.lastGpsAt ? 1 : 0)
+  );
+}
+
+/** One row per physical bus — keeps the active / GPS trip. */
+export function dedupeLiveFleet(items) {
+  const byKey = new Map();
+  for (const item of items || []) {
+    const key = fleetVehicleKey(item);
+    if (!key) continue;
+    const prev = byKey.get(key);
+    if (!prev) {
+      byKey.set(key, item);
+      continue;
+    }
+    const nextScore = liveScore(item);
+    const prevScore = liveScore(prev);
+    if (nextScore !== prevScore) {
+      byKey.set(key, nextScore > prevScore ? item : prev);
+      continue;
+    }
+    const nextAt = pingTime(item.lastGpsAt || item.trip?.latestLocation?.at || item.trip?.startedAt);
+    const prevAt = pingTime(prev.lastGpsAt || prev.trip?.latestLocation?.at || prev.trip?.startedAt);
+    byKey.set(key, nextAt >= prevAt ? item : prev);
+  }
+  return [...byKey.values()];
+}
+
 export function attachFleetPlates(items, fleetBuses) {
   if (!items?.length) return items || [];
   const byId = new Map();
@@ -43,15 +98,21 @@ export function attachFleetPlates(items, fleetBuses) {
 
 export function busMapLocation(item) {
   const trip = item?.trip;
-  return trip?.latestLocation || trip?.startLocation || item?.schoolLocation || null;
+  return (
+    normalizeMapPoint(trip?.latestLocation) ||
+    normalizeMapPoint(trip?.startLocation) ||
+    normalizeMapPoint(item?.schoolLocation) ||
+    null
+  );
 }
 
 function speedMpsFrom(loc, speedKmh) {
   if (typeof loc?.speed === 'number' && Number.isFinite(loc.speed) && loc.speed >= 0) {
-    return loc.speed > 40 ? loc.speed / 3.6 : loc.speed;
+    const mps = loc.speed > 70 ? loc.speed / 3.6 : loc.speed;
+    return Math.min(50, Math.max(0, mps));
   }
   if (typeof speedKmh === 'number' && Number.isFinite(speedKmh) && speedKmh >= 0) {
-    return speedKmh / 3.6;
+    return Math.min(50, Math.max(0, speedKmh / 3.6));
   }
   return undefined;
 }
@@ -62,16 +123,27 @@ function pingTime(value) {
   return Number.isFinite(n) ? n : 0;
 }
 
+function targetKeyForTrip(targets, tripId) {
+  const id = String(tripId);
+  if (targets.has(id)) return id;
+  for (const [key, value] of targets) {
+    if (value?.tripId === id) return key;
+  }
+  return id;
+}
+
 export function applyLocationPing(targets, payload) {
-  if (!payload?.tripId || payload.lat == null || payload.lng == null) return;
-  const id = String(payload.tripId);
+  const point = normalizeMapPoint(payload);
+  if (!payload?.tripId || !point) return;
+  const id = targetKeyForTrip(targets, payload.tripId);
   const prev = targets.get(id) || {};
   const at = pingTime(payload.at) || Date.now();
   if (prev.at && at < prev.at) return;
   targets.set(id, {
     ...prev,
-    lat: payload.lat,
-    lng: payload.lng,
+    tripId: String(payload.tripId),
+    lat: point.lat,
+    lng: point.lng,
     heading: Number.isFinite(payload.heading) ? payload.heading : prev.heading,
     speedMps: speedMpsFrom(payload, null) ?? prev.speedMps,
     at,
@@ -94,24 +166,33 @@ export function syncFleetVehicles({
 
   for (const item of buses) {
     const trip = item.trip;
+    const id = fleetVehicleKey(item);
+    if (!id || !trip?._id) continue;
+    const tripId = String(trip._id);
     const loc = busMapLocation(item);
-    if (loc?.lat == null || loc?.lng == null || !trip?._id) continue;
-    const id = String(trip._id);
+    const pending = targetsRef.current.get(id) || targetsRef.current.get(tripId);
+    const lat = loc?.lat ?? pending?.lat;
+    const lng = loc?.lng ?? pending?.lng;
+    if (!normalizeMapPoint({ lat, lng })) continue;
+    if (pending && targetsRef.current.has(tripId) && id !== tripId) {
+      targetsRef.current.delete(tripId);
+    }
     seen.add(id);
-    coords.push([loc.lng, loc.lat]);
+    coords.push([lng, lat]);
 
     const plate = tripPlate(trip);
-    const selected = selectedId === id;
-    const speedMps = speedMpsFrom(loc, item.speedKmh);
-    const prev = targetsRef.current.get(id);
-    const at = pingTime(loc.at);
+    const selected = selectedId === tripId || selectedId === id;
+    const speedMps = speedMpsFrom(loc || pending, item.speedKmh);
+    const prev = targetsRef.current.get(id) || pending;
+    const at = pingTime(loc?.at);
     const keepLive = prev && at && prev.at && at < prev.at;
     targetsRef.current.set(id, {
-      lat: keepLive ? prev.lat : loc.lat,
-      lng: keepLive ? prev.lng : loc.lng,
+      tripId,
+      lat: keepLive ? prev.lat : lat,
+      lng: keepLive ? prev.lng : lng,
       heading: keepLive
         ? prev.heading
-        : Number.isFinite(loc.heading)
+        : Number.isFinite(loc?.heading)
           ? loc.heading
           : prev?.heading,
       speedMps: keepLive ? prev.speedMps : speedMps ?? prev?.speedMps,
@@ -122,23 +203,25 @@ export function syncFleetVehicles({
 
     let entry = markersRef.current.get(id);
     if (!entry) {
-      const el = createBoltCarElement({ heading: loc.heading, selected, label: plate, pulse });
+      const heading = loc?.heading ?? prev?.heading;
+      const el = createBoltCarElement({ heading, selected, label: plate, pulse });
       if (scale) el.style.transform = `scale(${scale})`;
       if (onSelect) {
         el.style.cursor = 'pointer';
         el.addEventListener('click', (e) => {
           e.stopPropagation();
-          onSelect(id);
+          onSelect(tripId);
         });
       }
       const marker = new mapboxgl.Marker({ element: el, anchor: 'center' })
-        .setLngLat([loc.lng, loc.lat])
+        .setLngLat([lng, lat])
         .addTo(map);
       const motion = createVehicleMotion();
-      motion.onGps([], { lat: loc.lat, lng: loc.lng }, speedMps);
-      if (Number.isFinite(loc.heading)) motion.state.heading = loc.heading;
-      markersRef.current.set(id, { marker, motion });
+      motion.onGps([], { lat, lng }, speedMps);
+      if (Number.isFinite(heading)) motion.state.heading = heading;
+      markersRef.current.set(id, { marker, motion, tripId });
     } else {
+      entry.tripId = tripId;
       const el = entry.marker.getElement();
       setBoltCarLabel(el, plate);
       setBoltCarSelected(el, selected);

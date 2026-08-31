@@ -7,6 +7,7 @@ import { setBoltCarSelected } from '../../lib/mapMarkers';
 import {
   attachFleetPlates,
   busMapLocation,
+  dedupeLiveFleet,
   startSmoothFleetLoop,
   subscribeFleetLocations,
   syncFleetVehicles,
@@ -206,7 +207,9 @@ function LiveFleetMap({ buses, selectedId, onSelect, className, showLegend }) {
 
   useEffect(() => {
     if (!selectedId || !mapRef.current) return;
-    const entry = markersRef.current.get(selectedId);
+    const entry =
+      [...markersRef.current.values()].find((row) => row.tripId === selectedId) ||
+      markersRef.current.get(selectedId);
     const pos = entry?.marker?.getLngLat();
     if (pos) {
       mapRef.current.easeTo({ center: [pos.lng, pos.lat], zoom: 15.2, duration: 700 });
@@ -218,7 +221,7 @@ function LiveFleetMap({ buses, selectedId, onSelect, className, showLegend }) {
       }
     }
     for (const [id, entry] of markersRef.current) {
-      setBoltCarSelected(entry.marker.getElement(), id === selectedId);
+      setBoltCarSelected(entry.marker.getElement(), id === selectedId || entry.tripId === selectedId);
     }
   }, [selectedId, buses]);
 
@@ -250,6 +253,7 @@ export default function LiveTracking({ endpoint = '/admin/live-tracking' } = {})
   const [params, setParams] = useSearchParams();
   const full = params.get('full') === '1';
   const focusTrip = params.get('trip');
+  const focusDriver = params.get('driver');
   const [buses, setBuses] = useState([]);
   const [stats, setStats] = useState(null);
   const [alerts, setAlerts] = useState([]);
@@ -275,7 +279,7 @@ export default function LiveTracking({ endpoint = '/admin/live-tracking' } = {})
               })
               .catch(() => ({ buses: [] })),
       ]);
-      setBuses(attachFleetPlates(data.buses || [], fleet.buses || []));
+      setBuses(dedupeLiveFleet(attachFleetPlates(data.buses || [], fleet.buses || [])));
       setStats(data.stats || null);
       setAlerts(data.alerts || []);
       setActivity(data.activity || []);
@@ -300,9 +304,17 @@ export default function LiveTracking({ endpoint = '/admin/live-tracking' } = {})
   }, [globalSearch]);
 
   useEffect(() => {
-    if (!focusTrip) return;
-    if (buses.some((b) => String(b.trip._id) === focusTrip)) setSelectedId(focusTrip);
-  }, [focusTrip, buses]);
+    if (focusTrip && buses.some((b) => String(b.trip._id) === focusTrip)) {
+      setSelectedId(focusTrip);
+      return;
+    }
+    if (!focusDriver) return;
+    const match = buses.find((b) => {
+      const driverId = b.trip?.driverId?._id || b.trip?.driverId?.id || b.trip?.driverId;
+      return String(driverId || '') === String(focusDriver);
+    });
+    if (match?.trip?._id) setSelectedId(String(match.trip._id));
+  }, [focusTrip, focusDriver, buses]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -376,7 +388,7 @@ export default function LiveTracking({ endpoint = '/admin/live-tracking' } = {})
 
   const mapBlock = (
     <LiveFleetMap
-      buses={filtered}
+      buses={buses}
       selectedId={selectedId}
       onSelect={select}
       className={full ? 'is-full' : ''}

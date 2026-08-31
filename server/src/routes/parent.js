@@ -3942,7 +3942,8 @@ function orderStopsForTrip(stops, direction) {
 function speedToKmh(speed) {
   const n = Number(speed);
   if (!Number.isFinite(n) || n < 0) return null;
-  return n > 40 ? Math.round(n) : Math.round(n * 3.6);
+  const mps = n > 70 ? n / 3.6 : n;
+  return Math.round(Math.min(180, mps * 3.6));
 }
 
 function updatedLabel(at) {
@@ -4925,11 +4926,11 @@ async function ensureSampleNoticeComments(announcement) {
 }
 
 async function assertParentAnnouncement(userId, announcementId) {
-  const kids = await Kid.find({ parentIds: userId, active: true }).select('schoolId');
-  const schoolIds = new Set(kids.map((k) => k.schoolId?.toString()).filter(Boolean));
+  const { schoolIds } = await parentNoticeContext(userId);
+  const allowed = new Set(schoolIds);
   const announcement = await Announcement.findById(announcementId);
   if (!announcement || !announcement.active || announcement.archived) return null;
-  if (!schoolIds.has(announcement.schoolId.toString())) return null;
+  if (!allowed.has(announcement.schoolId.toString())) return null;
   return announcement;
 }
 
@@ -5049,8 +5050,7 @@ async function ensureParentNotices(schoolId) {
 
 router.get('/announcements', async (req, res) => {
   try {
-    const kids = await Kid.find({ parentIds: req.user.id, active: true }).select('schoolId grade');
-    const schoolIds = [...new Set(kids.map((k) => k.schoolId?.toString()).filter(Boolean))];
+    const { schoolIds, grades } = await parentNoticeContext(req.user.id);
     if (!schoolIds.length) {
       return res.json({
         announcements: [],
@@ -5065,12 +5065,11 @@ router.get('/announcements', async (req, res) => {
     const { category, tab, q } = req.query;
     const page = Math.max(1, Number(req.query.page) || 1);
     const pageSize = Math.min(20, Math.max(4, Number(req.query.pageSize) || 8));
-    const grades = [...new Set(kids.map((k) => k.grade).filter(Boolean))];
     const filter = {
       schoolId: { $in: schoolIds },
       active: true,
       archived: { $ne: true },
-      sourceKey: { $not: /^sample:/ },
+      $nor: [{ sourceKey: /^sample:/ }],
       $and: [
         {
           $or: [
@@ -5106,7 +5105,7 @@ router.get('/announcements', async (req, res) => {
       schoolId: { $in: schoolIds },
       active: true,
       archived: { $ne: true },
-      sourceKey: { $not: /^sample:/ },
+      $nor: [{ sourceKey: /^sample:/ }],
       readBy: { $ne: req.user.id },
       $or: [
         { scope: { $ne: 'class' } },
@@ -5141,13 +5140,13 @@ router.get('/announcements', async (req, res) => {
 
 router.post('/announcements/:id/read', async (req, res) => {
   try {
-    const kids = await Kid.find({ parentIds: req.user.id, active: true }).select('schoolId');
-    const schoolIds = new Set(kids.map((k) => k.schoolId?.toString()).filter(Boolean));
+    const { schoolIds } = await parentNoticeContext(req.user.id);
+    const allowedSchools = new Set(schoolIds);
     const announcement = await Announcement.findById(req.params.id);
     if (!announcement || !announcement.active || announcement.archived) {
       return res.status(404).json({ error: 'Announcement not found' });
     }
-    if (!schoolIds.has(announcement.schoolId.toString())) {
+    if (!allowedSchools.has(announcement.schoolId.toString())) {
       return res.status(403).json({ error: 'Not allowed' });
     }
     await Announcement.updateOne({ _id: announcement._id }, { $addToSet: { readBy: req.user.id } });
@@ -5661,17 +5660,64 @@ function messageDateLabel(value) {
   return formatDateLabel(value);
 }
 
+async function parentInboxIds(userId, schoolId) {
+  const me = await User.findById(userId).select('phone email schoolId');
+  if (!me) return [userId];
+  const or = [{ _id: userId }];
+  if (me.email) or.push({ email: me.email });
+  if (me.phone) or.push({ phone: me.phone });
+  const sid = schoolId || me.schoolId;
+  const aliases = await User.find({
+    role: 'parent',
+    ...(sid ? { schoolId: sid } : {}),
+    $or: or,
+  }).select('_id');
+  return aliases.length ? aliases.map((u) => u._id) : [userId];
+}
+
+function parentConversationClause(parentIds, userId) {
+  return {
+    $or: [{ parentId: { $in: parentIds } }, { memberIds: userId }],
+  };
+}
+
+async function parentNoticeContext(userId) {
+  const me = await User.findById(userId).select('schoolId');
+  const parentIds = await parentInboxIds(userId, me?.schoolId);
+  const kids = await Kid.find({
+    parentIds: { $in: parentIds },
+    active: { $ne: false },
+  }).select('schoolId grade');
+  const schoolIds = [...new Set(kids.map((k) => k.schoolId?.toString()).filter(Boolean))];
+  if (!schoolIds.length && me?.schoolId) schoolIds.push(String(me.schoolId));
+  const grades = [...new Set(kids.map((k) => k.grade).filter(Boolean))];
+  return { parentIds, kids, schoolIds, grades };
+}
+
+function staffFacingFields(staff) {
+  if (!staff) return null;
+  const admin = staff.role === 'school_admin';
+  return {
+    title: staff.name || (admin ? 'Admin' : 'Teacher'),
+    roleLabel: admin ? 'Administration' : staff.jobTitle || 'Teacher',
+    avatarKind: admin ? 'admin' : 'teacher',
+    photoUrl: staff.photoUrl || '',
+    phone: staff.phone || '',
+  };
+}
+
 function serializeConversation(row, extra = {}) {
   const doc = row.toObject ? row.toObject() : row;
+  const facing = staffFacingFields(extra.staff);
   return {
     _id: doc._id,
     type: doc.type || 'direct',
-    title: doc.title,
-    roleLabel: doc.roleLabel || 'Teacher',
-    subtitle: doc.subtitle || extra.subtitle || doc.roleLabel || 'Teacher',
-    avatarKind: doc.avatarKind || 'teacher',
-    photoUrl: extra.photoUrl || doc.photoUrl || '',
-    phone: extra.phone || doc.phone || '',
+    title: facing?.title || doc.title,
+    roleLabel: facing?.roleLabel || doc.roleLabel || 'Teacher',
+    subtitle: doc.subtitle || extra.subtitle || facing?.roleLabel || doc.roleLabel || 'Teacher',
+    avatarKind: facing?.avatarKind || doc.avatarKind || 'teacher',
+    photoUrl: extra.photoUrl || facing?.photoUrl || doc.photoUrl || '',
+    phone: extra.phone || facing?.phone || doc.phone || '',
     online: extra.online === true || doc.online === true,
     lastMessage: doc.lastMessage || '',
     lastMessageAt: doc.lastMessageAt,
@@ -5680,6 +5726,23 @@ function serializeConversation(row, extra = {}) {
     archived: doc.archived === true,
     counterpartUserId: doc.counterpartUserId || null,
   };
+}
+
+async function staffMapForConversations(rows) {
+  const ids = [
+    ...new Set(
+      rows
+        .map((row) => {
+          const doc = row.toObject ? row.toObject() : row;
+          return doc.counterpartUserId?._id || doc.counterpartUserId;
+        })
+        .filter(Boolean)
+        .map(String)
+    ),
+  ];
+  if (!ids.length) return new Map();
+  const users = await User.find({ _id: { $in: ids } }).select('name role jobTitle photoUrl phone');
+  return new Map(users.map((u) => [String(u._id), u]));
 }
 
 function serializeChatMessage(row) {
@@ -6325,32 +6388,39 @@ router.post('/calendar/sync', async (req, res) => {
 
 router.get('/messages', async (req, res) => {
   try {
-    const kids = await Kid.find({ parentIds: req.user.id, active: true }).select('schoolId grade');
-    const schoolId = kids[0]?.schoolId;
+    const kids = await Kid.find({ parentIds: req.user.id, active: { $ne: false } }).select('schoolId grade');
+    const schoolId = kids[0]?.schoolId || req.user.schoolId;
+    const parentIds = await parentInboxIds(req.user.id, schoolId);
 
     const tab = String(req.query.tab || 'messages').toLowerCase();
     const q = String(req.query.q || '').trim();
-    const filter = { parentId: req.user.id, sourceKey: { $not: /^sample:/ } };
-    if (tab === 'groups') filter.type = 'group';
-    else if (tab === 'archived') filter.archived = true;
+    const filter = {
+      $and: [parentConversationClause(parentIds, req.user.id), { $nor: [{ sourceKey: /^sample:/ }] }],
+    };
+    if (tab === 'groups') filter.$and.push({ type: 'group' });
+    else if (tab === 'archived') filter.$and.push({ archived: true });
     else {
-      filter.type = { $ne: 'group' };
-      filter.archived = { $ne: true };
+      filter.$and.push({ type: { $ne: 'group' } });
+      filter.$and.push({ archived: { $ne: true } });
     }
 
     if (q) {
       const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-      filter.$or = [{ title: rx }, { lastMessage: rx }, { roleLabel: rx }];
+      filter.$and.push({ $or: [{ title: rx }, { lastMessage: rx }, { roleLabel: rx }] });
     }
 
     const [rows, contacts, unread] = await Promise.all([
-      Conversation.find(filter).sort({ lastMessageAt: -1 }).limit(60),
+      Conversation.find(filter).sort({ lastMessageAt: -1 }).limit(80),
       parentMessageContacts(schoolId),
       Notification.countDocuments({ userId: req.user.id, read: { $ne: true } }),
     ]);
+    const staffMap = await staffMapForConversations(rows);
 
     res.json({
-      conversations: rows.map(serializeConversation),
+      conversations: rows.map((row) => {
+        const cid = String(row.counterpartUserId || '');
+        return serializeConversation(row, { staff: staffMap.get(cid) });
+      }),
       contacts,
       unread,
     });
@@ -6457,7 +6527,11 @@ router.post('/messages', async (req, res) => {
 
 router.get('/messages/:id', async (req, res) => {
   try {
-    const convo = await Conversation.findOne({ _id: req.params.id, parentId: req.user.id });
+    const parentIds = await parentInboxIds(req.user.id, req.user.schoolId);
+    const convo = await Conversation.findOne({
+      _id: req.params.id,
+      ...parentConversationClause(parentIds, req.user.id),
+    });
     if (!convo) return res.status(404).json({ error: 'Conversation not found' });
     if (convo.unreadCount) {
       convo.unreadCount = 0;
@@ -6466,11 +6540,12 @@ router.get('/messages/:id', async (req, res) => {
     const [messages, staff] = await Promise.all([
       Message.find({ conversationId: convo._id }).sort({ createdAt: 1 }).limit(200),
       convo.counterpartUserId
-        ? User.findById(convo.counterpartUserId).select('name phone photoUrl')
+        ? User.findById(convo.counterpartUserId).select('name role jobTitle phone photoUrl')
         : null,
     ]);
     res.json({
       conversation: serializeConversation(convo, {
+        staff,
         phone: staff?.phone || convo.phone || '',
         photoUrl: staff?.photoUrl || convo.photoUrl || '',
         online: convo.online === true,
@@ -6486,7 +6561,11 @@ router.post('/messages/:id', async (req, res) => {
   try {
     const body = String(req.body?.body || '').trim();
     if (!body) return res.status(400).json({ error: 'Message cannot be empty' });
-    const convo = await Conversation.findOne({ _id: req.params.id, parentId: req.user.id });
+    const parentIds = await parentInboxIds(req.user.id, req.user.schoolId);
+    const convo = await Conversation.findOne({
+      _id: req.params.id,
+      ...parentConversationClause(parentIds, req.user.id),
+    });
     if (!convo) return res.status(404).json({ error: 'Conversation not found' });
     const parent = await User.findById(req.user.id).select('name');
     const message = await Message.create({
@@ -6532,7 +6611,11 @@ router.post('/messages/:id', async (req, res) => {
 
 router.post('/messages/:id/archive', async (req, res) => {
   try {
-    const convo = await Conversation.findOne({ _id: req.params.id, parentId: req.user.id });
+    const parentIds = await parentInboxIds(req.user.id, req.user.schoolId);
+    const convo = await Conversation.findOne({
+      _id: req.params.id,
+      ...parentConversationClause(parentIds, req.user.id),
+    });
     if (!convo) return res.status(404).json({ error: 'Conversation not found' });
     convo.archived = req.body?.archived === false ? false : true;
     await convo.save();

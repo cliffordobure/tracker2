@@ -32,6 +32,8 @@ const tripSchema = new mongoose.Schema(
     },
     sequence: { type: Number, default: 1 },
     scheduledFor: { type: Date, default: null },
+    /** Wall-clock HH:mm as entered in school time (Africa/Nairobi). */
+    scheduledTime: { type: String, default: '' },
     kidIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Kid' }],
     startedAt: { type: Date },
     endedAt: { type: Date },

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
+import CampusSelect, { campusRefId } from '../../components/CampusSelect';
 import MediaPicker from '../../components/MediaPicker';
 
 const PAGE_SIZES = [10, 25, 50];
@@ -38,6 +39,7 @@ const emptyForm = {
   safetyFeatures: '',
   assistantName: '',
   assistantPhone: '',
+  campusId: '',
   photo: null,
 };
 
@@ -246,7 +248,7 @@ function ActionGlyph({ name }) {
 }
 
 export default function Buses() {
-  const { globalSearch = '', schoolName } = useOutletContext() || {};
+  const { globalSearch = '', schoolName, campusFilter = '', campuses } = useOutletContext() || {};
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const openedEdit = useRef('');
@@ -270,16 +272,18 @@ export default function Buses() {
   const [viewing, setViewing] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(emptyForm);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
 
   const load = async () => {
-    const data = await api('/admin/buses');
+    const data = await api(`/admin/buses${campusFilter ? `?campusId=${campusFilter}` : ''}`);
     setBuses(data.buses || []);
     setStats(data.stats || null);
   };
 
   useEffect(() => {
     load().catch((e) => setError(e.message));
-  }, []);
+  }, [campusFilter]);
 
   useEffect(() => {
     if (globalSearch) setQ(globalSearch);
@@ -403,6 +407,7 @@ export default function Buses() {
       safetyFeatures: b.safetyFeatures || '',
       assistantName: b.assistantName || '',
       assistantPhone: b.assistantPhone || '',
+      campusId: campusRefId(b.campusId),
       photo: b.photoUrl ? { url: b.photoUrl, publicId: b.photoPublicId || '' } : null,
     });
     setViewing(null);
@@ -420,6 +425,9 @@ export default function Buses() {
   }, [params, buses]);
 
   const submit = async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
     setError('');
     setSuccess('');
     try {
@@ -445,6 +453,7 @@ export default function Buses() {
         safetyFeatures: form.safetyFeatures,
         assistantName: form.assistantName,
         assistantPhone: form.assistantPhone,
+        campusId: form.campusId || null,
         photoUrl: form.photo?.url || '',
         photoPublicId: form.photo?.publicId || '',
       };
@@ -459,6 +468,9 @@ export default function Buses() {
       await load();
     } catch (e) {
       setError(e.message);
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   };
 
@@ -896,6 +908,7 @@ export default function Buses() {
             </button>
           </div>
           {error && <div className="alert">{error}</div>}
+          <CampusSelect campuses={campuses} value={form.campusId} onChange={(campusId) => setForm({ ...form, campusId })} />
           <div className="sa-stu-form-row">
             <label className="sa-field">
               <span>Label</span>
@@ -1033,8 +1046,8 @@ export default function Buses() {
             <button type="button" className="sa-btn sa-btn-outline" onClick={closePanel}>
               Cancel
             </button>
-            <button type="button" className="sa-btn sa-btn-primary" disabled={!canSave} onClick={submit}>
-              {editingId ? 'Save vehicle' : 'Create vehicle'}
+            <button type="button" className="sa-btn sa-btn-primary" disabled={!canSave || saving} onClick={submit}>
+              {saving ? 'Saving…' : editingId ? 'Save vehicle' : 'Create vehicle'}
             </button>
           </div>
         </aside>

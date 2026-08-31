@@ -28,6 +28,7 @@ import {
 import { authenticate, requireSchoolStaff, requireSuperAdmin } from '../middleware/auth.js';
 import adminTripOps from './adminTripOps.js';
 import adminAcademics from './adminAcademics.js';
+import adminCampuses, { validCampusId } from './adminCampuses.js';
 import { createAndEmitNotifications, NOTIFICATION_TYPES } from '../services/notifications.js';
 import { getIO } from '../socket.js';
 
@@ -35,6 +36,7 @@ const router = Router();
 router.use(authenticate, requireSchoolStaff);
 router.use(adminTripOps);
 router.use(adminAcademics);
+router.use(adminCampuses);
 
 /** school_admin → their school; super_admin → query/body schoolId or null (all). */
 function resolveSchoolId(req, { required = false } = {}) {
@@ -47,6 +49,12 @@ function resolveSchoolId(req, { required = false } = {}) {
 function schoolFilter(req, field = 'schoolId') {
   const schoolId = resolveSchoolId(req);
   if (schoolId) return { [field]: schoolId };
+  return {};
+}
+
+function campusFilter(req) {
+  const id = String(req.query.campusId || '');
+  if (/^[a-f0-9]{24}$/i.test(id)) return { campusId: id };
   return {};
 }
 
@@ -241,7 +249,7 @@ router.get('/dashboard', async (req, res) => {
         .populate('busId', 'plate label')
         .populate('driverId', 'name')
         .populate('scheduleId', 'scheduledTime')
-        .select('status startedAt endedAt scheduledFor serviceDate period direction kidIds busId driverId routeId scheduleId latestLocation tripCode'),
+        .select('status startedAt endedAt scheduledFor scheduledTime serviceDate period direction kidIds busId driverId routeId scheduleId latestLocation tripCode'),
       Announcement.find({ ...filter, active: { $ne: false }, archived: { $ne: true } })
         .sort({ publishedAt: -1, createdAt: -1 })
         .limit(4)
@@ -979,6 +987,7 @@ router.post('/messages', async (req, res) => {
     );
     if (!contact) return res.status(404).json({ error: 'Contact not found' });
 
+    const sourceKey = `admin:${req.user.id}:${kind}:${contact._id}`;
     let query;
     if (kind === 'driver') {
       query = { schoolId, driverId: contact._id, counterpartUserId: req.user.id, type: 'direct' };
@@ -989,23 +998,40 @@ router.post('/messages', async (req, res) => {
     }
 
     let convo = await Conversation.findOne(query);
+    if (!convo) convo = await Conversation.findOne({ schoolId, sourceKey });
     if (!convo) {
-      convo = await Conversation.create({
-        schoolId,
-        parentId: kind === 'parent' ? contact._id : null,
-        driverId: kind === 'driver' ? contact._id : null,
-        counterpartUserId: kind === 'teacher' ? contact._id : req.user.id,
-        createdByUserId: req.user.id,
-        type: 'direct',
-        title: contact.name,
-        roleLabel: kind === 'parent' ? 'Parent' : kind === 'driver' ? 'Driver' : contact.jobTitle || 'Teacher',
-        avatarKind: kind === 'parent' ? 'parent' : kind === 'driver' ? 'driver' : 'teacher',
-        photoUrl: contact.photoUrl || '',
-        phone: contact.phone || '',
-        lastMessage: body || '',
-        lastMessageAt: new Date(),
-        sourceKey: `admin:${req.user.id}:${kind}:${contact._id}`,
-      });
+      try {
+        convo = await Conversation.create({
+          schoolId,
+          parentId: kind === 'parent' ? contact._id : null,
+          driverId: kind === 'driver' ? contact._id : null,
+          counterpartUserId: kind === 'teacher' ? contact._id : req.user.id,
+          createdByUserId: req.user.id,
+          memberIds: kind === 'parent' ? [contact._id, req.user.id] : [req.user.id],
+          type: 'direct',
+          title: contact.name,
+          roleLabel: kind === 'parent' ? 'Parent' : kind === 'driver' ? 'Driver' : contact.jobTitle || 'Teacher',
+          avatarKind: kind === 'parent' ? 'parent' : kind === 'driver' ? 'driver' : 'teacher',
+          photoUrl: contact.photoUrl || '',
+          phone: contact.phone || '',
+          lastMessage: body || '',
+          lastMessageAt: new Date(),
+          sourceKey,
+        });
+      } catch (err) {
+        if (err?.code !== 11000) throw err;
+        convo = await Conversation.findOne({ schoolId, sourceKey });
+        if (!convo) throw err;
+      }
+    }
+    if (kind === 'parent' && convo && !convo.parentId) {
+      convo.parentId = contact._id;
+    }
+    if (kind === 'parent' && convo) {
+      const members = new Set((convo.memberIds || []).map(String));
+      members.add(String(contact._id));
+      members.add(String(req.user.id));
+      convo.memberIds = [...members];
     }
 
     if (body) {
@@ -1029,6 +1055,7 @@ router.post('/messages', async (req, res) => {
           type: NOTIFICATION_TYPES.MESSAGE,
           title: req.user.name || 'Admin',
           body,
+          link: `messages/${convo._id}`,
         },
       ]);
     }
@@ -1097,6 +1124,7 @@ router.post('/messages/:id', async (req, res) => {
           type: NOTIFICATION_TYPES.MESSAGE,
           title: req.user.name || 'Admin',
           body,
+          link: `messages/${convo._id}`,
         }))
       );
     }
@@ -1750,7 +1778,10 @@ function sameDay(a, b) {
 // ——— Buses ———
 router.get('/buses', async (req, res) => {
   try {
-    const buses = await Bus.find(schoolFilter(req)).populate('schoolId', 'name').sort({ label: 1, plate: 1 });
+    const buses = await Bus.find({ ...schoolFilter(req), ...campusFilter(req) })
+      .populate('schoolId', 'name')
+      .populate('campusId', 'name')
+      .sort({ label: 1, plate: 1 });
     const profiles = await DriverProfile.find({ busId: { $in: buses.map((b) => b._id) } })
       .populate('userId', 'name phone photoUrl active')
       .populate('assignedRouteIds', 'name');
@@ -1995,6 +2026,7 @@ router.get('/buses/:id', async (req, res) => {
         direction: t.direction,
         period: t.period || '',
         scheduledFor: t.scheduledFor || null,
+        scheduledTime: t.scheduledTime || '',
         startedAt: t.startedAt || null,
         endedAt: t.endedAt || null,
         serviceDate: t.serviceDate || null,
@@ -2018,9 +2050,20 @@ router.post('/buses', async (req, res) => {
       return res.status(400).json({ error: 'seats must be a positive number' });
     }
 
+    const plate = String(req.body.plate || '').trim().replace(/\s+/g, ' ');
+    if (!plate) return res.status(400).json({ error: 'Registration / plate is required' });
+    const plateClash = await Bus.findOne({
+      schoolId,
+      plate: { $regex: `^${plate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
+    });
+    if (plateClash) {
+      return res.status(400).json({ error: 'A vehicle with that plate already exists' });
+    }
+
     const bus = await Bus.create({
       schoolId,
-      plate: req.body.plate,
+      campusId: await validCampusId(schoolId, req.body.campusId),
+      plate,
       label: req.body.label || '',
       model: req.body.model || '',
       color: req.body.color || '',
@@ -2073,7 +2116,22 @@ router.put('/buses/:id', async (req, res) => {
     }
 
     const updates = {};
-    if (req.body.plate !== undefined) updates.plate = req.body.plate;
+    if (req.body.campusId !== undefined) {
+      updates.campusId = await validCampusId(existing.schoolId, req.body.campusId);
+    }
+    if (req.body.plate !== undefined) {
+      const plate = String(req.body.plate || '').trim().replace(/\s+/g, ' ');
+      if (!plate) return res.status(400).json({ error: 'Registration / plate is required' });
+      const plateClash = await Bus.findOne({
+        schoolId: existing.schoolId,
+        _id: { $ne: existing._id },
+        plate: { $regex: `^${plate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
+      });
+      if (plateClash) {
+        return res.status(400).json({ error: 'A vehicle with that plate already exists' });
+      }
+      updates.plate = plate;
+    }
     if (req.body.label !== undefined) updates.label = req.body.label;
     if (req.body.model !== undefined) updates.model = req.body.model;
     if (req.body.color !== undefined) updates.color = req.body.color;
@@ -2369,6 +2427,7 @@ router.post('/routes', async (req, res) => {
 
     const route = await Route.create({
       schoolId,
+      campusId: await validCampusId(schoolId, req.body.campusId),
       name: req.body.name,
       description: req.body.description || '',
       code: req.body.code || '',
@@ -2443,6 +2502,7 @@ router.get('/routes/:id', async (req, res) => {
       period: t.period || '',
       tripCode: t.tripCode || '',
       scheduledFor: t.scheduledFor || null,
+      scheduledTime: t.scheduledTime || '',
       startedAt: t.startedAt || null,
       endedAt: t.endedAt || null,
       serviceDate: t.serviceDate || null,
@@ -2583,6 +2643,9 @@ router.put('/routes/:id', async (req, res) => {
     const updates = {};
     if (req.body.name !== undefined) updates.name = req.body.name;
     if (req.body.description !== undefined) updates.description = req.body.description;
+    if (req.body.campusId !== undefined) {
+      updates.campusId = await validCampusId(existing.schoolId, req.body.campusId);
+    }
     if (req.body.code !== undefined) updates.code = String(req.body.code || '').trim();
     if (req.body.active !== undefined) updates.active = req.body.active;
     if (req.body.estimatedMinutes !== undefined) {
@@ -2893,9 +2956,39 @@ router.get('/parents', async (req, res) => {
     const kidFilter = schoolId ? { schoolId } : {};
     const kids = parents.length
       ? await Kid.find({ ...kidFilter, parentIds: { $in: parents.map((p) => p._id) } })
-          .select('name grade photoUrl parentIds active')
+          .select('name grade photoUrl parentIds active routeId homeStopId')
+          .populate('routeId', 'name')
+          .populate('homeStopId', 'name')
           .sort({ name: 1 })
       : [];
+    const routeIds = [...new Set(kids.map((k) => k.routeId?._id || k.routeId).filter(Boolean))];
+    const [profiles, schedules] = await Promise.all([
+      routeIds.length
+        ? DriverProfile.find({ assignedRouteIds: { $in: routeIds } }).populate('userId', 'name')
+        : [],
+      routeIds.length
+        ? TripSchedule.find({
+            ...(schoolId ? { schoolId } : {}),
+            routeId: { $in: routeIds },
+            active: { $ne: false },
+          }).populate('driverId', 'name')
+        : [],
+    ]);
+    const driversByRoute = {};
+    const addDriver = (routeId, name) => {
+      const key = String(routeId || '');
+      const label = String(name || '').trim();
+      if (!key || !label) return;
+      if (!driversByRoute[key]) driversByRoute[key] = [];
+      if (!driversByRoute[key].includes(label)) driversByRoute[key].push(label);
+    };
+    for (const s of schedules) addDriver(s.routeId, s.driverId?.name);
+    for (const profile of profiles) {
+      for (const rid of profile.assignedRouteIds || []) {
+        addDriver(rid, profile.userId?.name);
+      }
+    }
+    const uniqueJoin = (values) => [...new Set((values || []).filter(Boolean))].join(', ');
     const sinceMonth = monthStart();
     let withKids = 0;
     let addedThisMonth = 0;
@@ -2906,15 +2999,25 @@ router.get('/parents', async (req, res) => {
       if (children.length) withKids += 1;
       if (p.active !== false) active += 1;
       if (p.createdAt && p.createdAt >= sinceMonth) addedThisMonth += 1;
-      return {
-        ...p.toSafeJSON(),
-        children: children.map((k) => ({
+      const childRows = children.map((k) => {
+        const routeId = k.routeId?._id || k.routeId;
+        return {
           id: String(k._id),
           name: k.name,
           grade: k.grade || '',
           photoUrl: k.photoUrl || '',
           active: k.active !== false,
-        })),
+          routeName: k.routeId?.name || '',
+          stopName: k.homeStopId?.name || '',
+          driverName: (driversByRoute[String(routeId || '')] || []).join(', '),
+        };
+      });
+      return {
+        ...p.toSafeJSON(),
+        children: childRows,
+        routeName: uniqueJoin(childRows.map((c) => c.routeName)),
+        stopName: uniqueJoin(childRows.map((c) => c.stopName)),
+        driverName: uniqueJoin(childRows.flatMap((c) => String(c.driverName || '').split(', ').filter(Boolean))),
       };
     });
     res.json({
@@ -3017,7 +3120,7 @@ function licenseStatusOf(expiry, today, soon) {
 // ——— Drivers ———
 router.get('/drivers', async (req, res) => {
   try {
-    const users = await User.find({ role: 'driver', ...schoolFilter(req) }).sort({ name: 1 });
+    const users = await User.find({ role: 'driver', ...schoolFilter(req), ...campusFilter(req) }).sort({ name: 1 });
     const profiles = await DriverProfile.find({ userId: { $in: users.map((u) => u._id) } })
       .populate('assignedRouteIds', 'name')
       .populate('busId', 'plate label seats');
@@ -3145,6 +3248,7 @@ router.get('/drivers/:id', async (req, res) => {
       period: t.period || '',
       tripCode: t.tripCode || '',
       scheduledFor: t.scheduledFor || null,
+      scheduledTime: t.scheduledTime || '',
       startedAt: t.startedAt || null,
       endedAt: t.endedAt || null,
       serviceDate: t.serviceDate || null,
@@ -3263,6 +3367,7 @@ router.post('/drivers', async (req, res) => {
       phone: phone || '',
       role: 'driver',
       schoolId,
+      campusId: await validCampusId(schoolId, req.body.campusId),
       photoUrl: req.body.photoUrl || '',
       photoPublicId: req.body.photoPublicId || '',
       employeeId: employeeId || '',
@@ -3305,6 +3410,9 @@ router.put('/drivers/:id', async (req, res) => {
     if (req.body.phone !== undefined) updates.phone = req.body.phone;
     if (req.body.active !== undefined) updates.active = req.body.active;
     if (req.body.employeeId !== undefined) updates.employeeId = String(req.body.employeeId || '').trim();
+    if (req.body.campusId !== undefined) {
+      updates.campusId = await validCampusId(existing.schoolId, req.body.campusId);
+    }
     if (req.body.email) {
       const email = req.body.email.toLowerCase().trim();
       const taken = await User.findOne({ email, _id: { $ne: existing._id } });
@@ -3367,7 +3475,7 @@ router.delete('/drivers/:id', async (req, res) => {
 // ——— Teachers ———
 router.get('/teachers', async (req, res) => {
   try {
-    const filter = { role: 'teacher', ...schoolFilter(req) };
+    const filter = { role: 'teacher', ...schoolFilter(req), ...campusFilter(req) };
     const teachers = await User.find(filter).sort({ name: 1 });
     const schoolId = resolveSchoolId(req);
     const { start, end } = dayBounds();
@@ -3610,6 +3718,7 @@ router.post('/teachers', async (req, res) => {
       phone: phone || '',
       role: 'teacher',
       schoolId,
+      campusId: await validCampusId(schoolId, req.body.campusId),
       photoUrl: req.body.photoUrl || '',
       photoPublicId: req.body.photoPublicId || '',
       gender: allowedGender.includes(gender) ? gender : '',
@@ -3656,6 +3765,9 @@ router.put('/teachers/:id', async (req, res) => {
     if (req.body.employeeId !== undefined) updates.employeeId = String(req.body.employeeId || '').trim();
     if (req.body.jobTitle !== undefined) updates.jobTitle = String(req.body.jobTitle || '').trim();
     if (req.body.idNumber !== undefined) updates.idNumber = String(req.body.idNumber || '').trim();
+    if (req.body.campusId !== undefined) {
+      updates.campusId = await validCampusId(existing.schoolId, req.body.campusId);
+    }
     const teacher = await User.findByIdAndUpdate(req.params.id, updates, { new: true });
     res.json({ teacher: teacher.toSafeJSON() });
   } catch (err) {
@@ -3676,9 +3788,10 @@ router.delete('/teachers/:id', async (req, res) => {
 // ——— Kids ———
 router.get('/kids', async (req, res) => {
   try {
-    const filter = schoolFilter(req);
+    const filter = { ...schoolFilter(req), ...campusFilter(req) };
     const kids = await Kid.find(filter)
       .populate('schoolId', 'name')
+      .populate('campusId', 'name')
       .populate('routeId', 'name')
       .populate('homeStopId', 'name location address')
       .populate('parentIds', 'name email phone')
@@ -3740,6 +3853,7 @@ router.get('/kids/:id', async (req, res) => {
     }
     const kid = await Kid.findById(req.params.id)
       .populate('schoolId', 'name address')
+      .populate('campusId', 'name')
       .populate('routeId', 'name')
       .populate('homeStopId', 'name address location type')
       .populate('parentIds', 'name email phone photoUrl');
@@ -4093,6 +4207,7 @@ router.post('/kids/onboard', async (req, res) => {
       gender: allowedGender.includes(gender) ? gender : '',
       dateOfBirth: dateOfBirth || null,
       schoolId,
+      campusId: await validCampusId(schoolId, req.body.campusId),
       routeId: route._id,
       homeStopId: stop._id,
       parentIds: linkedParentIds,
@@ -4239,6 +4354,9 @@ router.put('/kids/:id', async (req, res) => {
     delete updates.boarding;
     delete updates.routeName;
     delete updates.parent;
+    if (updates.campusId !== undefined) {
+      updates.campusId = await validCampusId(existing.schoolId, updates.campusId);
+    }
     if (updates.dateOfBirth === '') updates.dateOfBirth = null;
     if (updates.gender != null && !['', 'male', 'female', 'other'].includes(updates.gender)) {
       delete updates.gender;
@@ -4494,12 +4612,22 @@ router.post('/announcements', async (req, res) => {
       attachmentPublicId: attachmentPublicId || '',
       publishedAt: new Date(),
     });
-    const teachers = await User.find({ schoolId, role: 'teacher', active: true }).select('_id');
-    if (teachers.length) {
+    const [teachers, parents, kidRows] = await Promise.all([
+      User.find({ schoolId, role: 'teacher', active: { $ne: false } }).select('_id'),
+      User.find({ schoolId, role: 'parent', active: { $ne: false } }).select('_id'),
+      Kid.find({ schoolId, active: { $ne: false } }).select('parentIds'),
+    ]);
+    const recipientIds = new Set();
+    for (const u of teachers) recipientIds.add(String(u._id));
+    for (const u of parents) recipientIds.add(String(u._id));
+    for (const kid of kidRows) {
+      for (const id of kid.parentIds || []) recipientIds.add(String(id));
+    }
+    if (recipientIds.size) {
       await createAndEmitNotifications(
         getIO(),
-        teachers.map((t) => ({
-          userId: t._id,
+        [...recipientIds].map((userId) => ({
+          userId,
           type: NOTIFICATION_TYPES.ANNOUNCEMENT,
           key: `announcement:${announcement._id}`,
           title: announcement.title,

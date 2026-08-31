@@ -7,16 +7,17 @@ import { useTripTab } from '../lib/tripTabs';
 
 const navItems = [
   { to: '/school-admin', label: 'Dashboard', end: true, icon: 'dashboard' },
+  { to: '/school-admin/live-tracking', label: 'Live Tracking', icon: 'live' },
+  { to: '/school-admin/campuses', label: 'Campuses', icon: 'campuses' },
+  { to: '/school-admin/teachers', label: 'Teachers', icon: 'teachers' },
   { to: '/school-admin/classes', label: 'Classes', icon: 'classes' },
+  { to: '/school-admin/stops', label: 'Stops', icon: 'stops' },
+  { to: '/school-admin/routes', label: 'Routes', icon: 'routes' },
+  { to: '/school-admin/parents', label: 'Parents', icon: 'parents' },
   { to: '/school-admin/students', label: 'Students', icon: 'students' },
   { to: '/school-admin/buses', label: 'Buses / Vehicles', icon: 'buses' },
   { to: '/school-admin/drivers', label: 'Drivers', icon: 'drivers' },
-  { to: '/school-admin/teachers', label: 'Teachers', icon: 'teachers' },
-  { to: '/school-admin/routes', label: 'Routes', icon: 'routes' },
-  { to: '/school-admin/stops', label: 'Stops', icon: 'stops' },
   { to: '/school-admin/trip-instances', label: 'Trips', icon: 'trips' },
-  { to: '/school-admin/live-tracking', label: 'Live Tracking', icon: 'live' },
-  { to: '/school-admin/parents', label: 'Parents', icon: 'parents' },
   { to: '/school-admin/attendance', label: 'Attendance', icon: 'attendance' },
   { to: '/school-admin/reports', label: 'Reports & Analytics', icon: 'reports' },
   { to: '/school-admin/notifications', label: 'Notifications', icon: 'bell', badge: 'unread' },
@@ -46,6 +47,7 @@ const pageMeta = {
   '/school-admin/stops': { title: 'Stops', crumbs: ['Dashboard', 'Stops'] },
   '/school-admin/trip-instances': { title: 'Trips', crumbs: ['Dashboard', 'Trips'] },
   '/school-admin/live-tracking': { title: 'Live Tracking', crumbs: ['Dashboard', 'Live Tracking'] },
+  '/school-admin/campuses': { title: 'Campuses', crumbs: ['Dashboard', 'Campuses'] },
   '/school-admin/reports': { title: 'Reports & Analytics', crumbs: ['Dashboard', 'Reports & Analytics'] },
   '/school-admin/calendar': { title: 'Calendar', crumbs: ['Dashboard', 'Calendar'] },
   '/school-admin/notifications': { title: 'Notifications', crumbs: ['Dashboard', 'Notifications'] },
@@ -177,6 +179,14 @@ function NavIcon({ name }) {
           <path d="M2 12a10 10 0 0 1 20 0" />
         </svg>
       );
+    case 'campuses':
+      return (
+        <svg {...common}>
+          <path d="M3 21h18" />
+          <path d="M6 21V8l6-4 6 4v13" />
+          <path d="M10 21v-6h4v6" />
+        </svg>
+      );
     case 'attendance':
     case 'leave':
       return (
@@ -251,6 +261,8 @@ export default function SchoolAdminLayout() {
   const [unread, setUnread] = useState(0);
   const [incidentCount, setIncidentCount] = useState(0);
   const [messageCount, setMessageCount] = useState(0);
+  const [campuses, setCampuses] = useState([]);
+  const [campusFilter, setCampusFilter] = useState('');
   const searchRef = useRef(null);
 
   useEffect(() => {
@@ -291,6 +303,9 @@ export default function SchoolAdminLayout() {
         setIncidentCount(Number(d.incidents) || 0);
         setMessageCount(Number(d.messages) || 0);
       })
+      .catch(() => {});
+    api('/admin/campuses')
+      .then((d) => setCampuses(d.campuses || []))
       .catch(() => {});
   }, [location.pathname]);
 
@@ -623,6 +638,17 @@ export default function SchoolAdminLayout() {
             </div>
           </div>
 
+          {campuses.length > 1 && (
+            <label className="sa-campus-switch">
+              <span>Campus</span>
+              <select value={campusFilter} onChange={(e) => setCampusFilter(e.target.value)} aria-label="Filter by campus">
+                <option value="">All campuses</option>
+                {campuses.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </label>
+          )}
           <form className="sa-search" onSubmit={onSearch}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
               <circle cx="11" cy="11" r="7" />
@@ -688,7 +714,7 @@ export default function SchoolAdminLayout() {
         </header>
 
         <div className={`sa-content${isLiveMap ? ' sa-content--map' : ''}`}>
-          <Outlet context={{ globalSearch: search, schoolName }} />
+          <Outlet context={{ globalSearch: search, schoolName, campuses, campusFilter }} />
         </div>
       </div>
 

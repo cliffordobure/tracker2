@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 
@@ -11,9 +12,10 @@ const empty = {
 
 export default function TeacherNotes() {
   const { showToast } = useAuth();
+  const [params] = useSearchParams();
   const [kids, setKids] = useState([]);
   const [notes, setNotes] = useState([]);
-  const [form, setForm] = useState(empty);
+  const [form, setForm] = useState({ ...empty, kidId: params.get('kidId') || '' });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -21,7 +23,7 @@ export default function TeacherNotes() {
     const [k, n] = await Promise.all([api('/teacher/kids'), api('/teacher/notes')]);
     setKids(k.kids || []);
     setNotes(n.notes || []);
-    setForm((f) => ({ ...f, kidId: f.kidId || k.kids?.[0]?._id || '' }));
+    setForm((f) => ({ ...f, kidId: f.kidId || params.get('kidId') || k.kids?.[0]?._id || '' }));
   };
 
   useEffect(() => {
@@ -51,7 +53,7 @@ export default function TeacherNotes() {
           <h2>Update a parent</h2>
           <p className="tw-lede">
             Send a note about a student — behaviour, classwork, health, or anything the guardian
-            should know. It appears in the parent app alerts.
+            should know. For two-way chat, use <Link to="/teacher/messages">Messages</Link>.
           </p>
         </div>
         {error && <div className="tw-alert">{error}</div>}

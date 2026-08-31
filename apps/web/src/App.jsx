@@ -4,6 +4,7 @@ import Layout from './components/Layout';
 import SchoolAdminLayout from './components/SchoolAdminLayout';
 import SuperAdminLayout from './components/SuperAdminLayout';
 import Login from './pages/Login';
+import Landing from './pages/Landing';
 import SuperDashboard from './pages/super/SuperDashboard';
 import SuperSchools from './pages/super/SuperSchools';
 import SuperAdmins from './pages/super/SuperAdmins';
@@ -42,6 +43,7 @@ import Incidents from './pages/admin/Incidents';
 import Messages from './pages/admin/Messages';
 import UsersRoles from './pages/admin/UsersRoles';
 import SchoolSettings from './pages/admin/SchoolSettings';
+import Campuses from './pages/admin/Campuses';
 import LeaveRequests from './pages/admin/LeaveRequests';
 import Noticeboard from './pages/admin/Noticeboard';
 import Classes from './pages/admin/Classes';
@@ -59,6 +61,15 @@ import TeacherAssignments from './pages/teacher/TeacherAssignments';
 import TeacherNotes from './pages/teacher/TeacherNotes';
 import TeacherStudents from './pages/teacher/TeacherStudents';
 import TeacherDiary from './pages/teacher/TeacherDiary';
+import TeacherAnnouncements from './pages/teacher/TeacherAnnouncements';
+import TeacherMessages from './pages/teacher/TeacherMessages';
+import TeacherNotifications from './pages/teacher/TeacherNotifications';
+import TeacherStudentProfile from './pages/teacher/TeacherStudentProfile';
+import TeacherClass from './pages/teacher/TeacherClass';
+import TeacherResources from './pages/teacher/TeacherResources';
+import TeacherTimetable from './pages/teacher/TeacherTimetable';
+import TeacherReports from './pages/teacher/TeacherReports';
+import TeacherProfile from './pages/teacher/TeacherProfile';
 import { homePathForRole } from './lib/roles';
 import './school-admin.css';
 
@@ -77,7 +88,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
-      <Route path="/" element={<HomeRedirect />} />
+      <Route path="/" element={<Landing />} />
 
       <Route path="/admin/*" element={<LegacyAdminRedirect />} />
 
@@ -117,6 +128,7 @@ export default function App() {
       >
         <Route index element={<SchoolDashboard />} />
         <Route path="school" element={<SchoolSettings />} />
+        <Route path="campuses" element={<Campuses />} />
         <Route path="buses" element={<Buses />} />
         <Route path="buses/:id" element={<VehicleDetails />} />
         <Route path="routes" element={<RoutesPage />} />
@@ -185,9 +197,19 @@ export default function App() {
         <Route path="assignments" element={<TeacherAssignments />} />
         <Route path="notes" element={<TeacherNotes />} />
         <Route path="students" element={<TeacherStudents />} />
+        <Route path="students/:id" element={<TeacherStudentProfile />} />
+        <Route path="class" element={<TeacherClass />} />
+        <Route path="resources" element={<TeacherResources />} />
+        <Route path="announcements" element={<TeacherAnnouncements />} />
+        <Route path="noticeboard" element={<Navigate to="/teacher/announcements" replace />} />
+        <Route path="messages" element={<TeacherMessages />} />
+        <Route path="messages/:id" element={<TeacherMessages />} />
+        <Route path="notifications" element={<TeacherNotifications />} />
+        <Route path="timetable" element={<TeacherTimetable />} />
+        <Route path="reports" element={<TeacherReports />} />
+        <Route path="profile" element={<TeacherProfile />} />
         <Route path="live" element={<Navigate to="/teacher" replace />} />
         <Route path="trips" element={<Navigate to="/teacher" replace />} />
-        <Route path="noticeboard" element={<Navigate to="/teacher" replace />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />
@@ -195,12 +217,6 @@ export default function App() {
   );
 }
 
-function HomeRedirect() {
-  const { user, loading } = useAuth();
-  if (loading) return <div className="loading-screen">Loading…</div>;
-  if (!user) return <Navigate to="/login" replace />;
-  return <Navigate to={homePathForRole(user.role)} replace />;
-}
 
 function LegacyAdminRedirect() {
   const { user, loading } = useAuth();

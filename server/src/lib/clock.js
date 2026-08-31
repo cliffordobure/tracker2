@@ -72,3 +72,47 @@ export function calendarGroup(value) {
   if (that === yest) return 'yesterday';
   return 'earlier';
 }
+
+/** Offset of APP_TZ at `date`, in ms (Nairobi is always +3h). */
+function offsetMsAt(date) {
+  const list = parts(date, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  });
+  if (!list) return 0;
+  const asIfUtc = Date.UTC(
+    Number(part(list, 'year')),
+    Number(part(list, 'month')) - 1,
+    Number(part(list, 'day')),
+    Number(part(list, 'hour')),
+    Number(part(list, 'minute')),
+    Number(part(list, 'second'))
+  );
+  return asIfUtc - date.getTime();
+}
+
+/**
+ * Build a Date for a school-local wall clock (YYYY-MM-DD + HH:mm),
+ * independent of whether the host is UTC (Render) or not.
+ */
+export function fromAppZonedDateTime(ymd, hour = 0, minute = 0, second = 0) {
+  const match = String(ymd || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const y = Number(match[1]);
+  const mo = Number(match[2]);
+  const d = Number(match[3]);
+  const hh = Number.isFinite(Number(hour)) ? Number(hour) : 0;
+  const mm = Number.isFinite(Number(minute)) ? Number(minute) : 0;
+  const ss = Number.isFinite(Number(second)) ? Number(second) : 0;
+  let utcMs = Date.UTC(y, mo - 1, d, hh, mm, ss);
+  for (let i = 0; i < 2; i += 1) {
+    const offset = offsetMsAt(new Date(utcMs));
+    utcMs = Date.UTC(y, mo - 1, d, hh, mm, ss) - offset;
+  }
+  return new Date(utcMs);
+}

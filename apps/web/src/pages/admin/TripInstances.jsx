@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useOutletContext } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { TRIP_TABS, useTripTab, writeTripTab } from '../../lib/tripTabs';
+import { fmtSchoolDate, fmtSchoolTime, tripStartLabel } from '../../lib/schoolTime';
 import MapView from '../../components/MapView';
 import TripScheduling from './TripScheduling';
 import TripOutings from './TripOutings';
@@ -50,26 +51,11 @@ function initials(name = '') {
 }
 
 function fmtDate(value) {
-  if (!value) return '';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  return fmtSchoolDate(value);
 }
 
 function fmtTime(value) {
-  if (!value) return '';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-}
-
-function fmtClock(hhmm) {
-  if (!hhmm) return '';
-  const [h, m] = String(hhmm).split(':').map(Number);
-  if (!Number.isFinite(h)) return String(hhmm);
-  const d = new Date();
-  d.setHours(h, Number.isFinite(m) ? m : 0, 0, 0);
-  return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  return fmtSchoolTime(value);
 }
 
 function tripId(t) {
@@ -95,7 +81,7 @@ function busOf(t) {
 }
 
 function startTime(t) {
-  return fmtTime(t.startedAt || t.scheduledFor) || fmtClock(t.scheduleId?.scheduledTime);
+  return tripStartLabel(t);
 }
 
 function statusMeta(status) {
@@ -329,10 +315,12 @@ export default function TripInstances() {
           return hay.includes(needle);
         });
     return [...list].sort((a, b) => {
-      const at = new Date(a.serviceDate || a.scheduledFor || a.createdAt || 0) - new Date(b.serviceDate || b.scheduledFor || b.createdAt || 0);
+      const created = new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+      if (created !== 0) return created;
+      const at = new Date(b.serviceDate || b.scheduledFor || 0) - new Date(a.serviceDate || a.scheduledFor || 0);
       if (at !== 0) return at;
-      return String(a.scheduledTime || '').localeCompare(String(b.scheduledTime || ''))
-        || String(a.tripCode || '').localeCompare(String(b.tripCode || ''));
+      return String(b.scheduledTime || '').localeCompare(String(a.scheduledTime || ''))
+        || String(b.tripCode || '').localeCompare(String(a.tripCode || ''));
     });
   }, [trips, q]);
 
@@ -396,12 +384,30 @@ export default function TripInstances() {
     }
   };
 
+  const deleteTrip = async (t) => {
+    if (!confirm(`Delete ${tripCodeOf(t)}? This cannot be undone.`)) return;
+    setError('');
+    try {
+      await api(`/admin/trip-instances/${tripId(t)}`, { method: 'DELETE' });
+      setInfo('Trip deleted.');
+      if (detail && tripId(detail) === tripId(t)) setDetail(null);
+      setSelected((prev) => {
+        const next = new Set(prev);
+        next.delete(tripId(t));
+        return next;
+      });
+      await load();
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
   const openEdit = (t) => {
     setEditing(t);
     setEditForm({
       busId: busOf(t)?._id || t.busId || '',
       driverId: driverOf(t)?._id || driverOf(t)?.id || t.driverId || '',
-      scheduledTime: t.scheduleId?.scheduledTime || '06:30',
+      scheduledTime: t.scheduledTime || t.scheduleId?.scheduledTime || '06:30',
     });
     setPanel('edit');
   };
@@ -800,17 +806,25 @@ export default function TripInstances() {
                       <td>
                         <strong>{t.studentCount ?? (t.kidIds || []).length}</strong>
                       </td>
-                      <td>
-                        <div className="sa-stu-actions sa-bus-actions">
-                          <button
-                            type="button"
-                            className="sa-icon-ghost"
-                            aria-label="More"
-                            onClick={() => setMenuId((cur) => (cur === id ? '' : id))}
-                          >
-                            <ActionGlyph name="more" />
+                      <td className="sa-trips-sched-actions">
+                        {t.status === 'scheduled' ? (
+                          <button type="button" className="sa-text-link" onClick={() => openEdit(t)}>
+                            Edit
                           </button>
-                        </div>
+                        ) : null}
+                        {t.status === 'scheduled' || t.status === 'cancelled' ? (
+                          <button type="button" className="sa-text-link is-danger" onClick={() => deleteTrip(t)}>
+                            Delete
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="sa-icon-ghost"
+                          aria-label="More"
+                          onClick={() => setMenuId((cur) => (cur === id ? '' : id))}
+                        >
+                          <ActionGlyph name="more" />
+                        </button>
                       </td>
                     </tr>
                   );
@@ -1009,6 +1023,9 @@ export default function TripInstances() {
               )}
               {detailTrip.status === 'scheduled' ? (
                 <button type="button" className="sa-btn sa-btn-primary" onClick={() => { setDetail(null); openEdit(detailTrip); }}>Edit trip</button>
+              ) : null}
+              {detailTrip.status === 'scheduled' || detailTrip.status === 'cancelled' ? (
+                <button type="button" className="sa-btn sa-btn-outline" onClick={() => { setDetail(null); deleteTrip(detailTrip); }}>Delete</button>
               ) : (
                 <button type="button" className="sa-btn sa-btn-outline" onClick={() => setDetail(null)}>Close</button>
               )}
@@ -1053,6 +1070,12 @@ export default function TripInstances() {
                 <button type="button" className="is-danger" onClick={() => { setMenuId(''); cancelTrip(menuTrip); }}>
                   <i aria-hidden="true"><TripKpiGlyph name="x" /></i>
                   <span><strong>Cancel trip</strong><em>Stop this instance from running</em></span>
+                </button>
+              ) : null}
+              {menuTrip.status === 'scheduled' || menuTrip.status === 'cancelled' ? (
+                <button type="button" className="is-danger" onClick={() => { setMenuId(''); deleteTrip(menuTrip); }}>
+                  <i aria-hidden="true"><TripKpiGlyph name="x" /></i>
+                  <span><strong>Delete trip</strong><em>Remove this trip from the list</em></span>
                 </button>
               ) : null}
             </div>

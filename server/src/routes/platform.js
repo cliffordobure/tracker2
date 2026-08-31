@@ -4,6 +4,7 @@ import mongoose from 'mongoose';
 import {
   User,
   School,
+  Campus,
   Route,
   Bus,
   Trip,
@@ -388,6 +389,15 @@ router.post('/schools', async (req, res) => {
       supportEmail: String(req.body.supportEmail || '').trim(),
       supportPhone: String(req.body.supportPhone || '').trim(),
     });
+    await Campus.create({
+      schoolId: school._id,
+      name: 'Main Campus',
+      address: school.address || '',
+      phone: school.supportPhone || '',
+      location: school.location || { lat: null, lng: null },
+      isDefault: true,
+      active: true,
+    });
 
     let schoolAdmin = null;
     try {
@@ -405,6 +415,7 @@ router.post('/schools', async (req, res) => {
         schoolAdmin = created.toSafeJSON();
       }
     } catch (err) {
+      await Campus.deleteMany({ schoolId: school._id });
       await School.findByIdAndDelete(school._id);
       throw err;
     }

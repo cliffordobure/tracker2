@@ -33,6 +33,23 @@ function parentId(p) {
   return p.id || p._id;
 }
 
+function splitNames(value) {
+  return [...new Set(String(value || '').split(',').map((s) => s.trim()).filter(Boolean))];
+}
+
+function MultiCell({ value }) {
+  const items = splitNames(value);
+  if (!items.length) return '—';
+  if (items.length === 1) return items[0];
+  return (
+    <div className="sa-par-kids">
+      {items.map((item) => (
+        <span key={item}>{item}</span>
+      ))}
+    </div>
+  );
+}
+
 function FieldIcon({ name }) {
   const p = { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' };
   if (name === 'mail') return <svg {...p}><rect x="3.5" y="5.5" width="17" height="13" rx="2" /><path d="m4 7 8 6 8-6" /></svg>;
@@ -82,7 +99,11 @@ export default function Parents() {
       if (statusFilter === 'unlinked' && (p.children || []).length) return false;
       if (!needle) return true;
       const kids = (p.children || []).map((c) => c.name).join(' ');
-      return [p.name, p.email, p.phone, kids].filter(Boolean).join(' ').toLowerCase().includes(needle);
+      return [p.name, p.email, p.phone, kids, p.routeName, p.stopName, p.driverName]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+        .includes(needle);
     });
   }, [parents, q, statusFilter]);
 
@@ -219,6 +240,9 @@ export default function Parents() {
               <tr>
                 <th>Parent</th>
                 <th>Students</th>
+                <th>Route</th>
+                <th>Stop</th>
+                <th>Driver</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
@@ -255,6 +279,9 @@ export default function Parents() {
                         '—'
                       )}
                     </td>
+                    <td><MultiCell value={p.routeName} /></td>
+                    <td><MultiCell value={p.stopName} /></td>
+                    <td><MultiCell value={p.driverName} /></td>
                     <td>
                       <span className={`sa-stu-status is-${p.active === false ? 'inactive' : 'active'}`}>
                         {p.active === false ? 'Inactive' : 'Active'}

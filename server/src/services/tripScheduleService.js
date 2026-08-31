@@ -7,6 +7,7 @@ import {
 import { notifyTripAssigned } from './notifications.js';
 import { getIO } from '../socket.js';
 import { EDIT_SCOPES } from '@school-tracker/shared';
+import { fromAppZonedDateTime } from '../lib/clock.js';
 
 function parseDateInput(dateInput) {
   if (dateInput == null || dateInput === '') return new Date();
@@ -38,13 +39,21 @@ export function dateKey(d) {
   return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
 }
 
-/** Combine serviceDate + HH:mm into a local Date for scheduledFor. */
+export function normalizeClock(value, fallback = '06:30') {
+  const [hh, mm] = String(value || fallback).split(':').map(Number);
+  if (!Number.isFinite(hh)) return fallback;
+  return `${String(hh).padStart(2, '0')}:${String(Number.isFinite(mm) ? mm : 0).padStart(2, '0')}`;
+}
+
+/** Combine serviceDate + HH:mm into a Kenya-time instant for scheduledFor. */
 export function scheduledForFrom(serviceDate, scheduledTime = '06:30') {
-  const d = startOfDay(serviceDate);
-  if (Number.isNaN(d.getTime())) return null;
-  const [hh, mm] = String(scheduledTime || '06:30').split(':').map(Number);
-  d.setHours(Number.isFinite(hh) ? hh : 6, Number.isFinite(mm) ? mm : 30, 0, 0);
-  return Number.isNaN(d.getTime()) ? null : d;
+  const ymd =
+    typeof serviceDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(serviceDate)
+      ? serviceDate
+      : dateKey(serviceDate);
+  const clock = normalizeClock(scheduledTime);
+  const [hh, mm] = clock.split(':').map(Number);
+  return fromAppZonedDateTime(ymd, hh, mm);
 }
 
 function matchesScheduleDay(schedule, date) {
@@ -170,6 +179,7 @@ function instancePayload(schedule, serviceDate, exception) {
     direction: schedule.direction,
     period: schedule.period,
     serviceDate: startOfDay(serviceDate),
+    scheduledTime: normalizeClock(time),
     scheduledFor: scheduledForFrom(serviceDate, time),
     kidIds,
     sequence: 1,
@@ -360,10 +370,8 @@ export async function applyScheduleEdit(scheduleId, body = {}) {
         trip.busId = nextBus;
         trip.driverId = nextDriver;
         if (exception.kidIds?.length) trip.kidIds = exception.kidIds;
-        trip.scheduledFor = scheduledForFrom(
-          serviceDate,
-          exception.scheduledTime || schedule.scheduledTime
-        );
+        trip.scheduledTime = normalizeClock(exception.scheduledTime || schedule.scheduledTime);
+        trip.scheduledFor = scheduledForFrom(serviceDate, trip.scheduledTime);
         await trip.save();
         updated.push(trip);
       }
@@ -422,7 +430,8 @@ export async function applyScheduleEdit(scheduleId, body = {}) {
     trip.direction = schedule.direction;
     trip.period = schedule.period;
     trip.kidIds = schedule.kidIds || [];
-    trip.scheduledFor = scheduledForFrom(trip.serviceDate, schedule.scheduledTime);
+    trip.scheduledTime = normalizeClock(schedule.scheduledTime);
+    trip.scheduledFor = scheduledForFrom(trip.serviceDate, trip.scheduledTime);
     await trip.save();
     updated.push(trip);
   }

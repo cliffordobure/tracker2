@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 const busSchema = new mongoose.Schema(
   {
     schoolId: { type: mongoose.Schema.Types.ObjectId, ref: 'School', required: true },
+    campusId: { type: mongoose.Schema.Types.ObjectId, ref: 'Campus', default: null },
     plate: { type: String, required: true, trim: true },
     label: { type: String, default: '', trim: true },
     model: { type: String, default: '', trim: true },

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
+import { fmtSchoolDate, fmtSchoolTime, tripStartLabel } from '../../lib/schoolTime';
 
 const TABS = [
   { id: 'overview', label: 'Overview' },
@@ -28,17 +29,11 @@ function initials(name = '') {
 }
 
 function fmtDate(value) {
-  if (!value) return '';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  return fmtSchoolDate(value);
 }
 
 function fmtTime(value) {
-  if (!value) return '';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  return fmtSchoolTime(value);
 }
 
 function genderLabel(value) {
@@ -191,6 +186,9 @@ export default function DriverDetails() {
             </button>
             {menuOpen && (
               <div className="sa-stu-menu sa-sd-menu">
+                <button type="button" onClick={() => navigate(`/school-admin/live-tracking?driver=${driver.id}`)}>
+                  Live map
+                </button>
                 <button type="button" onClick={() => setActive(driver.active === false)}>
                   {driver.active === false ? 'Activate' : 'Deactivate'}
                 </button>
@@ -520,6 +518,7 @@ export default function DriverDetails() {
               <h3>Quick Actions</h3>
               <div className="sa-sd-quick">
                 <Link to={`/school-admin/drivers?edit=${driver.id}`}>Edit Driver Profile</Link>
+                <Link to={`/school-admin/live-tracking?driver=${driver.id}`}>Live map</Link>
                 <Link to={`/school-admin/drivers?edit=${driver.id}`}>Assign / Change Vehicle</Link>
                 <Link to="/school-admin/trip-instances">View Trips</Link>
                 <button type="button" onClick={() => setTab('schedule')}>View Schedule</button>
@@ -546,7 +545,7 @@ export default function DriverDetails() {
                     <li key={t.id}>
                       <div>
                         <strong>
-                          {fmtTime(t.scheduledFor || t.startedAt) || periodLabel(t.period) || 'Trip'}
+                          {tripStartLabel(t) || periodLabel(t.period) || 'Trip'}
                           {t.endedAt ? ` – ${fmtTime(t.endedAt)}` : ''}
                         </strong>
                         <span>

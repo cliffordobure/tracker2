@@ -234,6 +234,12 @@
   font-size: 1.05rem;
 }
 
+.tw-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
 .tw-metrics.tw-metrics-4 {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
@@ -602,13 +608,240 @@
   box-shadow: inset 0 0 0 1.5px var(--tw-accent);
 }
 
+.tw-nav-label {
+  margin: 0.7rem 0.4rem 0.15rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--tw-muted);
+}
+
+.tw-topbar-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.tw-bell {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--tw-line);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--tw-ink);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.tw-bell em {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #e11d48;
+  color: #fff;
+  font-size: 0.62rem;
+  font-style: normal;
+  font-weight: 800;
+  display: grid;
+  place-items: center;
+}
+
+.tw-user-link {
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+  width: 100%;
+}
+
+.tw-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.tw-tab {
+  border: 1px solid var(--tw-line);
+  background: #fff;
+  color: var(--tw-muted);
+  border-radius: 999px;
+  padding: 0.4rem 0.75rem;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tw-tab.is-on {
+  background: var(--tw-mint);
+  color: var(--tw-accent-deep);
+  border-color: transparent;
+}
+
+.tw-tab small {
+  margin-left: 0.35rem;
+}
+
+.tw-check {
+  display: flex !important;
+  align-items: center;
+  gap: 0.45rem;
+  font-weight: 650;
+  color: var(--tw-muted);
+}
+
+.tw-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.tw-row-between {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.tw-note-btn {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  display: flex;
+  gap: 0.7rem;
+  align-items: flex-start;
+  cursor: pointer;
+  padding: 0.15rem 0;
+  color: inherit;
+  font: inherit;
+}
+
+.tw-note-btn.is-on {
+  color: var(--tw-accent-deep);
+}
+
+.tw-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 0.45rem;
+  border-radius: 999px;
+  background: #d1d5db;
+  flex: none;
+}
+
+.tw-dot.is-on {
+  background: var(--tw-accent);
+}
+
+.tw-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--tw-accent);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 800;
+  display: grid;
+  place-items: center;
+}
+
+.tw-profile-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+}
+
+.tw-msg {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 1rem;
+  min-height: 62vh;
+}
+
+.tw-msg-list,
+.tw-msg-thread {
+  background: #fff;
+  border: 1px solid var(--tw-line);
+  border-radius: 18px;
+  padding: 1rem;
+}
+
+.tw-msg-list {
+  display: grid;
+  gap: 0.7rem;
+  align-content: start;
+}
+
+.tw-msg-thread {
+  display: flex;
+  flex-direction: column;
+  min-height: 62vh;
+}
+
+.tw-chat {
+  flex: 1;
+  display: grid;
+  align-content: start;
+  gap: 0.55rem;
+  overflow: auto;
+  padding: 0.4rem 0 0.8rem;
+}
+
+.tw-bubble {
+  max-width: 78%;
+  background: #f3f6f5;
+  border-radius: 14px;
+  padding: 0.55rem 0.75rem;
+}
+
+.tw-bubble.is-mine {
+  margin-left: auto;
+  background: var(--tw-mint);
+}
+
+.tw-bubble p {
+  margin: 0;
+}
+
+.tw-bubble small {
+  color: var(--tw-muted);
+}
+
+.tw-chat-form {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.tw-chat-form input {
+  flex: 1;
+}
+
+.tw-timetable th,
+.tw-timetable td {
+  min-width: 110px;
+}
+
 @media (max-width: 1100px) {
   .tw-metrics,
   .tw-actions {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .tw-grid,
-  .tw-split {
+  .tw-split,
+  .tw-msg {
     grid-template-columns: 1fr;
   }
 }
