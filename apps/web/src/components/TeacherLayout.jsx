@@ -26,7 +26,7 @@ const extraNav = [
 const titles = [
   ['/teacher/students/', 'Student profile'],
   ['/teacher/register', 'Class register'],
-  ['/teacher/diary', 'Class diary'],
+  ['/teacher/diary', 'Diary'],
   ['/teacher/assignments', 'Work'],
   ['/teacher/notes', 'Parent notes'],
   ['/teacher/students', 'Students'],

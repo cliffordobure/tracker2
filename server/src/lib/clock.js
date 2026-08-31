@@ -37,6 +37,15 @@ export function formatDateKey(value) {
   return `${part(list, 'year')}-${part(list, 'month')}-${part(list, 'day')}`;
 }
 
+export function formatDateTime(value) {
+  const date = formatDateLabel(value);
+  const time = formatClock(value);
+  if (!date && !time) return '';
+  if (!date) return time;
+  if (!time) return date;
+  return `${date}, ${time}`;
+}
+
 export function formatDateLabel(value) {
   const d = asDate(value);
   if (!d) return '';

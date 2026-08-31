@@ -23,13 +23,13 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 import { createAndEmitNotifications, NOTIFICATION_TYPES } from '../services/notifications.js';
 import { getIO } from '../socket.js';
 import { formatClock } from '../lib/clock.js';
+import { DIARY_LABELS, diaryTypeMeta, diaryNotifyCopy, diaryCalendarDate, diaryCalendarRange } from '../lib/diary.js';
 
 const router = Router();
 router.use(authenticate, requireRole('teacher'));
 
 const ATTENDANCE_STATUSES = ['present', 'absent', 'late', 'excused'];
 const NOTE_CATEGORIES = ['general', 'academic', 'behaviour', 'health', 'urgent'];
-const DIARY_LABELS = ['general', 'class', 'activity', 'meal', 'academic', 'health', 'lesson', 'behaviour'];
 const MAX_DIARY_MEDIA = 8;
 const MAX_ASSIGNMENT_MEDIA = 8;
 
@@ -1878,9 +1878,22 @@ function applyDiaryFields(entry, body) {
   if (body.title !== undefined) entry.title = String(body.title || '').trim().slice(0, 160);
   if (body.body !== undefined) entry.body = String(body.body || '').trim().slice(0, 4000);
   if (DIARY_LABELS.includes(body.label)) entry.label = body.label;
+  if (body.topic !== undefined) entry.topic = String(body.topic || '').trim().slice(0, 160);
+  if (body.lessonSummary !== undefined) entry.lessonSummary = String(body.lessonSummary || '').trim().slice(0, 2000);
+  if (body.learningActivity !== undefined) entry.learningActivity = String(body.learningActivity || '').trim().slice(0, 2000);
+  if (body.teacherObservation !== undefined) {
+    entry.teacherObservation = String(body.teacherObservation || '').trim().slice(0, 2000);
+  }
+  if (body.category !== undefined) entry.category = String(body.category || '').trim().slice(0, 60);
+  if (['', 'low', 'medium', 'high'].includes(body.severity)) entry.severity = body.severity || '';
+  if (body.actionTaken !== undefined) entry.actionTaken = String(body.actionTaken || '').trim().slice(0, 400);
+  if (body.visibilityParents !== undefined) entry.visibilityParents = body.visibilityParents !== false;
+  if (body.visibilityStudents !== undefined) entry.visibilityStudents = body.visibilityStudents !== false;
+  if (body.notifyParent !== undefined) entry.notifyParent = body.notifyParent !== false;
+  if (body.classId !== undefined) entry.classId = body.classId || null;
   if (body.grade !== undefined) entry.grade = String(body.grade || '').trim();
   if (Array.isArray(body.kidIds)) entry.kidIds = body.kidIds;
-  if (body.date) entry.date = startOfDay(body.date);
+  if (body.date) entry.date = diaryCalendarDate(body.date);
   if (body.media !== undefined) entry.media = normalizeDiaryMedia(body.media);
   if (body.private !== undefined) entry.private = body.private === true;
   if (body.learningObjectives !== undefined) {
@@ -1913,24 +1926,36 @@ function applyDiaryFields(entry, body) {
       assignmentId: enabled ? prevId : null,
     };
   }
+  if (entry.label === 'homework' && !entry.homework?.enabled) {
+    entry.homework = {
+      enabled: true,
+      title: String(entry.topic || entry.title || '').trim().slice(0, 160),
+      dueDate: body.homework?.dueDate ? startOfDay(body.homework.dueDate) : entry.homework?.dueDate || null,
+      assignmentId: entry.homework?.assignmentId || null,
+    };
+  }
+  if (!String(entry.body || '').trim()) {
+    entry.body = String(entry.lessonSummary || entry.teacherObservation || entry.topic || entry.title || '')
+      .trim()
+      .slice(0, 4000);
+  }
 }
 
 async function notifyDiaryParents(entry, teacher) {
-  if (entry.private || entry.status === 'draft') return 0;
+  if (entry.private || entry.status === 'draft' || entry.notifyParent === false || entry.visibilityParents === false) {
+    return 0;
+  }
   const kids = await audienceKids(entry.schoolId, { kidIds: entry.kidIds, grade: entry.grade });
   const teacherName = teacher?.name || 'Teacher';
-  const photoNote = entry.media?.length
-    ? ` ${entry.media.length} file${entry.media.length === 1 ? '' : 's'} attached.`
-    : '';
-  const signNote = ' Please read and sign in the diary.';
   const items = [];
   for (const kid of kids) {
+    const copy = diaryNotifyCopy(entry, kid, teacherName);
     for (const parent of kid.parentIds || []) {
       items.push({
         userId: parent._id || parent,
         type: NOTIFICATION_TYPES.DIARY,
-        title: `Class diary: ${entry.title}`,
-        body: `${teacherName} posted about ${kid.name}.${photoNote}${signNote}`,
+        title: copy.title,
+        body: copy.body,
         kidId: kid._id,
       });
     }
@@ -2024,7 +2049,8 @@ router.get('/diary', async (req, res) => {
 
     const filter = { schoolId, active: true };
     if (req.query.date) {
-      filter.date = startOfDay(req.query.date);
+      const { from, to } = diaryCalendarRange(req.query.date);
+      filter.date = { $gte: from, $lte: to };
     } else {
       const { from, to } = monthRange(req.query.month);
       filter.date = { $gte: from, $lte: to };
@@ -2057,15 +2083,61 @@ router.get('/diary', async (req, res) => {
         parentName: s.parentName || 'Parent',
         signedAt: s.signedAt,
       }));
+      const meta = diaryTypeMeta(doc.label);
       return {
         ...doc,
+        type: doc.label,
+        typeLabel: meta.label,
+        typeEmoji: meta.emoji,
+        filter: meta.filter,
         photoUrl: photo?.url || media.find((m) => m?.url)?.url || '',
         comments,
         signatures,
         signatureCount: signatures.length,
+        acknowledgedCount: signatures.length,
       };
     });
-    res.json({ entries: list, dates });
+
+    let overview = null;
+    if (req.query.date) {
+      const published = list.filter((e) => e.status !== 'draft' && !e.private);
+      const audience = await audienceKids(schoolId, {
+        kidIds: published.flatMap((e) => (e.kidIds || []).map((k) => k._id || k)),
+        grade: published.find((e) => e.grade)?.grade,
+      });
+      const signedKidIds = new Set(
+        published.flatMap((e) => (e.signatures || []).map((s) => String(s.kidId))),
+      );
+      const parentIds = new Set();
+      const pendingParents = [];
+      for (const kid of audience) {
+        for (const parent of kid.parentIds || []) {
+          const id = String(parent._id || parent);
+          if (parentIds.has(id)) continue;
+          parentIds.add(id);
+          if (!signedKidIds.has(String(kid._id))) {
+            pendingParents.push({
+              parentId: id,
+              parentName: parent.name || 'Parent',
+              kidName: kid.name,
+            });
+          }
+        }
+      }
+      overview = {
+        date: req.query.date,
+        classLabel: published.find((e) => e.grade)?.grade || audience[0]?.grade || '',
+        students: audience.length,
+        lessons: published.filter((e) => ['lesson', 'class', 'academic'].includes(e.label)).length,
+        homework: published.filter((e) => e.label === 'homework' || e.homework?.enabled).length,
+        published: published.length,
+        acknowledged: signedKidIds.size,
+        pending: Math.max(0, audience.length - signedKidIds.size),
+        pendingParents: pendingParents.slice(0, 40),
+        ackRate: audience.length ? Math.round((signedKidIds.size / audience.length) * 100) : 0,
+      };
+    }
+    res.json({ entries: list, dates, overview, types: DIARY_LABELS.map((value) => diaryTypeMeta(value)) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2077,18 +2149,19 @@ router.post('/diary', async (req, res) => {
     if (!schoolId) return res.status(400).json({ error: 'No school assigned to this teacher' });
 
     const payload = req.body || {};
-    if (!payload.title?.trim()) return res.status(400).json({ error: 'title is required' });
+    if (!payload.title?.trim() && !payload.topic?.trim()) return res.status(400).json({ error: 'title is required' });
     const status = payload.status === 'draft' ? 'draft' : 'published';
-    if (status === 'published' && !payload.private && !String(payload.body || '').trim()) {
+    const description = String(payload.body || payload.lessonSummary || payload.teacherObservation || payload.topic || payload.title || '').trim();
+    if (status === 'published' && !payload.private && !description) {
       return res.status(400).json({ error: 'description is required' });
     }
 
     const entry = new DiaryEntry({
       schoolId,
       teacherId: req.user.id,
-      date: startOfDay(payload.date),
-      title: String(payload.title).trim().slice(0, 160),
-      body: String(payload.body || '').trim().slice(0, 4000),
+      date: diaryCalendarDate(payload.date),
+      title: String(payload.title || payload.topic || '').trim().slice(0, 160),
+      body: description.slice(0, 4000),
       label: DIARY_LABELS.includes(payload.label) ? payload.label : 'general',
       grade: payload.grade?.trim() || '',
       kidIds: Array.isArray(payload.kidIds) ? payload.kidIds : [],

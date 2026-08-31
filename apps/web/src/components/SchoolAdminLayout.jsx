@@ -33,6 +33,7 @@ const extraItems = [
   { to: '/school-admin/subjects', label: 'Subjects', icon: 'reports' },
   { to: '/school-admin/examinations', label: 'Examinations', icon: 'reports' },
   { to: '/school-admin/assignments', label: 'Assignments', icon: 'reports' },
+  { to: '/school-admin/diary', label: 'Diary', icon: 'reports' },
 ];
 
 const pageMeta = {
@@ -58,6 +59,7 @@ const pageMeta = {
   '/school-admin/subjects': { title: 'Subjects', crumbs: ['Dashboard', 'Subjects'] },
   '/school-admin/examinations': { title: 'Examinations', crumbs: ['Dashboard', 'Examinations'] },
   '/school-admin/assignments': { title: 'Assignments', crumbs: ['Dashboard', 'Assignments'] },
+  '/school-admin/diary': { title: 'Diary monitoring', crumbs: ['Dashboard', 'Diary'] },
   '/school-admin/attendance': { title: 'Attendance', crumbs: ['Dashboard', 'Attendance'] },
   '/school-admin/leave-requests': { title: 'Leave Requests', crumbs: ['Dashboard', 'Leave Requests'] },
   '/school-admin/noticeboard': { title: 'Noticeboard', crumbs: ['Dashboard', 'Noticeboard'] },

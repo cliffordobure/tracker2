@@ -60,6 +60,8 @@ import Attendance from './pages/admin/Attendance';
 import ComingSoon from './pages/admin/ComingSoon';
 import DriverHome from './pages/driver/DriverHome';
 import ParentHome from './pages/parent/ParentHome';
+import ParentDiary from './pages/parent/ParentDiary';
+import AdminDiary from './pages/admin/AdminDiary';
 import TeacherLayout from './components/TeacherLayout';
 import TeacherHome from './pages/teacher/TeacherHome';
 import TeacherRegister from './pages/teacher/TeacherRegister';
@@ -169,6 +171,7 @@ export default function App() {
         <Route path="subjects" element={<Subjects />} />
         <Route path="examinations" element={<Examinations />} />
         <Route path="assignments" element={<AssignmentsAdmin />} />
+        <Route path="diary" element={<AdminDiary />} />
         <Route path="attendance" element={<Attendance />} />
         <Route path="coming-soon/:feature" element={<ComingSoon />} />
         <Route path="dispatch" element={<Navigate to="/school-admin/trip-instances?tab=schedules" replace />} />
@@ -189,11 +192,12 @@ export default function App() {
         path="/parent"
         element={
           <Protected roles={['parent']}>
-            <Layout navItems={[{ to: '/parent', label: 'Family', end: true }]} title="Parent" />
+            <Layout navItems={[{ to: '/parent', label: 'Family', end: true }, { to: '/parent/diary', label: 'Diary' }]} title="Parent" />
           </Protected>
         }
       >
         <Route index element={<ParentHome />} />
+        <Route path="diary" element={<ParentDiary />} />
       </Route>
 
       <Route

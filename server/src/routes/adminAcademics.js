@@ -7,7 +7,9 @@ import {
   Assessment,
   AttendanceRecord,
   TripEvent,
+  DiaryEntry,
 } from '../models/index.js';
+import { diaryCalendarRange } from '../lib/diary.js';
 import { createAndEmitNotifications, NOTIFICATION_TYPES } from '../services/notifications.js';
 import { getIO } from '../socket.js';
 
@@ -749,6 +751,83 @@ router.post('/attendance/bulk', async (req, res) => {
     res.json({ saved });
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+router.get('/diary/monitor', async (req, res) => {
+  try {
+    const schoolId = resolveSchoolId(req);
+    if (!schoolId) return res.status(400).json({ error: 'schoolId is required' });
+    const { from: day, to } = diaryCalendarRange(req.query.date);
+
+    const [classes, teachers, entries, kids] = await Promise.all([
+      SchoolClass.find({ schoolId, active: { $ne: false } }).populate('teacherId', 'name').lean(),
+      User.find({ schoolId, role: 'teacher', active: { $ne: false } }).select('name'),
+      DiaryEntry.find({
+        schoolId,
+        active: true,
+        status: { $ne: 'draft' },
+        date: { $gte: day, $lte: to },
+      })
+        .populate('teacherId', 'name')
+        .lean(),
+      Kid.find({ schoolId, active: { $ne: false } }).select('grade parentIds'),
+    ]);
+
+    const submittedTeacherIds = new Set(entries.map((e) => String(e.teacherId?._id || e.teacherId)));
+    const byGrade = new Map();
+    for (const klass of classes) {
+      const grade = klass.grade || '';
+      const classEntries = entries.filter((e) => e.grade === grade);
+      const homework = classEntries.filter((e) => e.label === 'homework' || e.homework?.enabled);
+      byGrade.set(grade, {
+        classId: klass._id,
+        grade,
+        teacherName: klass.teacherId?.name || '',
+        entries: classEntries.length,
+        lessons: classEntries.filter((e) => ['lesson', 'class', 'academic'].includes(e.label)).length,
+        homework: homework.length,
+        submitted: classEntries.length > 0,
+      });
+    }
+
+    const missing = [...byGrade.values()]
+      .filter((row) => !row.submitted)
+      .map((row) => ({
+        grade: row.grade,
+        teacherName: row.teacherName || 'Unassigned',
+        subject: 'Diary',
+      }));
+
+    const signedKids = new Set();
+    let expected = 0;
+    for (const entry of entries) {
+      if (entry.private || entry.visibilityParents === false) continue;
+      const audience = kids.filter((k) => {
+        if (entry.kidIds?.length) return entry.kidIds.some((id) => String(id) === String(k._id));
+        if (entry.grade) return k.grade === entry.grade;
+        return true;
+      });
+      expected += audience.length;
+      for (const s of entry.parentSignatures || []) signedKids.add(`${entry._id}:${s.kidId}`);
+    }
+
+    res.json({
+      date: req.query.date || `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`,
+      classes: classes.length,
+      diaryCompletion: classes.length
+        ? Math.round((([...byGrade.values()].filter((r) => r.submitted).length) / classes.length) * 100)
+        : 0,
+      teachersSubmitted: submittedTeacherIds.size,
+      teachersTotal: teachers.length,
+      pendingEntries: missing.length,
+      homeworkPublished: entries.filter((e) => e.label === 'homework' || e.homework?.enabled).length,
+      parentAcknowledgement: expected ? Math.round((signedKids.size / expected) * 100) : 0,
+      classesToday: [...byGrade.values()],
+      missing,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

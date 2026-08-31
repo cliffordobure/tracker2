@@ -37,6 +37,7 @@ import { getVapidPublicKey } from '../services/push.js';
 import { createAndEmitNotifications, NOTIFICATION_TYPES } from '../services/notifications.js';
 import { getIO } from '../socket.js';
 import { formatClock as formatNairobiClock, formatDateKey, formatDateLabel, formatDayClock, calendarGroup, toIso } from '../lib/clock.js';
+import { diaryTypeMeta, diaryTypeLabel } from '../lib/diary.js';
 
 const router = Router();
 router.use(authenticate, requireRole('parent'));
@@ -2417,6 +2418,7 @@ function parentDiaryMatch(kids, schoolIds) {
     schoolId: { $in: schoolIds },
     active: true,
     private: { $ne: true },
+    visibilityParents: { $ne: false },
     status: { $ne: 'draft' },
     $or: [
       { kidIds: { $in: kidIds } },
@@ -2589,18 +2591,7 @@ function diaryKidCard(kid) {
 }
 
 function diaryEntryType(label) {
-  switch (String(label || '').toLowerCase()) {
-    case 'activity':
-      return 'Activity';
-    case 'meal':
-      return 'Meal';
-    case 'health':
-      return 'Health Note';
-    case 'behaviour':
-      return 'Behaviour';
-    default:
-      return 'Class Diary';
-  }
+  return diaryTypeLabel(label);
 }
 
 function diaryRatingLabel(score) {
@@ -2747,7 +2738,17 @@ function serializeParentDiary(entry, { kids = [], userId, previous = [], kidId }
     body: doc.body || '',
     date: doc.date || doc.createdAt,
     typeLabel: diaryEntryType(doc.label),
+    typeEmoji: diaryTypeMeta(doc.label).emoji,
+    filter: diaryTypeMeta(doc.label).filter,
     label: doc.label || 'class',
+    topic: doc.topic || '',
+    lessonSummary: doc.lessonSummary || '',
+    learningActivity: doc.learningActivity || '',
+    teacherObservation: doc.teacherObservation || '',
+    category: doc.category || '',
+    severity: doc.severity || '',
+    actionTaken: doc.actionTaken || '',
+    homeworkDue: doc.homework?.dueDate || null,
     teacher: {
       name: teacher.name || 'Class Teacher',
       photoUrl: teacher.photoUrl || '',
@@ -2880,20 +2881,9 @@ async function ensureParentDiarySample(parentId, kids) {
   }
 }
 
-function diaryTypeMeta(label) {
-  switch (String(label || '').toLowerCase()) {
-    case 'academic':
-    case 'class':
-    case 'lesson':
-    case 'activity':
-      return { category: 'Academic', title: 'Class Activity' };
-    case 'health':
-      return { category: 'Note', title: 'Health Note' };
-    case 'behaviour':
-      return { category: 'Note', title: 'Behaviour Note' };
-    default:
-      return { category: 'Note', title: 'Note' };
-  }
+function diaryFeedMeta(label) {
+  const meta = diaryTypeMeta(label);
+  return { category: meta.category, title: meta.label, emoji: meta.emoji, filter: meta.filter };
 }
 
 function feedChildLabel(kidIds, kids) {
@@ -3008,16 +2998,28 @@ async function buildParentDiaryFeed(kids, query = {}, userId = null) {
 
   const items = [];
   for (const e of entries) {
-    const meta = diaryTypeMeta(e.label);
+    const meta = diaryFeedMeta(e.label);
     const kidsMeta = feedChildLabel(e.kidIds, kids);
     const media = serializeDiaryAttachments(e);
     items.push({
       id: String(e._id),
       _id: e._id,
-      kind: 'academic',
+      kind: e.label === 'homework' ? 'homework' : e.label === 'achievement' ? 'achievement' : 'academic',
       category: meta.category,
-      title: e.title || meta.title,
-      body: e.body || e.title || '',
+      filter: meta.filter,
+      typeEmoji: meta.emoji,
+      typeLabel: meta.label,
+      title: e.topic || e.title || meta.title,
+      body: e.lessonSummary || e.body || e.title || '',
+      topic: e.topic || '',
+      lessonSummary: e.lessonSummary || '',
+      learningActivity: e.learningActivity || '',
+      teacherObservation: e.teacherObservation || '',
+      severity: e.severity || '',
+      actionTaken: e.actionTaken || '',
+      homeworkDue: e.homework?.dueDate || null,
+      homework: serializeDiaryHomework(e),
+      subjects: e.subjects || [],
       teacherName: e.teacherId?.name || 'Teacher',
       date: e.date || e.createdAt,
       time: formatClock(e.time || e.createdAt),
@@ -3090,7 +3092,12 @@ async function buildParentDiaryFeed(kids, query = {}, userId = null) {
 
   return items
     .filter((item) => {
-      if (category && category !== 'all' && String(item.category).toLowerCase() !== category) return false;
+      if (category && category !== 'all') {
+        const cat = category.toLowerCase();
+        const matchCat = String(item.category || '').toLowerCase() === cat;
+        const matchFilter = String(item.filter || '').toLowerCase() === cat;
+        if (!matchCat && !matchFilter) return false;
+      }
       if (q && !`${item.title} ${item.body} ${item.childLabel}`.toLowerCase().includes(q)) return false;
       return true;
     })
@@ -3377,15 +3384,18 @@ router.post('/diary/:id/sign', async (req, res) => {
       (s) => String(s.userId) === String(req.user.id) && String(s.kidId) === String(kid._id),
     );
     if (already) {
-      return res.status(400).json({ error: 'You have already signed this diary entry' });
+      return res.status(400).json({ error: 'You have already acknowledged this diary entry' });
     }
 
     const author = await User.findById(req.user.id).select('name photoUrl');
+    const ua = String(req.headers['user-agent'] || '');
+    const device = /android/i.test(ua) ? 'Android' : /iphone|ipad|ios/i.test(ua) ? 'iOS' : /mobile/i.test(ua) ? 'Mobile' : 'Web';
     entry.parentSignatures.push({
       userId: req.user.id,
       kidId: kid._id,
       parentName: author?.name || req.user.name || 'Parent',
       signedAt: new Date(),
+      device,
     });
     await entry.save();
 
@@ -3396,8 +3406,8 @@ router.post('/diary/:id/sign', async (req, res) => {
           {
             userId: teacherId,
             type: 'reminder',
-            title: 'Diary signed',
-            body: `${author?.name || 'A parent'} signed "${entry.title}" for ${kid.name}.`,
+            title: 'Diary acknowledged',
+            body: `${author?.name || 'A parent'} acknowledged "${entry.title}" for ${kid.name}.`,
             kidId: kid._id,
           },
         ]);

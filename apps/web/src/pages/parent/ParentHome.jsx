@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { connectSocket } from '../../lib/socket';
 import { useAuth } from '../../context/AuthContext';
@@ -21,6 +22,7 @@ function locFrom(trip) {
 }
 
 export default function ParentHome() {
+  const navigate = useNavigate();
   const { user, logout, showToast } = useAuth();
   const [kids, setKids] = useState([]);
   const [active, setActive] = useState([]);
@@ -261,7 +263,11 @@ export default function ParentHome() {
       setScreen('live');
       return;
     }
-    if (name === 'attendance' || name === 'diary') {
+    if (name === 'diary') {
+      navigate('/parent/diary');
+      return;
+    }
+    if (name === 'attendance') {
       setSheetTab('school');
       setScreen('live');
       return;

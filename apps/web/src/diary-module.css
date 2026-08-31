@@ -1,0 +1,57 @@
+.tdiary { display: grid; gap: 18px; }
+.tdiary-head { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; align-items: flex-end; }
+.tdiary-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.tdiary-stat { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 12px 14px; }
+.tdiary-stat b { display: block; font-size: 22px; color: #1d4ed8; }
+.tdiary-stat span { color: #6b7280; font-size: 12px; }
+.tdiary-list { display: grid; gap: 10px; }
+.tdiary-row { display: flex; gap: 12px; align-items: flex-start; background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 12px 14px; cursor: pointer; }
+.tdiary-row.is-open { border-color: #93c5fd; box-shadow: 0 0 0 3px #dbeafe; }
+.tdiary-emoji { font-size: 22px; width: 36px; text-align: center; }
+.tdiary-row h3 { margin: 0 0 2px; font-size: 15px; }
+.tdiary-row p { margin: 0; color: #4b5563; font-size: 13px; }
+.tdiary-row small { color: #6b7280; }
+.tdiary-form { display: grid; gap: 10px; }
+.tdiary-form textarea { min-height: 72px; }
+.tdiary-checks { display: flex; gap: 14px; flex-wrap: wrap; }
+.tdiary-pending { background: #fff7ed; border: 1px solid #fed7aa; border-radius: 12px; padding: 12px; }
+.tdiary-pending li { margin: 4px 0; }
+
+.pdiary { max-width: 760px; margin: 0 auto; display: grid; gap: 16px; padding-bottom: 32px; }
+.pdiary h2 { margin: 0; }
+.pdiary .tw-lede, .tdiary .tw-lede, .adiary .tw-lede { color: #6b7280; margin: 6px 0 0; }
+.pdiary .tw-alert, .tdiary .tw-alert, .adiary .tw-alert { background: #fef2f2; color: #991b1b; padding: 10px 12px; border-radius: 10px; }
+.pdiary .tw-btn, .tdiary .tw-btn, .adiary .tw-btn { border: 0; border-radius: 10px; padding: 8px 14px; font-weight: 700; cursor: pointer; }
+.pdiary .tw-btn-primary { background: #1d4ed8; color: #fff; }
+.pdiary select, .tdiary select, .tdiary input, .tdiary textarea { width: 100%; }
+.pdiary-filters { display: flex; gap: 8px; flex-wrap: wrap; }
+.pdiary-filters button { border: 1px solid #e5e7eb; background: #fff; border-radius: 999px; padding: 6px 12px; font-size: 12px; font-weight: 700; }
+.pdiary-filters button.is-on { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
+.pdiary-day { display: grid; gap: 10px; }
+.pdiary-day h3 { margin: 18px 0 0; font-size: 13px; color: #6b7280; letter-spacing: .04em; }
+.pdiary-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 16px; padding: 16px; display: grid; gap: 8px; }
+.pdiary-card h4 { margin: 0; }
+.pdiary-ack { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+.pdiary-today { display: flex; gap: 12px; flex-wrap: wrap; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 12px; padding: 10px 12px; font-size: 13px; }
+.pdiary-today strong { margin-right: 4px; }
+.pdiary-toolbar { display: flex; gap: 12px; flex-wrap: wrap; }
+.pdiary-toolbar label { display: grid; gap: 4px; font-size: 12px; font-weight: 700; color: #6b7280; }
+.pdiary-toolbar select, .pdiary select { border: 1px solid #e5e7eb; border-radius: 10px; padding: 8px 10px; }
+.pdiary-kicker { font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: #4b5563; }
+.pdiary-subject { color: #1d4ed8; font-weight: 700; }
+.pdiary-block { background: #f9fafb; border-radius: 10px; padding: 10px 12px; }
+.pdiary-block b { display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px; }
+.pdiary-block p, .pdiary-block ul { margin: 0; }
+.pdiary-comments { margin: 0; padding-left: 18px; color: #374151; font-size: 13px; }
+.pdiary-comment-box { display: grid; gap: 8px; }
+.pdiary-comment-box textarea { width: 100%; border: 1px solid #e5e7eb; border-radius: 10px; padding: 8px; }
+.pdiary .tw-btn-ghost, .tdiary .tw-btn-ghost { background: #f3f4f6; color: #111827; }
+
+.adiary { display: grid; gap: 16px; }
+.adiary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+.adiary-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 14px; }
+.adiary-card b { display: block; font-size: 24px; color: #111827; }
+.adiary-warn { background: #fef2f2; border: 1px solid #fecaca; border-radius: 12px; padding: 12px 14px; }
+.adiary table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 12px; overflow: hidden; }
+.adiary th, .adiary td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; }
+.adiary th { color: #6b7280; font-size: 12px; }
