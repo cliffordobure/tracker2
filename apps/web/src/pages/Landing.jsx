@@ -1,93 +1,45 @@
-import { Link, Navigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
-import { homePathForRole } from '../lib/roles';
-
-const features = [
-  {
-    title: 'Live Tracking',
-    body: 'Track buses in real time and stay informed on every trip.',
-    image: '/onboard-tracking.png',
-  },
-  {
-    title: 'Safety First',
-    body: 'Smart alerts keep students, parents, and drivers connected.',
-    image: '/onboard-safety.png',
-  },
-  {
-    title: 'Smart Reports',
-    body: 'Real-time insights that help schools make better decisions.',
-    image: '/onboard-reports.png',
-  },
-];
+import { useState } from 'react';
+import { Link } from 'react-router-dom';
 
 export default function Landing() {
-  const { user, loading } = useAuth();
-
-  if (loading) return <div className="loading-screen">Loading…</div>;
-  if (user) return <Navigate to={homePathForRole(user.role)} replace />;
+  const [demoOpen, setDemoOpen] = useState(false);
 
   return (
-    <div className="tt-landing">
-      <header className="tt-landing-nav">
-        <div className="tt-brand">
-          <span className="tt-shield" aria-hidden="true">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-              <path d="M12 2 4 5.4v6.3c0 5 3.4 9.6 8 11.3 4.6-1.7 8-6.3 8-11.3V5.4L12 2Z" fill="#0C1B3A" />
-              <path d="M8.2 13.2 12 8.8l3.8 4.4v1.6c0 1.8-1.5 3.4-3.8 4-2.3-.6-3.8-2.2-3.8-4v-1.6Z" fill="#fff" />
-            </svg>
-          </span>
-          <div>
-            <strong>Track Toto</strong>
-            <small>Transport Management System</small>
-          </div>
-        </div>
-        <Link className="tt-nav-login" to="/login">
-          Login
-        </Link>
-      </header>
-
-      <section className="tt-hero">
-        <div className="tt-hero-copy">
-          <p className="tt-kicker">SCHOOL TRANSPORT, SIMPLIFIED</p>
+    <section>
+      <div className="mk-hero">
+        <div>
+          <p className="mk-pill">🛡 Smart Transport. Safer Students. Stronger Schools.</p>
           <h1>
-            Smarter Transport.
+            Smarter School
             <br />
-            Safer Students.
-            <em> Stronger Schools.</em>
+            Transport Management
+            <em>All in One Platform</em>
           </h1>
-          <p className="tt-lede">
-            Track Toto helps school admins run routes, teachers update parents, and families follow
-            every ride from gate to home.
+          <p className="mk-lede">
+            Track Toto gives schools real-time bus tracking, student safety alerts, and a connected
+            workspace for admins, teachers, drivers, and parents — from the school gate to home.
           </p>
-          <div className="tt-hero-actions">
-            <Link className="tt-btn" to="/login">
-              Get Started
-              <span aria-hidden="true">→</span>
-            </Link>
-            <Link className="tt-btn-ghost" to="/login">
-              Login to your account
-            </Link>
+          <div className="mk-hero-actions">
+            <Link className="mk-btn mk-btn--solid" to="/login">Access Dashboard</Link>
+            <button className="mk-btn mk-btn--ghost" type="button" onClick={() => setDemoOpen(true)}>
+              Watch Demo
+            </button>
           </div>
         </div>
-        <div className="tt-hero-art">
-          <img src="/splash-track-toto.png" alt="Track Toto school transport" />
+        <div className="mk-hero-art">
+          <img src="/landing-hero.png" alt="Track Toto School bus arriving at campus" />
         </div>
-      </section>
+      </div>
 
-      <section className="tt-features" aria-label="What Track Toto offers">
-        {features.map((item) => (
-          <article key={item.title} className="tt-feature">
-            <img src={item.image} alt="" />
-            <h2>{item.title}</h2>
-            <p>{item.body}</p>
-          </article>
-        ))}
-      </section>
-
-      <footer className="tt-landing-foot">
-        <span>© {new Date().getFullYear()} Track Toto School</span>
-        <Link to="/login">Admin login</Link>
-      </footer>
-    </div>
+      {demoOpen && (
+        <div className="lp-modal" role="dialog" aria-label="Watch demo" onClick={() => setDemoOpen(false)}>
+          <div className="lp-modal-card" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="lp-modal-close" onClick={() => setDemoOpen(false)} aria-label="Close">×</button>
+            <p>See live tracking, parent alerts, and the school admin dashboard in one walkthrough.</p>
+            <Link className="mk-btn mk-btn--solid" to="/login">Access Dashboard</Link>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }

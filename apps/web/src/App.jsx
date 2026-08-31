@@ -5,6 +5,12 @@ import SchoolAdminLayout from './components/SchoolAdminLayout';
 import SuperAdminLayout from './components/SuperAdminLayout';
 import Login from './pages/Login';
 import Landing from './pages/Landing';
+import MarketingLayout from './components/MarketingLayout';
+import Features from './pages/marketing/Features';
+import About from './pages/marketing/About';
+import Pricing from './pages/marketing/Pricing';
+import Resources from './pages/marketing/Resources';
+import Contact from './pages/marketing/Contact';
 import SuperDashboard from './pages/super/SuperDashboard';
 import SuperSchools from './pages/super/SuperSchools';
 import SuperAdmins from './pages/super/SuperAdmins';
@@ -87,8 +93,15 @@ function Protected({ roles, children }) {
 export default function App() {
   return (
     <Routes>
-      <Route path="/login" element={<Login />} />
-      <Route path="/" element={<Landing />} />
+      <Route element={<MarketingLayout />}>
+        <Route path="/" element={<Landing />} />
+        <Route path="/features" element={<Features />} />
+        <Route path="/about" element={<About />} />
+        <Route path="/pricing" element={<Pricing />} />
+        <Route path="/resources" element={<Resources />} />
+        <Route path="/contact" element={<Contact />} />
+        <Route path="/login" element={<Login />} />
+      </Route>
 
       <Route path="/admin/*" element={<LegacyAdminRedirect />} />
 
