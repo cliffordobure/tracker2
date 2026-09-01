@@ -24,6 +24,7 @@ const announcementSchema = new mongoose.Schema(
       index: true,
     },
     grade: { type: String, default: '', trim: true, index: true },
+    grades: { type: [String], default: [], index: true },
     teacherId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
     audience: { type: String, default: '' },
     icon: { type: String, default: '' },

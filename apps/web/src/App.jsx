@@ -136,7 +136,7 @@ export default function App() {
       <Route
         path="/school-admin"
         element={
-          <Protected roles={['school_admin']}>
+          <Protected roles={['school_admin', 'staff']}>
             <SchoolAdminLayout />
           </Protected>
         }
@@ -239,6 +239,6 @@ function LegacyAdminRedirect() {
   const { user, loading } = useAuth();
   if (loading) return <div className="loading-screen">Loading…</div>;
   if (!user) return <Navigate to="/login" replace />;
-  if (user.role === 'school_admin') return <Navigate to="/school-admin" replace />;
+  if (user.role === 'school_admin' || user.role === 'staff') return <Navigate to="/school-admin" replace />;
   return <Navigate to="/super-admin" replace />;
 }

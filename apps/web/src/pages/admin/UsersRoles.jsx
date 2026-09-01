@@ -2,22 +2,26 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useOutletContext } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
+import { ASSIGNABLE_ROLES, STAFF_MENUS, emptyMenuRights } from '../../lib/staffAccess';
 
 const PAGE_SIZES = [10, 25, 50];
 const ROLE_COLORS = {
   school_admin: '#5d3fd3',
+  staff: '#0f766e',
   teacher: '#d97706',
   driver: '#2563eb',
   parent: '#16a34a',
 };
 const ROLE_HELP = {
-  school_admin: 'School admin console: students, fleet, trips, reports, and settings for this school.',
+  school_admin: 'Full school admin dashboard and every menu for this school.',
+  staff: 'Same school admin dashboard, limited to the View or Edit rights you assign.',
   teacher: 'Teacher app: register, diary, notes, assignments, and students.',
   driver: 'Driver app: assigned trips, live location, and incident reports.',
   parent: 'Parent app: children, live trip tracking, and messages.',
 };
 const ROLE_DEPT = {
-  school_admin: 'School Admin',
+  school_admin: 'Administration',
+  staff: 'Administration',
   teacher: 'Academics',
   driver: 'Transport',
   parent: '',
@@ -27,9 +31,10 @@ const emptyForm = {
   name: '',
   email: '',
   phone: '',
-  role: 'parent',
+  role: 'school_admin',
   department: '',
-  password: 'password123',
+  password: '',
+  menuRights: emptyMenuRights(),
   active: true,
 };
 
@@ -159,7 +164,22 @@ function roleGlyph(id) {
   if (id === 'teacher') return 'cap';
   if (id === 'driver') return 'wheel';
   if (id === 'parent') return 'users';
+  if (id === 'staff') return 'lock';
   return 'monitor';
+}
+
+const ROLE_FORM_LABELS = {
+  school_admin: 'Super Admin',
+  staff: 'Staff',
+  teacher: 'Teacher',
+  driver: 'Driver',
+  parent: 'Parent',
+};
+
+function formRolesFor(user) {
+  const ids = [...ASSIGNABLE_ROLES.map((r) => r.id)];
+  if (user?.role && !ids.includes(user.role)) ids.push(user.role);
+  return ids.map((id) => ({ id, label: ROLE_FORM_LABELS[id] || id }));
 }
 
 export default function UsersRoles() {
@@ -185,6 +205,7 @@ export default function UsersRoles() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyForm);
+  const [rightsOpen, setRightsOpen] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [saving, setSaving] = useState(false);
   const year = new Date().getFullYear();
@@ -218,6 +239,7 @@ export default function UsersRoles() {
   const users = data?.users || [];
   const stats = data?.stats || {};
   const roles = data?.roles || [];
+  const assignableRoles = data?.assignableRoles?.length ? data.assignableRoles : ASSIGNABLE_ROLES;
   const departments = useMemo(() => {
     const set = new Set(data?.departments || []);
     users.forEach((u) => {
@@ -327,9 +349,15 @@ export default function UsersRoles() {
     });
   };
 
-  const openCreate = (nextRole = 'parent') => {
+  const openCreate = (nextRole = 'school_admin') => {
     setEditing(null);
-    setForm({ ...emptyForm, role: nextRole, department: ROLE_DEPT[nextRole] || '' });
+    setForm({
+      ...emptyForm,
+      role: nextRole,
+      department: ROLE_DEPT[nextRole] || '',
+      menuRights: emptyMenuRights(),
+    });
+    setRightsOpen(nextRole === 'staff');
     setShowAddMenu(false);
     setShowForm(true);
   };
@@ -343,8 +371,10 @@ export default function UsersRoles() {
       role: u.role,
       department: departmentOf(u),
       password: '',
+      menuRights: { ...emptyMenuRights(), ...(u.menuRights || {}) },
       active: u.active !== false,
     });
+    setRightsOpen(u.role === 'staff');
     setShowForm(true);
     setMenuId('');
   };
@@ -357,10 +387,13 @@ export default function UsersRoles() {
       if (editing) {
         const body = { ...form };
         if (!body.password) delete body.password;
+        if (body.role !== 'staff') delete body.menuRights;
         await api(`/admin/users/${editing.id}`, { method: 'PUT', body });
         setSuccess('User updated.');
       } else {
-        await api('/admin/users', { method: 'POST', body: form });
+        const body = { ...form };
+        if (body.role !== 'staff') delete body.menuRights;
+        await api('/admin/users', { method: 'POST', body });
         setSuccess('User added.');
       }
       setShowForm(false);
@@ -440,7 +473,7 @@ export default function UsersRoles() {
             </button>
             {showAddMenu && (
               <div className="sa-users-add-menu" onClick={(e) => e.stopPropagation()}>
-                {roles.map((r) => (
+                {assignableRoles.map((r) => (
                   <button key={r.id} type="button" onClick={() => openCreate(r.id)}>
                     {r.label}
                   </button>
@@ -819,23 +852,19 @@ export default function UsersRoles() {
       {tab === 'permissions' && (
         <section className="sa-card">
           <h3>Permissions</h3>
-          <p className="sa-muted">There is no custom permission matrix. Access follows the stored role on each user account.</p>
+          <p className="sa-muted">Super Admin has every menu. Staff uses the same dashboard, limited to the View or Edit rights set when you add them.</p>
           <ul className="sa-users-perms">
             <li>
-              <strong>School Admin</strong>
-              <span>Full school admin web app for this school.</span>
+              <strong>Super Admin</strong>
+              <span>Full school admin dashboard and all menus for this school.</span>
             </li>
             <li>
-              <strong>Teacher</strong>
-              <span>Teacher web/app modules only.</span>
+              <strong>Staff</strong>
+              <span>Same dashboard as Super Admin, with View or Edit on the menus you tick.</span>
             </li>
             <li>
-              <strong>Driver</strong>
-              <span>Driver trips, GPS, and incident reporting.</span>
-            </li>
-            <li>
-              <strong>Parent</strong>
-              <span>Family tracking and parent messages.</span>
+              <strong>Teacher, Driver, Parent</strong>
+              <span>Created from their own home-page menus, not from Add New User.</span>
             </li>
           </ul>
         </section>
@@ -904,20 +933,68 @@ export default function UsersRoles() {
             </label>
             <label>
               Role
-              <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value, department: ROLE_DEPT[e.target.value] || form.department })}>
-                {roles.map((r) => (
+              <select
+                value={form.role}
+                onChange={(e) => {
+                  const nextRole = e.target.value;
+                  setForm({
+                    ...form,
+                    role: nextRole,
+                    department: ROLE_DEPT[nextRole] || form.department,
+                    menuRights: nextRole === 'staff' ? form.menuRights || emptyMenuRights() : emptyMenuRights(),
+                  });
+                  setRightsOpen(nextRole === 'staff');
+                }}
+              >
+                {formRolesFor(editing).map((r) => (
                   <option key={r.id} value={r.id}>
                     {r.label}
                   </option>
                 ))}
               </select>
             </label>
+            {form.role === 'staff' && (
+              <div className="sa-staff-rights">
+                <span>Menu rights</span>
+                <button
+                  type="button"
+                  className="sa-staff-rights-toggle"
+                  onClick={() => setRightsOpen((open) => !open)}
+                >
+                  {STAFF_MENUS.filter((m) => form.menuRights?.[m.key] === 'view' || form.menuRights?.[m.key] === 'edit').length} menus selected
+                  <UsersIcon name="caret" />
+                </button>
+                {rightsOpen && (
+                  <div className="sa-staff-rights-pop">
+                    <p>Tick View or Edit for each school admin menu.</p>
+                    {STAFF_MENUS.map((menu) => (
+                      <label key={menu.key} className="sa-staff-rights-row">
+                        <span>{menu.label}</span>
+                        <select
+                          value={form.menuRights?.[menu.key] || ''}
+                          onChange={(e) =>
+                            setForm({
+                              ...form,
+                              menuRights: { ...form.menuRights, [menu.key]: e.target.value },
+                            })
+                          }
+                        >
+                          <option value="">{menu.key === 'dashboard' ? 'View' : 'None'}</option>
+                          <option value="view">View</option>
+                          <option value="edit">Edit</option>
+                        </select>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             <label>
               Department
               <input value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} />
             </label>
             <label>
-              Password {editing ? '(leave blank to keep)' : ''}
+              Password {editing ? '(leave blank to keep)' : <em className="sa-req">*</em>}
               <input
                 type="text"
                 value={form.password}
@@ -949,7 +1026,7 @@ export default function UsersRoles() {
             <h3>Import users</h3>
             <p className="sa-muted">
               CSV header must include <code>name</code>, <code>email</code>, and <code>role</code>. Role must be{' '}
-              <code>school_admin</code>, <code>teacher</code>, <code>driver</code>, or <code>parent</code>. Optional:{' '}
+              <code>school_admin</code> or <code>staff</code>. Optional:{' '}
               <code>phone</code>, <code>department</code>, <code>password</code>.
             </p>
             <input

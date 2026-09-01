@@ -37,7 +37,13 @@ import { getVapidPublicKey } from '../services/push.js';
 import { createAndEmitNotifications, NOTIFICATION_TYPES } from '../services/notifications.js';
 import { getIO } from '../socket.js';
 import { formatClock as formatNairobiClock, formatDateKey, formatDateLabel, formatDayClock, calendarGroup, toIso } from '../lib/clock.js';
-import { diaryTypeMeta, diaryTypeLabel } from '../lib/diary.js';
+import { diaryTypeMeta, diaryTypeLabel, normalizeDiaryCommentMedia, serializeDiaryCommentMedia } from '../lib/diary.js';
+import {
+  announcementAudienceLabel,
+  announcementGradesOf,
+  announcementVisibleToGrades,
+  classAnnouncementVisibleOr,
+} from '../lib/announcements.js';
 
 const router = Router();
 router.use(authenticate, requireRole('parent'));
@@ -417,7 +423,10 @@ async function computeKidHub(parentId, kid) {
           schoolId,
           active: true,
           status: { $ne: 'draft' },
-          $or: [{ kidIds: kid._id }, { kidIds: { $size: 0 }, grade: kid.grade }, { kidIds: { $exists: false }, grade: kid.grade }],
+          $or: [
+            { kidIds: kid._id },
+            { $and: [{ $or: [{ kidIds: { $exists: false } }, { kidIds: { $size: 0 } }] }, { $or: [{ grade: kid.grade }, { grade: '' }, { grade: { $exists: false } }] }] },
+          ],
         })
           .sort({ dueDate: -1, createdAt: -1 })
           .limit(80)
@@ -1058,6 +1067,7 @@ async function buildParentDocuments(parentId, query = {}) {
   const scopedKids = kidFilter ? kids.filter((k) => String(k._id) === kidFilter) : kids;
   const schoolIds = [...new Set(scopedKids.map((k) => k.schoolId?._id || k.schoolId).filter(Boolean))];
   const kidIds = scopedKids.map((k) => k._id);
+  const grades = [...new Set(scopedKids.map((k) => k.grade).filter(Boolean))];
   const from = startOfDay(new Date(Date.now() - 180 * 24 * 60 * 60 * 1000));
 
   const [diaryEntries, announcements, statements, leaves] = await Promise.all([
@@ -1076,6 +1086,7 @@ async function buildParentDocuments(parentId, query = {}) {
           schoolId: { $in: schoolIds },
           active: { $ne: false },
           attachmentUrl: { $nin: [null, ''] },
+          $or: classAnnouncementVisibleOr(grades),
         })
           .sort({ publishedAt: -1 })
           .limit(40)
@@ -2200,11 +2211,7 @@ router.get('/overview', async (req, res) => {
             schoolId: { $in: schoolIds },
             active: true,
             archived: { $ne: true },
-            $or: [
-              { scope: { $ne: 'class' } },
-              { scope: 'class', grade: { $in: grades } },
-              { category: 'class', grade: { $in: grades } },
-            ],
+            $or: classAnnouncementVisibleOr(grades),
           })
             .sort({ publishedAt: -1, createdAt: -1 })
             .limit(20)
@@ -2217,7 +2224,10 @@ router.get('/overview', async (req, res) => {
             schoolId: { $in: schoolIds },
             active: true,
             status: { $ne: 'draft' },
-            $or: [{ kidIds: { $in: kidIds } }, { kidIds: { $size: 0 }, grade: { $in: grades } }, { kidIds: { $exists: false }, grade: { $in: grades } }],
+            $or: [
+              { kidIds: { $in: kidIds } },
+              { $and: [{ $or: [{ kidIds: { $exists: false } }, { kidIds: { $size: 0 } }] }, { $or: [{ grade: { $in: grades } }, { grade: '' }, { grade: { $exists: false } }] }] },
+            ],
           }).limit(80)
         : [],
       kidIds.length ? AttendanceRecord.find({ kidId: { $in: kidIds }, date: today }) : [],
@@ -2658,15 +2668,20 @@ function serializeDiaryAttachments(entry) {
 }
 
 function serializeDiaryComments(entry, userId) {
-  return (entry.comments || []).map((c) => ({
-    _id: c._id,
-    authorName: c.authorName || 'Parent',
-    authorRole: c.authorRole || 'Parent',
-    authorPhotoUrl: c.authorPhotoUrl || '',
-    body: c.body || '',
-    createdAt: c.createdAt,
-    mine: userId && c.userId && String(c.userId) === String(userId),
-  }));
+  return (entry.comments || []).map((c) => {
+    const media = serializeDiaryCommentMedia(c);
+    return {
+      _id: c._id,
+      authorName: c.authorName || 'Parent',
+      authorRole: c.authorRole || 'Parent',
+      authorPhotoUrl: c.authorPhotoUrl || '',
+      body: c.body || '',
+      media,
+      attachments: media,
+      createdAt: c.createdAt,
+      mine: userId && c.userId && String(c.userId) === String(userId),
+    };
+  });
 }
 
 function diaryAppliesToKid(entry, kid) {
@@ -3034,7 +3049,9 @@ async function buildParentDiaryFeed(kids, query = {}, userId = null) {
     });
   }
   for (const a of announcements) {
-    if (a.scope === 'class' && a.grade && !kids.some((k) => k.grade === a.grade)) continue;
+    const kidGrades = kids.map((k) => k.grade).filter(Boolean);
+    if (!announcementVisibleToGrades(a, kidGrades)) continue;
+    const classLabel = announcementGradesOf(a).join(', ');
     items.push({
       id: String(a._id),
       kind: 'announcement',
@@ -3045,7 +3062,7 @@ async function buildParentDiaryFeed(kids, query = {}, userId = null) {
       date: a.publishedAt || a.createdAt,
       time: formatClock(a.publishedAt || a.createdAt),
       attachments: a.attachmentUrl ? 1 : 0,
-      childLabel: a.scope === 'class' && a.grade ? a.grade : 'All Children',
+      childLabel: a.scope === 'class' && classLabel ? classLabel : 'All Children',
       childId: null,
       source: 'announcement',
     });
@@ -3320,7 +3337,8 @@ router.post('/diary/:id/comments', async (req, res) => {
       return res.status(404).json({ error: 'Diary entry not found' });
     }
     const body = String(req.body?.body || '').trim().slice(0, 800);
-    if (!body) return res.status(400).json({ error: 'Comment is required' });
+    const media = normalizeDiaryCommentMedia(req.body?.media || req.body?.attachments);
+    if (!body && !media.length) return res.status(400).json({ error: 'Write a comment or attach a file' });
     const { entry, kids } = await findParentDiary(req.user.id, req.params.id);
     if (!entry) return res.status(404).json({ error: 'Diary entry not found' });
     const author = await User.findById(req.user.id).select('name photoUrl');
@@ -3331,17 +3349,19 @@ router.post('/diary/:id/comments', async (req, res) => {
       authorRole: 'Parent',
       authorPhotoUrl: author?.photoUrl || '',
       body,
+      media,
     });
     await entry.save();
     const teacherId = entry.teacherId?._id || entry.teacherId;
     if (teacherId) {
       try {
+        const preview = body || (media[0]?.originalName ? `sent ${media[0].originalName}` : 'sent a file');
         await createAndEmitNotifications(getIO(), [
           {
             userId: teacherId,
             type: 'reminder',
             title: 'Diary comment',
-            body: `${author?.name || 'A parent'} commented on "${entry.title}": ${body.slice(0, 140)}`,
+            body: `${author?.name || 'A parent'} commented on "${entry.title}": ${String(preview).slice(0, 140)}`,
             kidId: entry.kidIds?.[0] || null,
           },
         ]);
@@ -4884,7 +4904,10 @@ function serializeParentAnnouncement(a, userId, extra = {}) {
     kind,
     icon: parentNoticeIcon(row),
     authorName: row.authorName || 'Admin',
-    audience: row.audience || row.authorName || 'School',
+    audience: row.audience || announcementAudienceLabel(row.scope, announcementGradesOf(row)),
+    scope: row.scope || 'school',
+    grade: row.grade || '',
+    grades: announcementGradesOf(row),
     publishedAt: published,
     attachmentName: row.attachmentName || '',
     attachmentUrl: row.attachmentUrl || '',
@@ -4936,11 +4959,12 @@ async function ensureSampleNoticeComments(announcement) {
 }
 
 async function assertParentAnnouncement(userId, announcementId) {
-  const { schoolIds } = await parentNoticeContext(userId);
+  const { schoolIds, grades } = await parentNoticeContext(userId);
   const allowed = new Set(schoolIds);
   const announcement = await Announcement.findById(announcementId);
   if (!announcement || !announcement.active || announcement.archived) return null;
   if (!allowed.has(announcement.schoolId.toString())) return null;
+  if (!announcementVisibleToGrades(announcement, grades)) return null;
   return announcement;
 }
 
@@ -5082,11 +5106,7 @@ router.get('/announcements', async (req, res) => {
       $nor: [{ sourceKey: /^sample:/ }],
       $and: [
         {
-          $or: [
-            { scope: { $ne: 'class' } },
-            { scope: 'class', grade: { $in: grades } },
-            { category: 'class', grade: { $in: grades } },
-          ],
+          $or: classAnnouncementVisibleOr(grades),
         },
       ],
     };
@@ -5117,11 +5137,7 @@ router.get('/announcements', async (req, res) => {
       archived: { $ne: true },
       $nor: [{ sourceKey: /^sample:/ }],
       readBy: { $ne: req.user.id },
-      $or: [
-        { scope: { $ne: 'class' } },
-        { scope: 'class', grade: { $in: grades } },
-        { category: 'class', grade: { $in: grades } },
-      ],
+      $or: classAnnouncementVisibleOr(grades),
     };
 
     const [total, rows, unreadCount, bellUnread] = await Promise.all([
@@ -6216,8 +6232,11 @@ router.get('/calendar', async (req, res) => {
             active: true,
             archived: { $ne: true },
             sourceKey: { $not: /^sample:/ },
-            $or: [{ kind: 'event' }, { category: 'events' }],
             publishedAt: { $gte: windowFrom, $lte: windowTo },
+            $and: [
+              { $or: [{ kind: 'event' }, { category: 'events' }] },
+              { $or: classAnnouncementVisibleOr(selectedKid?.grade ? [selectedKid.grade] : grades) },
+            ],
           }).sort({ publishedAt: 1 })
         : [],
       selectedKid
@@ -6228,8 +6247,7 @@ router.get('/calendar', async (req, res) => {
             dueDate: { $gte: windowFrom, $lte: windowTo },
             $or: [
               { kidIds: selectedKid._id },
-              { kidIds: { $size: 0 }, grade: selectedKid.grade },
-              { kidIds: { $exists: false }, grade: selectedKid.grade },
+              { $and: [{ $or: [{ kidIds: { $exists: false } }, { kidIds: { $size: 0 } }] }, { $or: [{ grade: selectedKid.grade }, { grade: '' }, { grade: { $exists: false } }] }] },
             ],
           }).limit(40)
         : Assignment.find({
@@ -6237,7 +6255,10 @@ router.get('/calendar', async (req, res) => {
             active: true,
             status: { $ne: 'draft' },
             dueDate: { $gte: windowFrom, $lte: windowTo },
-            $or: [{ kidIds: { $in: kids.map((k) => k._id) } }, { grade: { $in: grades } }],
+            $or: [
+              { kidIds: { $in: kids.map((k) => k._id) } },
+              { $and: [{ $or: [{ kidIds: { $exists: false } }, { kidIds: { $size: 0 } }] }, { $or: [{ grade: { $in: grades } }, { grade: '' }, { grade: { $exists: false } }] }] },
+            ],
           }).limit(40),
       Notification.countDocuments({ userId: req.user.id, read: { $ne: true } }),
     ]);

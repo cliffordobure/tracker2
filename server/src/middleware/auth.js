@@ -27,7 +27,7 @@ export function requireRole(...roles) {
 }
 
 export const requireSuperAdmin = requireRole('super_admin');
-export const requireSchoolStaff = requireRole('super_admin', 'school_admin');
+export const requireSchoolStaff = requireRole('super_admin', 'school_admin', 'staff');
 
 export async function attachUser(req, res, next) {
   try {

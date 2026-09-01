@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { NavLink, Outlet, Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { NavLink, Navigate, Outlet, Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../lib/api';
 import { getSocket } from '../lib/socket';
 import { useTripTab } from '../lib/tripTabs';
+import { canEditMenu, canViewMenu, canViewPath, menuKeyFromPath } from '../lib/staffAccess';
 
 const navItems = [
   { to: '/school-admin', label: 'Dashboard', end: true, icon: 'dashboard' },
@@ -11,25 +12,25 @@ const navItems = [
   { to: '/school-admin/campuses', label: 'Campuses', icon: 'campuses' },
   { to: '/school-admin/teachers', label: 'Teachers', icon: 'teachers' },
   { to: '/school-admin/classes', label: 'Classes', icon: 'classes' },
-  { to: '/school-admin/stops', label: 'Stops', icon: 'stops' },
   { to: '/school-admin/routes', label: 'Routes', icon: 'routes' },
+  { to: '/school-admin/stops', label: 'Stops', icon: 'stops' },
   { to: '/school-admin/parents', label: 'Parents', icon: 'parents' },
   { to: '/school-admin/students', label: 'Students', icon: 'students' },
   { to: '/school-admin/buses', label: 'Buses / Vehicles', icon: 'buses' },
   { to: '/school-admin/drivers', label: 'Drivers', icon: 'drivers' },
   { to: '/school-admin/trip-instances', label: 'Trips', icon: 'trips' },
+  { to: '/school-admin/notifications', label: 'Notifications', icon: 'bell', badge: 'unread' },
+  { to: '/school-admin/messages', label: 'Inbox/Outbox', icon: 'messages', badge: 'messages' },
+  { to: '/school-admin/noticeboard', label: 'Noticeboard', icon: 'notice' },
+  { to: '/school-admin/leave-requests', label: 'Leave Requests', icon: 'leave', badge: 'leave' },
+  { to: '/school-admin/users', label: 'Users & Roles', icon: 'users' },
   { to: '/school-admin/attendance', label: 'Attendance', icon: 'attendance' },
   { to: '/school-admin/reports', label: 'Reports & Analytics', icon: 'reports' },
-  { to: '/school-admin/notifications', label: 'Notifications', icon: 'bell', badge: 'unread' },
   { to: '/school-admin/incidents', label: 'Incidents', icon: 'incidents', badge: 'incidents' },
-  { to: '/school-admin/messages', label: 'Messages', icon: 'messages', badge: 'messages' },
   { to: '/school-admin/calendar', label: 'Calendar', icon: 'calendar' },
-  { to: '/school-admin/users', label: 'Users & Roles', icon: 'users' },
 ];
 
 const extraItems = [
-  { to: '/school-admin/leave-requests', label: 'Leave Requests', icon: 'leave' },
-  { to: '/school-admin/noticeboard', label: 'Noticeboard', icon: 'notice' },
   { to: '/school-admin/subjects', label: 'Subjects', icon: 'reports' },
   { to: '/school-admin/examinations', label: 'Examinations', icon: 'reports' },
   { to: '/school-admin/assignments', label: 'Assignments', icon: 'reports' },
@@ -53,7 +54,7 @@ const pageMeta = {
   '/school-admin/calendar': { title: 'Calendar', crumbs: ['Dashboard', 'Calendar'] },
   '/school-admin/notifications': { title: 'Notifications', crumbs: ['Dashboard', 'Notifications'] },
   '/school-admin/incidents': { title: 'Incidents', crumbs: ['Dashboard', 'Incidents'] },
-  '/school-admin/messages': { title: 'Messages', crumbs: ['Dashboard', 'Messages'] },
+  '/school-admin/messages': { title: 'Inbox/Outbox', crumbs: ['Dashboard', 'Inbox/Outbox'] },
   '/school-admin/users': { title: 'Users & Roles', crumbs: ['Dashboard', 'Users & Roles'] },
   '/school-admin/classes': { title: 'Classes', crumbs: ['Dashboard', 'Classes'] },
   '/school-admin/subjects': { title: 'Subjects', crumbs: ['Dashboard', 'Subjects'] },
@@ -72,6 +73,19 @@ const bottomItems = [
   { to: '/school-admin/live-tracking', label: 'Live', icon: 'live' },
   { to: '/school-admin/school', label: 'Settings', icon: 'settings' },
 ];
+
+function applyInboxCounts(data, setUnread, setIncidentCount, setMessageCount, setLeaveCount) {
+  setUnread(Number(data.unread) || 0);
+  setIncidentCount(Number(data.incidents) || 0);
+  setMessageCount(Number(data.messages) || 0);
+  if (data.leave != null) {
+    setLeaveCount(Number(data.leave) || 0);
+    return Promise.resolve();
+  }
+  return api('/admin/leave-requests/stats')
+    .then((d) => setLeaveCount(Number(d?.stats?.pending) || 0))
+    .catch(() => setLeaveCount(0));
+}
 
 function prettyName(value) {
   return String(value || '')
@@ -263,6 +277,7 @@ export default function SchoolAdminLayout() {
   const [unread, setUnread] = useState(0);
   const [incidentCount, setIncidentCount] = useState(0);
   const [messageCount, setMessageCount] = useState(0);
+  const [leaveCount, setLeaveCount] = useState(0);
   const [campuses, setCampuses] = useState([]);
   const [campusFilter, setCampusFilter] = useState('');
   const searchRef = useRef(null);
@@ -300,11 +315,7 @@ export default function SchoolAdminLayout() {
       })
       .catch(() => {});
     api('/admin/inbox')
-      .then((d) => {
-        setUnread(Number(d.unread) || 0);
-        setIncidentCount(Number(d.incidents) || 0);
-        setMessageCount(Number(d.messages) || 0);
-      })
+      .then((d) => applyInboxCounts(d, setUnread, setIncidentCount, setMessageCount, setLeaveCount))
       .catch(() => {});
     api('/admin/campuses')
       .then((d) => setCampuses(d.campuses || []))
@@ -325,11 +336,7 @@ export default function SchoolAdminLayout() {
   useEffect(() => {
     const refresh = () => {
       api('/admin/inbox')
-        .then((d) => {
-          setUnread(Number(d.unread) || 0);
-          setIncidentCount(Number(d.incidents) || 0);
-          setMessageCount(Number(d.messages) || 0);
-        })
+        .then((d) => applyInboxCounts(d, setUnread, setIncidentCount, setMessageCount, setLeaveCount))
         .catch(() => {});
     };
     const s = getSocket();
@@ -414,7 +421,7 @@ export default function SchoolAdminLayout() {
         title: 'Message Details',
         crumbs: [
           { label: 'Dashboard', to: '/school-admin' },
-          { label: 'Messages', to: '/school-admin/messages' },
+          { label: 'Inbox/Outbox', to: '/school-admin/messages' },
           { label: 'Message Details' },
         ],
       };
@@ -466,7 +473,16 @@ export default function SchoolAdminLayout() {
     year: 'numeric',
   });
 
-  const searchable = [...navItems, ...extraItems, { to: '/school-admin/school', label: 'Settings' }];
+  const visibleNavItems = navItems.filter((item) => canViewMenu(user, menuKeyFromPath(item.to) || (item.end ? 'dashboard' : '')));
+  const visibleExtraItems = extraItems.filter((item) => canViewMenu(user, menuKeyFromPath(item.to)));
+  const canSeeSettings = canViewMenu(user, 'settings');
+  const currentMenuKey = menuKeyFromPath(location.pathname);
+  const pageReadOnly = Boolean(currentMenuKey && canViewMenu(user, currentMenuKey) && !canEditMenu(user, currentMenuKey));
+  const searchable = [...visibleNavItems, ...visibleExtraItems, ...(canSeeSettings ? [{ to: '/school-admin/school', label: 'Settings' }] : [])];
+
+  if (user?.role === 'staff' && !canViewPath(user, location.pathname)) {
+    return <Navigate to="/school-admin" replace />;
+  }
 
   function onSearch(e) {
     e.preventDefault();
@@ -528,9 +544,17 @@ export default function SchoolAdminLayout() {
         </div>
 
         <nav className="sa-nav" aria-label="School admin">
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const count =
-              item.badge === 'unread' ? unread : item.badge === 'incidents' ? incidentCount : item.badge === 'messages' ? messageCount : 0;
+              item.badge === 'unread'
+                ? unread
+                : item.badge === 'incidents'
+                  ? incidentCount
+                  : item.badge === 'messages'
+                    ? messageCount
+                    : item.badge === 'leave'
+                      ? leaveCount
+                      : 0;
             return (
               <NavLink key={item.to + item.label} to={item.to} end={item.end} className="sa-nav-link" title={item.label}>
                 <span className="sa-nav-icon" aria-hidden="true">
@@ -542,21 +566,27 @@ export default function SchoolAdminLayout() {
               </NavLink>
             );
           })}
-          <p className="sa-nav-section-title">More</p>
-          {extraItems.map((item) => (
-            <NavLink key={item.to} to={item.to} title={item.label} className="sa-nav-link">
-              <span className="sa-nav-icon" aria-hidden="true">
-                <NavIcon name={item.icon} />
-              </span>
-              <span>{item.label}</span>
-            </NavLink>
-          ))}
+          {visibleExtraItems.length > 0 && <p className="sa-nav-section-title">More</p>}
+          {visibleExtraItems.map((item) => {
+            const count = item.badge === 'leave' ? leaveCount : 0;
+            return (
+              <NavLink key={item.to} to={item.to} title={item.label} className="sa-nav-link">
+                <span className="sa-nav-icon" aria-hidden="true">
+                  <NavIcon name={item.icon} />
+                </span>
+                <span>{item.label}</span>
+                {item.badge && count > 0 && <i className="sa-nav-badge">{count > 9 ? '9+' : count}</i>}
+              </NavLink>
+            );
+          })}
+          {canSeeSettings && (
           <NavLink to="/school-admin/school" className="sa-nav-link" title="Settings">
             <span className="sa-nav-icon" aria-hidden="true">
               <NavIcon name="settings" />
             </span>
             <span>Settings</span>
           </NavLink>
+          )}
         </nav>
 
         <div className="sa-sidebar-foot">
@@ -564,7 +594,13 @@ export default function SchoolAdminLayout() {
             <span className="sa-user-avatar">{prettyName(user?.name || 'A').slice(0, 1)}</span>
             <div>
               <strong>{prettyName(user?.name || 'Admin')}</strong>
-              <small>{user?.role === 'super_admin' ? 'Super Admin' : 'Administrator'}</small>
+              <small>
+                {user?.role === 'super_admin'
+                  ? 'Super Admin'
+                  : user?.role === 'staff'
+                    ? 'Staff'
+                    : 'Super Admin'}
+              </small>
             </div>
           </div>
           <button type="button" className="sa-signout" onClick={logout}>
@@ -715,13 +751,30 @@ export default function SchoolAdminLayout() {
           </div>
         </header>
 
-        <div className={`sa-content${isLiveMap ? ' sa-content--map' : ''}`}>
-          <Outlet context={{ globalSearch: search, schoolName, campuses, campusFilter }} />
+        <div
+          className={`sa-content${isLiveMap ? ' sa-content--map' : ''}${pageReadOnly ? ' sa-staff-readonly' : ''}`}
+          onClickCapture={
+            pageReadOnly
+              ? (e) => {
+                  const btn = e.target.closest('button, a.sa-btn-primary');
+                  if (!btn) return;
+                  const text = String(btn.textContent || btn.getAttribute('aria-label') || '').toLowerCase();
+                  if (!/\b(add|create|save|delete|remove|approve|reject|import|assign|new |update|submit)\b/.test(text)) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                }
+              : undefined
+          }
+        >
+          {pageReadOnly && (
+            <p className="sa-staff-readonly-banner">You have view-only access on this page.</p>
+          )}
+          <Outlet context={{ globalSearch: search, schoolName, campuses, campusFilter, canEdit: !pageReadOnly }} />
         </div>
       </div>
 
       <nav className="sa-bottom-nav" aria-label="Quick navigation">
-        {bottomItems.map((item) => (
+        {bottomItems.filter((item) => canViewMenu(user, menuKeyFromPath(item.to) || (item.end ? 'dashboard' : ''))).map((item) => (
           <NavLink key={item.to} to={item.to} end={item.end} className="sa-bottom-link">
             <span aria-hidden="true">
               <NavIcon name={item.icon} />

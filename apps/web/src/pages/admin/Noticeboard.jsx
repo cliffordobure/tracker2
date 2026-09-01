@@ -25,6 +25,8 @@ const empty = {
   title: '',
   body: '',
   category: 'general',
+  scope: 'school',
+  grades: [],
   attachmentUrl: '',
   attachmentName: '',
   attachmentPublicId: '',
@@ -57,6 +59,24 @@ function formatStamp(value) {
 function categoryOf(row) {
   const value = String(row?.category || 'general').toLowerCase();
   return CATEGORIES.some((c) => c.id === value) ? value : 'general';
+}
+
+function gradesOf(row) {
+  const list = [...(Array.isArray(row?.grades) ? row.grades : []), row?.grade];
+  return [...new Set(list.map((g) => String(g || '').trim()).filter(Boolean))];
+}
+
+function audienceOf(row) {
+  if (row?.audience) return row.audience;
+  if (row?.scope === 'class') {
+    const grades = gradesOf(row);
+    return grades.length ? grades.join(', ') : 'Class';
+  }
+  return 'All';
+}
+
+function classLabel(c) {
+  return [c.grade, c.section].filter(Boolean).join(' ') || c.grade || 'Class';
 }
 
 function NoticeIcon({ name }) {
@@ -142,6 +162,7 @@ export default function Noticeboard() {
   const titleRef = useRef(null);
   const fileRef = useRef(null);
   const [items, setItems] = useState([]);
+  const [classes, setClasses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [form, setForm] = useState(empty);
@@ -160,8 +181,12 @@ export default function Noticeboard() {
     setLoading(true);
     setError('');
     try {
-      const data = await api('/admin/announcements');
+      const [data, classData] = await Promise.all([
+        api('/admin/announcements'),
+        api('/admin/classes').catch(() => ({ classes: [] })),
+      ]);
       setItems(data.announcements || []);
+      setClasses(classData.classes || []);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -200,6 +225,8 @@ export default function Noticeboard() {
       title: row.title || '',
       body: row.body || '',
       category: categoryOf(row),
+      scope: row.scope === 'class' ? 'class' : 'school',
+      grades: gradesOf(row),
       attachmentUrl: row.attachmentUrl || '',
       attachmentName: row.attachmentName || '',
       attachmentPublicId: row.attachmentPublicId || '',
@@ -215,7 +242,9 @@ export default function Noticeboard() {
       const cat = categoryOf(row);
       if (filter !== 'all' && cat !== filter) return false;
       if (!q) return true;
-      return [row.title, row.body, row.authorName, cat].some((v) => String(v || '').toLowerCase().includes(q));
+      return [row.title, row.body, row.authorName, cat, audienceOf(row), ...gradesOf(row)].some((v) =>
+        String(v || '').toLowerCase().includes(q)
+      );
     });
   }, [items, filter, globalSearch]);
 
@@ -259,9 +288,19 @@ export default function Noticeboard() {
       showToast?.('Title and message are required', 'error');
       return;
     }
+    if (form.scope === 'class' && !form.grades.length) {
+      showToast?.('Select at least one class', 'error');
+      return;
+    }
     setSaving(true);
     try {
-      const payload = { ...form, category: nextCategory, body: form.body.slice(0, BODY_MAX) };
+      const payload = {
+        ...form,
+        category: nextCategory,
+        scope: form.scope,
+        grades: form.scope === 'class' ? form.grades : [],
+        body: form.body.slice(0, BODY_MAX),
+      };
       if (editingId) {
         await api(`/admin/announcements/${editingId}`, { method: 'PUT', body: payload });
         showToast?.('Announcement updated', 'success');
@@ -269,7 +308,7 @@ export default function Noticeboard() {
         await api('/admin/announcements', { method: 'POST', body: payload });
         showToast?.('Announcement published', 'success');
       }
-      resetForm({ category: nextCategory });
+      resetForm({ category: nextCategory, scope: form.scope });
       await load();
     } catch (err) {
       showToast?.(err.message, 'error');
@@ -320,7 +359,14 @@ export default function Noticeboard() {
             <select
               required
               value={form.category}
-              onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
+              onChange={(e) => {
+                const category = e.target.value;
+                setForm((f) => ({
+                  ...f,
+                  category,
+                  scope: category === 'class' ? 'class' : f.scope,
+                }));
+              }}
             >
               {CATEGORIES.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -329,6 +375,85 @@ export default function Noticeboard() {
               ))}
             </select>
           </label>
+
+          <div className="sa-field">
+            <span>
+              Send to <em className="sa-req">*</em>
+            </span>
+            <div className="sa-notice-sendto" role="radiogroup" aria-label="Announcement audience">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={form.scope === 'school'}
+                className={form.scope === 'school' ? 'is-on' : ''}
+                onClick={() => setForm((f) => ({ ...f, scope: 'school' }))}
+              >
+                All
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={form.scope === 'class'}
+                className={form.scope === 'class' ? 'is-on' : ''}
+                onClick={() => setForm((f) => ({ ...f, scope: 'class' }))}
+              >
+                Class / Classes
+              </button>
+            </div>
+            {form.scope === 'class' ? (
+              <div className="sa-notice-classes">
+                <div className="sa-notice-classes-head">
+                  <em>
+                    {form.grades.length
+                      ? `${form.grades.length} ${form.grades.length === 1 ? 'class' : 'classes'} selected`
+                      : 'Select one or more classes'}
+                  </em>
+                  {classes.length ? (
+                    <button
+                      type="button"
+                      className="sa-text-link"
+                      onClick={() => {
+                        const all = classes.map((c) => c.grade).filter(Boolean);
+                        const selected = new Set(form.grades);
+                        const allOn = all.length > 0 && all.every((g) => selected.has(g));
+                        setForm((f) => ({ ...f, grades: allOn ? [] : all }));
+                      }}
+                    >
+                      {classes.every((c) => !c.grade || form.grades.includes(c.grade)) && form.grades.length
+                        ? 'Clear'
+                        : 'Select all'}
+                    </button>
+                  ) : null}
+                </div>
+                {classes.length ? (
+                  <div className="sa-notice-class-chips">
+                    {classes.map((c) => {
+                      const grade = c.grade;
+                      if (!grade) return null;
+                      const on = form.grades.includes(grade);
+                      return (
+                        <button
+                          key={c.id || grade}
+                          type="button"
+                          className={on ? 'is-on' : ''}
+                          onClick={() =>
+                            setForm((f) => ({
+                              ...f,
+                              grades: on ? f.grades.filter((g) => g !== grade) : [...f.grades, grade],
+                            }))
+                          }
+                        >
+                          {classLabel(c)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="sa-error">No classes found. Add classes under Classes first.</p>
+                )}
+              </div>
+            ) : null}
+          </div>
 
           <label className="sa-field">
             <span>
@@ -435,7 +560,9 @@ export default function Noticeboard() {
 
           <p className="sa-notice-hint">
             <NoticeIcon name="info" />
-            Published announcements will be visible to all relevant users.
+            {form.scope === 'class'
+              ? 'This notice will be visible to parents and class teachers of the selected class(es).'
+              : 'This notice will be visible to all teachers and parents at this school.'}
           </p>
         </form>
 
@@ -461,7 +588,11 @@ export default function Noticeboard() {
               {showAddMenu === 'new' && (
                 <div className="sa-users-add-menu" onClick={(e) => e.stopPropagation()}>
                   {CATEGORIES.map((c) => (
-                    <button key={c.id} type="button" onClick={() => focusComposer({ category: c.id })}>
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => focusComposer({ category: c.id, scope: c.id === 'class' ? 'class' : 'school' })}
+                    >
                       {c.label}
                     </button>
                   ))}
@@ -504,7 +635,8 @@ export default function Noticeboard() {
                       </div>
                       <p>{row.body}</p>
                       <small>
-                        {row.authorName || 'School Admin'} • {formatStamp(row.publishedAt || row.createdAt)}
+                        {row.authorName || 'School Admin'} • {row.scope === 'class' ? audienceOf(row) : 'All'} •{' '}
+                        {formatStamp(row.publishedAt || row.createdAt)}
                       </small>
                     </div>
                     <div className="sa-inc-row-actions sa-notice-more">

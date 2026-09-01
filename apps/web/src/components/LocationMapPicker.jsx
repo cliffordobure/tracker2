@@ -8,6 +8,8 @@ export default function LocationMapPicker({
   zoom = 13,
   focus,
   stopName = 'School',
+  title = 'Pick school location',
+  subtitle = 'Search a place or click the map to set the gate pin.',
   searchPlaceholder = 'Search estate, landmark, or area…',
   mapClassName = 'map-canvas pa-map',
   onLocationChange,
@@ -83,8 +85,8 @@ export default function LocationMapPicker({
           <div className="map-picker-modal-panel">
             <header className="map-picker-modal-head">
               <div>
-                <h3>Pick school location</h3>
-                <p className="muted">Search a place or click the map to set the gate pin.</p>
+                <h3>{title}</h3>
+                <p className="muted">{subtitle}</p>
               </div>
               <button type="button" className="sa-btn sa-btn-primary" onClick={() => setExpanded(false)}>
                 Done

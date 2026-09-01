@@ -20,10 +20,11 @@ import {
   SchoolOuting,
 } from '../models/index.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
-import { createAndEmitNotifications, NOTIFICATION_TYPES } from '../services/notifications.js';
+import { createAndEmitNotifications, emitChatMessage, NOTIFICATION_TYPES } from '../services/notifications.js';
 import { getIO } from '../socket.js';
 import { formatClock } from '../lib/clock.js';
-import { DIARY_LABELS, diaryTypeMeta, diaryNotifyCopy, diaryCalendarDate, diaryCalendarRange } from '../lib/diary.js';
+import { DIARY_LABELS, diaryTypeMeta, diaryNotifyCopy, diaryCalendarDate, diaryCalendarRange, normalizeDiaryCommentMedia, serializeDiaryCommentMedia } from '../lib/diary.js';
+import { classAnnouncementVisibleOr } from '../lib/announcements.js';
 
 const router = Router();
 router.use(authenticate, requireRole('teacher'));
@@ -611,10 +612,8 @@ router.get('/announcements', async (req, res) => {
       archived: archived ? true : { $ne: true },
       sourceKey: { $not: /^sample:/ },
       $or: [
-        { scope: { $ne: 'class' } },
         { scope: 'class', teacherId: req.user.id },
-        { scope: 'class', grade: { $in: grades } },
-        { category: 'class', grade: { $in: grades } },
+        ...classAnnouncementVisibleOr(grades),
       ],
     };
     if (req.query.scope === 'school' || req.query.scope === 'class') filter.scope = req.query.scope;
@@ -2069,13 +2068,19 @@ router.get('/diary', async (req, res) => {
       const photo = media.find(
         (m) => m?.url && m.resourceType !== 'raw' && m.resourceType !== 'video',
       );
-      const comments = (doc.comments || []).map((c) => ({
-        _id: c._id,
-        authorName: c.authorName || 'Parent',
-        authorRole: c.authorRole || 'Parent',
-        body: c.body || '',
-        createdAt: c.createdAt,
-      }));
+      const comments = (doc.comments || []).map((c) => {
+        const media = serializeDiaryCommentMedia(c);
+        return {
+          _id: c._id,
+          authorName: c.authorName || 'Parent',
+          authorRole: c.authorRole || 'Parent',
+          authorPhotoUrl: c.authorPhotoUrl || '',
+          body: c.body || '',
+          media,
+          attachments: media,
+          createdAt: c.createdAt,
+        };
+      });
       const signatures = (doc.parentSignatures || []).map((s) => ({
         _id: s._id,
         kidId: s.kidId?._id || s.kidId,
@@ -2213,6 +2218,70 @@ router.put('/diary/:id', async (req, res) => {
     res.json({ entry: populated, notified });
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/diary/:id/comments', async (req, res) => {
+  try {
+    if (!/^[a-fA-F0-9]{24}$/.test(String(req.params.id))) {
+      return res.status(404).json({ error: 'Diary entry not found' });
+    }
+    const { schoolId, teacher } = await teacherContext(req);
+    const entry = await DiaryEntry.findOne({
+      _id: req.params.id,
+      schoolId,
+      teacherId: req.user.id,
+      active: true,
+    });
+    if (!entry) return res.status(404).json({ error: 'Diary entry not found' });
+    const body = String(req.body?.body || '').trim().slice(0, 800);
+    const media = normalizeDiaryCommentMedia(req.body?.media || req.body?.attachments);
+    if (!body && !media.length) return res.status(400).json({ error: 'Write a comment or attach a file' });
+    const author = await User.findById(req.user.id).select('name photoUrl');
+    if (!Array.isArray(entry.comments)) entry.comments = [];
+    entry.comments.push({
+      userId: req.user.id,
+      authorName: author?.name || teacher?.name || req.user.name || 'Teacher',
+      authorRole: 'Teacher',
+      authorPhotoUrl: author?.photoUrl || '',
+      body,
+      media,
+    });
+    await entry.save();
+    try {
+      const kids = await audienceKids(entry.schoolId, { kidIds: entry.kidIds, grade: entry.grade });
+      const preview = body || (media[0]?.originalName ? `sent ${media[0].originalName}` : 'replied with a file');
+      const items = [];
+      for (const kid of kids) {
+        for (const parent of kid.parentIds || []) {
+          items.push({
+            userId: parent._id || parent,
+            type: NOTIFICATION_TYPES.DIARY,
+            title: 'Teacher replied in diary',
+            body: `${author?.name || 'Teacher'} replied on "${entry.title}": ${String(preview).slice(0, 140)}`,
+            kidId: kid._id,
+          });
+        }
+      }
+      if (items.length) await createAndEmitNotifications(getIO(), items);
+    } catch (_) {}
+    const populated = await populateDiary(DiaryEntry.findById(entry._id));
+    const comments = (populated.comments || []).map((c) => {
+      const files = serializeDiaryCommentMedia(c);
+      return {
+        _id: c._id,
+        authorName: c.authorName || 'Parent',
+        authorRole: c.authorRole || 'Parent',
+        authorPhotoUrl: c.authorPhotoUrl || '',
+        body: c.body || '',
+        media: files,
+        attachments: files,
+        createdAt: c.createdAt,
+      };
+    });
+    res.status(201).json({ comments, entry: populated });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -3064,8 +3133,13 @@ router.post('/messages', async (req, res) => {
           type: NOTIFICATION_TYPES.MESSAGE,
           title: teacher?.name || 'Teacher',
           body,
+          link: `messages/${convo._id}`,
         },
       ]);
+      emitChatMessage(getIO(), [parentId], {
+        conversationId: String(convo._id),
+        type: 'message',
+      });
     }
     res.status(201).json({ conversation: serializeTeacherConversation(convo, parent) });
   } catch (err) {
@@ -3130,8 +3204,13 @@ router.post('/messages/:id', async (req, res) => {
           type: NOTIFICATION_TYPES.MESSAGE,
           title: teacher?.name || 'Teacher',
           body,
+          link: `messages/${convo._id}`,
         },
       ]);
+      emitChatMessage(getIO(), [convo.parentId], {
+        conversationId: String(convo._id),
+        type: 'message',
+      });
     }
     res.status(201).json({
       conversation: serializeTeacherConversation(convo),

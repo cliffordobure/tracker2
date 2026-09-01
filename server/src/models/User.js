@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { normalizeMenuRights } from '../lib/staffAccess.js';
 
 const userSchema = new mongoose.Schema(
   {
@@ -6,9 +7,10 @@ const userSchema = new mongoose.Schema(
     passwordHash: { type: String, required: true },
     role: {
       type: String,
-      enum: ['super_admin', 'school_admin', 'driver', 'parent', 'teacher'],
+      enum: ['super_admin', 'school_admin', 'staff', 'driver', 'parent', 'teacher'],
       required: true,
     },
+    menuRights: { type: mongoose.Schema.Types.Mixed, default: {} },
     name: { type: String, required: true, trim: true },
     phone: { type: String, default: '' },
     schoolId: { type: mongoose.Schema.Types.ObjectId, ref: 'School', default: null },
@@ -55,6 +57,7 @@ userSchema.methods.toSafeJSON = function toSafeJSON() {
     id: this._id.toString(),
     email: this.email,
     role: this.role,
+    menuRights: this.role === 'staff' ? normalizeMenuRights(this.menuRights) : undefined,
     name: this.name,
     phone: this.phone,
     schoolId: this.schoolId?.toString?.() || this.schoolId || null,

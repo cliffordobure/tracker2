@@ -10,15 +10,30 @@ const empty = {
   description: '',
   dueDate: '',
   status: 'published',
+  kidIds: [],
 };
+
+function assignmentAudience(a) {
+  const kids = Array.isArray(a.kidIds) ? a.kidIds : [];
+  if (kids.length) {
+    const names = kids.map((k) => (k && typeof k === 'object' ? k.name : '')).filter(Boolean);
+    if (names.length === 1) return names[0];
+    if (names.length === 2) return names.join(', ');
+    if (names.length > 2) return `${names[0]} +${names.length - 1}`;
+    return `${kids.length} student${kids.length === 1 ? '' : 's'}`;
+  }
+  return a.grade || 'All classes';
+}
 
 export default function TeacherAssignments() {
   const { showToast } = useAuth();
   const [assignments, setAssignments] = useState([]);
   const [holidays, setHolidays] = useState([]);
   const [grades, setGrades] = useState([]);
+  const [kids, setKids] = useState([]);
   const [stats, setStats] = useState({});
   const [form, setForm] = useState(empty);
+  const [audience, setAudience] = useState('class');
   const [editingId, setEditingId] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -30,10 +45,14 @@ export default function TeacherAssignments() {
       setHolidays(work.holidays || []);
       setGrades(work.grades || []);
       setStats(work.stats || {});
+      const k = await api('/teacher/kids');
+      setKids(k.kids || []);
+      if (!(work.grades || []).length) setGrades(k.grades || []);
     } catch (_) {
       const [a, k] = await Promise.all([api('/teacher/assignments'), api('/teacher/kids')]);
       setAssignments(a.assignments || []);
       setGrades(k.grades || []);
+      setKids(k.kids || []);
     }
   };
 
@@ -46,14 +65,29 @@ export default function TeacherAssignments() {
     setBusy(true);
     setError('');
     try {
+      const payload = {
+        ...form,
+        grade: audience === 'all' ? '' : form.grade,
+        kidIds: audience === 'individuals' ? form.kidIds : [],
+      };
+      if (audience === 'class' && !payload.grade) {
+        setError('Select a class, or send to all classes / individual students');
+        setBusy(false);
+        return;
+      }
+      if (audience === 'individuals' && !payload.kidIds.length) {
+        setError('Select at least one student');
+        setBusy(false);
+        return;
+      }
       if (editingId) {
-        await api(`/teacher/assignments/${editingId}`, { method: 'PUT', body: form });
+        await api(`/teacher/assignments/${editingId}`, { method: 'PUT', body: payload });
         showToast('Assignment updated', 'success');
       } else {
-        await api('/teacher/assignments', { method: 'POST', body: form });
+        await api('/teacher/assignments', { method: 'POST', body: payload });
         showToast(form.status === 'draft' ? 'Draft saved' : 'Assignment posted. Parents have been notified.', 'success');
       }
-      setForm({ ...empty, grade: form.grade });
+      setForm({ ...empty, grade: audience === 'all' ? '' : form.grade });
       setEditingId('');
       await load();
     } catch (err) {
@@ -64,7 +98,9 @@ export default function TeacherAssignments() {
   };
 
   const startEdit = (a) => {
+    const kidIds = (a.kidIds || []).map((k) => k._id || k).filter(Boolean);
     setEditingId(a._id);
+    setAudience(kidIds.length ? 'individuals' : a.grade ? 'class' : 'all');
     setForm({
       title: a.title || '',
       subject: a.subject || '',
@@ -72,6 +108,7 @@ export default function TeacherAssignments() {
       description: a.description || '',
       dueDate: a.dueDate ? String(a.dueDate).slice(0, 10) : '',
       status: a.status === 'draft' ? 'draft' : 'published',
+      kidIds,
     });
   };
 
@@ -147,7 +184,7 @@ export default function TeacherAssignments() {
                     <div className="tw-muted">{a.subject || '—'}</div>
                     {a.description ? <div className="tw-muted">{a.description}</div> : null}
                   </td>
-                  <td>{a.grade || 'All grades'}</td>
+                  <td>{assignmentAudience(a)}</td>
                   <td>{a.dueDate ? new Date(a.dueDate).toLocaleDateString() : '—'}</td>
                   <td>
                     <span className="tw-pill">{a.status || 'published'}</span>
@@ -210,16 +247,62 @@ export default function TeacherAssignments() {
           <input value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} placeholder="English" />
         </label>
         <label>
-          Grade / class
-          <select value={form.grade} onChange={(e) => setForm({ ...form, grade: e.target.value })}>
-            <option value="">All grades</option>
-            {grades.map((g) => (
-              <option key={g} value={g}>
-                {g}
-              </option>
-            ))}
+          Send to
+          <select
+            value={audience}
+            onChange={(e) => {
+              const next = e.target.value;
+              setAudience(next);
+              setForm((f) => ({
+                ...f,
+                kidIds: next === 'individuals' ? f.kidIds : [],
+                grade: next === 'all' ? '' : f.grade,
+              }));
+            }}
+          >
+            <option value="all">All classes</option>
+            <option value="class">One class</option>
+            <option value="individuals">Individual students</option>
           </select>
         </label>
+        {audience !== 'all' && (
+          <label>
+            Class
+            <select
+              value={form.grade}
+              onChange={(e) => setForm({ ...form, grade: e.target.value, kidIds: audience === 'individuals' ? [] : form.kidIds })}
+            >
+              <option value="">{audience === 'individuals' ? 'All classes (filter)' : 'Select class'}</option>
+              {grades.map((g) => (
+                <option key={g} value={g}>
+                  {g}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {audience === 'individuals' && (
+          <fieldset className="diary-kids">
+            <legend>Students</legend>
+            {(form.grade ? kids.filter((k) => k.grade === form.grade) : kids).map((k) => {
+              const on = form.kidIds.includes(k._id);
+              return (
+                <label key={k._id} className="diary-kid-row">
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    onChange={() => setForm((f) => ({
+                      ...f,
+                      kidIds: on ? f.kidIds.filter((id) => id !== k._id) : [...f.kidIds, k._id],
+                    }))}
+                  />
+                  {k.name}{k.grade ? ` · ${k.grade}` : ''}
+                </label>
+              );
+            })}
+            {!kids.length && <p className="tw-empty">No students found.</p>}
+          </fieldset>
+        )}
         <label>
           Due date
           <input type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
@@ -250,6 +333,7 @@ export default function TeacherAssignments() {
               className="tw-btn tw-btn-ghost"
               onClick={() => {
                 setEditingId('');
+                setAudience('class');
                 setForm(empty);
               }}
             >

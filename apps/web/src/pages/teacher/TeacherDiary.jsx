@@ -70,6 +70,10 @@ export default function TeacherDiary() {
   const [uploading, setUploading] = useState(false);
   const [openId, setOpenId] = useState(null);
   const [editingId, setEditingId] = useState('');
+  const [reply, setReply] = useState('');
+  const [replyFiles, setReplyFiles] = useState([]);
+  const [replyBusy, setReplyBusy] = useState(false);
+  const [replyUploading, setReplyUploading] = useState(false);
 
   const load = async (month = monthKey(cursor), date = selected) => {
     const [d, k] = await Promise.all([
@@ -158,6 +162,41 @@ export default function TeacherDiary() {
     }
   };
 
+  const addReplyFiles = async (files) => {
+    const remaining = 4 - replyFiles.length;
+    const batch = [...files].slice(0, remaining);
+    if (!batch.length) return;
+    setReplyUploading(true);
+    setError('');
+    try {
+      const uploaded = [];
+      for (const file of batch) uploaded.push(await uploadFile(file, { folder: 'diary' }));
+      setReplyFiles((prev) => [...prev, ...uploaded]);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setReplyUploading(false);
+    }
+  };
+
+  const sendReply = async (entry) => {
+    const body = reply.trim();
+    if (!body && !replyFiles.length) return;
+    setReplyBusy(true);
+    setError('');
+    try {
+      await api(`/teacher/diary/${entry._id}/comments`, { method: 'POST', body: { body, media: replyFiles } });
+      showToast('Reply sent to parents', 'success');
+      setReply('');
+      setReplyFiles([]);
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setReplyBusy(false);
+    }
+  };
+
   const remove = async (id) => {
     if (!confirm('Remove this diary entry?')) return;
     try {
@@ -181,8 +220,8 @@ export default function TeacherDiary() {
   const monthLabel = cursor.toLocaleString(undefined, { month: 'long', year: 'numeric' });
   const selectedEntries = entries.filter((e) => ymd(e.date) === selected);
   const open = selectedEntries.find((e) => e._id === openId) || selectedEntries[0] || null;
-  const individual = ['observation', 'behaviour', 'achievement', 'incident'].includes(form.label);
   const prettyDate = new Date(`${selected}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
+  const audienceKids = form.grade ? kids.filter((k) => k.grade === form.grade) : kids;
 
   return (
     <div className="tw-split tdiary">
@@ -238,6 +277,7 @@ export default function TeacherDiary() {
                 <small>
                   {(e.subjects || [])[0] || e.typeLabel} · {e.time || '—'} · {e.grade || 'Class'}
                   {e.signatureCount ? ` · ${e.signatureCount} acknowledged` : ' · Awaiting acknowledgement'}
+                  {(e.comments || []).length ? ` · ${(e.comments || []).length} comment${(e.comments || []).length === 1 ? '' : 's'}` : ''}
                 </small>
                 <div className="tw-inline-actions">
                   <button
@@ -271,6 +311,71 @@ export default function TeacherDiary() {
           {!selectedEntries.length && <p className="tw-empty">No diary entries yet. Create a lesson, homework, or observation.</p>}
         </div>
 
+        {open && (
+          <div className="tdiary-comments">
+            <strong>Comments with parents</strong>
+            {(open.comments || []).length === 0 ? (
+              <p>No parent comments yet.</p>
+            ) : (
+              <ul>
+                {(open.comments || []).map((c) => (
+                  <li key={c._id}>
+                    <b>{c.authorName || 'Parent'}{c.authorRole ? ` · ${c.authorRole}` : ''}</b>
+                    {c.body ? <p>{c.body}</p> : null}
+                    {(c.attachments || c.media || []).length > 0 && (
+                      <span className="pdiary-comment-files">
+                        {(c.attachments || c.media).map((f) => (
+                          <a key={f.url} href={f.url} target="_blank" rel="noreferrer">{f.name || f.originalName || 'File'}</a>
+                        ))}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="pdiary-comment-box">
+              <textarea value={reply} onChange={(e) => setReply(e.target.value)} placeholder="Reply to parents" rows={3} />
+              <div className="pdiary-comment-box-actions">
+                <label className="tw-btn tw-btn-ghost">
+                  {replyUploading ? 'Uploading…' : 'Attach file'}
+                  <input
+                    type="file"
+                    multiple
+                    hidden
+                    disabled={replyUploading || replyFiles.length >= 4}
+                    onChange={(e) => {
+                      addReplyFiles(e.target.files);
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="tw-btn tw-btn-primary"
+                  disabled={replyBusy || replyUploading || (!reply.trim() && !replyFiles.length)}
+                  onClick={() => sendReply(open)}
+                >
+                  {replyBusy ? 'Sending…' : 'Send reply'}
+                </button>
+              </div>
+              {replyFiles.length > 0 && (
+                <div className="pdiary-comment-files">
+                  {replyFiles.map((f) => (
+                    <button
+                      type="button"
+                      key={f.url}
+                      className="diary-file-chip"
+                      onClick={() => setReplyFiles((prev) => prev.filter((x) => x.url !== f.url))}
+                    >
+                      {f.originalName || 'File'} ×
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {overview?.pendingParents?.length > 0 && (
           <div className="tdiary-pending">
             <strong>Not acknowledged ({overview.pending})</strong>
@@ -296,10 +401,33 @@ export default function TeacherDiary() {
         <label>
           Class
           <select value={form.grade} onChange={(e) => setForm({ ...form, grade: e.target.value, kidIds: [] })}>
-            <option value="">Whole school / pick students</option>
+            <option value="">All classes</option>
             {grades.map((g) => <option key={g} value={g}>{g}</option>)}
           </select>
         </label>
+        <fieldset className="diary-kids">
+          <legend>Students</legend>
+          <p className="tw-lede" style={{ margin: '0 0 8px' }}>
+            Leave empty for the whole {form.grade || 'school'}. Tick names to send this entry only to those students.
+          </p>
+          {audienceKids.map((k) => {
+            const on = form.kidIds.includes(k._id);
+            return (
+              <label key={k._id} className="diary-kid-row">
+                <input
+                  type="checkbox"
+                  checked={on}
+                  onChange={() => setForm((f) => ({
+                    ...f,
+                    kidIds: on ? f.kidIds.filter((id) => id !== k._id) : [...f.kidIds, k._id],
+                  }))}
+                />
+                {k.name}{k.grade ? ` · ${k.grade}` : ''}
+              </label>
+            );
+          })}
+          {!audienceKids.length && <p className="tw-empty">No students in this class.</p>}
+        </fieldset>
         <label>
           Date
           <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
@@ -337,27 +465,6 @@ export default function TeacherDiary() {
             Details
             <textarea value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} rows={5} />
           </label>
-        )}
-        {individual && (
-          <fieldset className="diary-kids">
-            <legend>Student</legend>
-            {(form.grade ? kids.filter((k) => k.grade === form.grade) : kids).map((k) => {
-              const on = form.kidIds.includes(k._id);
-              return (
-                <label key={k._id} className="diary-kid-row">
-                  <input
-                    type="checkbox"
-                    checked={on}
-                    onChange={() => setForm((f) => ({
-                      ...f,
-                      kidIds: on ? f.kidIds.filter((id) => id !== k._id) : [...f.kidIds, k._id],
-                    }))}
-                  />
-                  {k.name}{k.grade ? ` · ${k.grade}` : ''}
-                </label>
-              );
-            })}
-          </fieldset>
         )}
         {(form.label === 'behaviour' || form.label === 'incident') && (
           <>

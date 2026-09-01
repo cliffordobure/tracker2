@@ -27,6 +27,57 @@ export function diaryTypeLabel(label) {
   return diaryTypeMeta(label).label;
 }
 
+export const MAX_DIARY_COMMENT_MEDIA = 4;
+
+export function normalizeDiaryCommentMedia(raw, max = MAX_DIARY_COMMENT_MEDIA) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((m) => m && m.url)
+    .slice(0, max)
+    .map((m) => ({
+      url: String(m.url),
+      publicId: String(m.publicId || ''),
+      resourceType: ['image', 'video', 'raw'].includes(m.resourceType) ? m.resourceType : 'image',
+      originalName: String(m.originalName || ''),
+      bytes: Number.isFinite(Number(m.bytes)) ? Math.max(0, Number(m.bytes)) : 0,
+    }));
+}
+
+function diaryCommentKind(m) {
+  const type = String(m?.resourceType || '').toLowerCase();
+  if (type === 'image') return 'image';
+  const hay = `${m?.url || ''} ${m?.originalName || ''}`;
+  if (/\.(jpe?g|png|gif|webp|heic|bmp)($|\?)/i.test(hay) || /\/image\/upload\//i.test(hay)) return 'image';
+  if (/\.pdf($|\?)/i.test(hay)) return 'pdf';
+  return type === 'raw' || type === 'video' ? type : 'file';
+}
+
+export function serializeDiaryCommentMedia(comment) {
+  return (comment?.media || [])
+    .filter((m) => m && m.url)
+    .map((m) => {
+      const name = m.originalName || (String(m.url || '').split('/').pop() || 'Attachment');
+      const kind = diaryCommentKind(m);
+      const bytes = Number(m.bytes) || 0;
+      let sizeLabel = '';
+      if (bytes > 0) {
+        sizeLabel = bytes < 1024 * 1024
+          ? `${Math.max(1, Math.round(bytes / 1024))} KB`
+          : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+      }
+      return {
+        url: m.url,
+        name,
+        kind,
+        sizeLabel,
+        originalName: name,
+        publicId: m.publicId || '',
+        resourceType: m.resourceType || (kind === 'image' ? 'image' : 'raw'),
+        bytes,
+      };
+    });
+}
+
 /** School diary dates are calendar days, not timezone-local midnights. */
 export function diaryCalendarDate(dateInput) {
   if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dateInput)) {

@@ -30,18 +30,44 @@ import { closeSchool } from '../lib/schoolAccess.js';
 import adminTripOps from './adminTripOps.js';
 import adminAcademics from './adminAcademics.js';
 import adminCampuses, { validCampusId } from './adminCampuses.js';
-import { createAndEmitNotifications, NOTIFICATION_TYPES } from '../services/notifications.js';
+import { createAndEmitNotifications, emitChatMessage, NOTIFICATION_TYPES } from '../services/notifications.js';
 import { getIO } from '../socket.js';
+import {
+  announcementAudienceLabel,
+  announcementGradesOf,
+  parseAnnouncementGrades,
+} from '../lib/announcements.js';
+import {
+  isSchoolConsoleRole,
+  menuKeyForAdminPath,
+  menuRightOf,
+  normalizeMenuRights,
+} from '../lib/staffAccess.js';
 
 const router = Router();
 router.use(authenticate, requireSchoolStaff);
+router.use(async (req, res, next) => {
+  if (req.user?.role !== 'staff') return next();
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+  const key = menuKeyForAdminPath(req.originalUrl || req.path);
+  if (!key) return next();
+  try {
+    const staff = await User.findById(req.user.id).select('menuRights');
+    if (menuRightOf(staff?.menuRights, key) !== 'edit') {
+      return res.status(403).json({ error: 'You have view-only access for this area' });
+    }
+    return next();
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
 router.use(adminTripOps);
 router.use(adminAcademics);
 router.use(adminCampuses);
 
 /** school_admin → their school; super_admin → query/body schoolId or null (all). */
 function resolveSchoolId(req, { required = false } = {}) {
-  if (req.user.role === 'school_admin') {
+  if (isSchoolConsoleRole(req.user.role)) {
     return req.user.schoolId || null;
   }
   return req.query.schoolId || req.body.schoolId || null;
@@ -60,7 +86,7 @@ function campusFilter(req) {
 }
 
 function assertSchoolAccess(req, schoolId) {
-  if (req.user.role === 'school_admin' && schoolId?.toString() !== req.user.schoolId) {
+  if (isSchoolConsoleRole(req.user.role) && schoolId?.toString() !== req.user.schoolId) {
     return false;
   }
   return true;
@@ -511,7 +537,7 @@ function serializeAdminNotification(n) {
 router.get('/inbox', async (req, res) => {
   try {
     const schoolId = resolveSchoolId(req);
-    const [unread, incidents, messages] = await Promise.all([
+    const [unread, incidents, messages, leave] = await Promise.all([
       Notification.countDocuments({
         userId: req.user.id,
         read: { $ne: true },
@@ -526,8 +552,11 @@ router.get('/inbox', async (req, res) => {
       schoolId
         ? Conversation.countDocuments({ schoolId, archived: { $ne: true }, staffUnreadCount: { $gt: 0 } })
         : 0,
+      schoolId
+        ? LeaveRequest.countDocuments({ schoolId, status: 'pending' })
+        : 0,
     ]);
-    res.json({ unread, incidents, messages });
+    res.json({ unread, incidents, messages, leave });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -787,7 +816,7 @@ function personPayload(ref, role) {
 }
 
 function memberRoleLabel(role) {
-  if (role === 'school_admin' || role === 'super_admin') return 'Admin';
+  if (role === 'school_admin' || role === 'super_admin' || role === 'staff') return 'Admin';
   if (role === 'driver') return 'Driver';
   if (role === 'teacher') return 'Teacher';
   if (role === 'parent') return 'Parent';
@@ -1059,6 +1088,10 @@ router.post('/messages', async (req, res) => {
           link: `messages/${convo._id}`,
         },
       ]);
+      emitChatMessage(getIO(), [contact._id], {
+        conversationId: String(convo._id),
+        type: 'message',
+      });
     }
 
     const populated = await populateConversation(Conversation.findById(convo._id));
@@ -1128,6 +1161,10 @@ router.post('/messages/:id', async (req, res) => {
           link: `messages/${convo._id}`,
         }))
       );
+      emitChatMessage(getIO(), unique, {
+        conversationId: String(convo._id),
+        type: 'message',
+      });
     }
 
     res.status(201).json({
@@ -1191,7 +1228,7 @@ router.post('/messages/:id/members', async (req, res) => {
     const person = await User.findOne({
       _id: userId,
       schoolId,
-      role: { $in: ['school_admin', 'teacher', 'driver', 'parent'] },
+      role: { $in: ['school_admin', 'staff', 'teacher', 'driver', 'parent'] },
       active: { $ne: false },
     }).select('_id');
     if (!person) return res.status(404).json({ error: 'User not found' });
@@ -1243,10 +1280,12 @@ router.delete('/messages/:id', async (req, res) => {
   }
 });
 
-const SCHOOL_ROLES = ['school_admin', 'teacher', 'driver', 'parent'];
+const SCHOOL_ROLES = ['school_admin', 'staff', 'teacher', 'driver', 'parent'];
+const ASSIGNABLE_ROLES = ['school_admin', 'staff'];
 const ROLE_LABELS = {
   super_admin: 'Super Admin',
-  school_admin: 'School Admin',
+  school_admin: 'Super Admin',
+  staff: 'Staff',
   teacher: 'Teacher',
   driver: 'Driver',
   parent: 'Parent',
@@ -1279,7 +1318,7 @@ router.get('/users', async (req, res) => {
     }).sort({ name: 1 });
 
     const sinceMonth = monthStart();
-    const byRole = { school_admin: 0, teacher: 0, driver: 0, parent: 0 };
+    const byRole = { school_admin: 0, staff: 0, teacher: 0, driver: 0, parent: 0 };
     let active = 0;
     let addedThisMonth = 0;
     const departments = new Set();
@@ -1306,6 +1345,10 @@ router.get('/users', async (req, res) => {
         label: ROLE_LABELS[id],
         count: byRole[id] || 0,
       })),
+      assignableRoles: ASSIGNABLE_ROLES.map((id) => ({
+        id,
+        label: ROLE_LABELS[id],
+      })),
       departments: [...departments].sort(),
       stats: {
         total: users.length,
@@ -1329,9 +1372,14 @@ router.post('/users', async (req, res) => {
     const email = String(req.body?.email || '').toLowerCase().trim();
     const role = String(req.body?.role || '');
     if (!name || !email) return res.status(400).json({ error: 'name and email are required' });
-    if (!SCHOOL_ROLES.includes(role)) return res.status(400).json({ error: 'Choose a stored role.' });
+    if (!ASSIGNABLE_ROLES.includes(role)) return res.status(400).json({ error: 'Choose Super Admin or Staff.' });
+    if (req.user.role === 'staff' && role === 'school_admin') {
+      return res.status(403).json({ error: 'Staff cannot create a Super Admin' });
+    }
+    const password = String(req.body?.password || '').trim();
+    if (!password) return res.status(400).json({ error: 'Password is required' });
 
-    const passwordHash = await bcrypt.hash(String(req.body?.password || 'password123'), 10);
+    const passwordHash = await bcrypt.hash(password, 10);
     const user = await User.create({
       name,
       email,
@@ -1341,6 +1389,7 @@ router.post('/users', async (req, res) => {
       department: String(req.body?.department || '').trim(),
       jobTitle: String(req.body?.jobTitle || '').trim(),
       passwordHash,
+      menuRights: role === 'staff' ? normalizeMenuRights(req.body.menuRights) : {},
       active: req.body?.active === false ? false : true,
     });
     if (role === 'driver') await ensureDriverProfile(user._id);
@@ -1367,12 +1416,17 @@ router.post('/users/import', async (req, res) => {
         errors.push({ row: i + 1, error: 'name and email are required' });
         continue;
       }
-      if (!SCHOOL_ROLES.includes(role)) {
-        errors.push({ row: i + 1, error: 'role must be school_admin, teacher, driver, or parent' });
+      if (!ASSIGNABLE_ROLES.includes(role)) {
+        errors.push({ row: i + 1, error: 'role must be school_admin or staff' });
         continue;
       }
       try {
-        const passwordHash = await bcrypt.hash(String(row.password || 'password123'), 10);
+        const password = String(row.password || '').trim();
+        if (!password) {
+          errors.push({ row: i + 1, error: 'password is required' });
+          continue;
+        }
+        const passwordHash = await bcrypt.hash(password, 10);
         const user = await User.create({
           name,
           email,
@@ -1381,6 +1435,7 @@ router.post('/users/import', async (req, res) => {
           schoolId,
           department: String(row.department || '').trim(),
           passwordHash,
+          menuRights: role === 'staff' ? normalizeMenuRights(row) : {},
         });
         if (role === 'driver') await ensureDriverProfile(user._id);
         created.push(serializeSchoolUser(user));
@@ -1421,11 +1476,18 @@ router.put('/users/:id', async (req, res) => {
       if (taken) return res.status(400).json({ error: 'That email is already in use' });
       updates.email = email;
     }
-    if (req.body.role && SCHOOL_ROLES.includes(req.body.role)) {
+    if (req.body.role && (ASSIGNABLE_ROLES.includes(req.body.role) || req.body.role === existing.role)) {
       if (String(existing._id) === String(req.user.id) && req.body.role !== existing.role) {
         return res.status(400).json({ error: 'You cannot change your own role' });
       }
+      if (req.user.role === 'staff' && req.body.role === 'school_admin') {
+        return res.status(403).json({ error: 'Staff cannot assign Super Admin' });
+      }
       updates.role = req.body.role;
+    }
+    if (req.body.menuRights !== undefined || updates.role === 'staff' || existing.role === 'staff') {
+      const nextRole = updates.role || existing.role;
+      updates.menuRights = nextRole === 'staff' ? normalizeMenuRights(req.body.menuRights ?? existing.menuRights) : {};
     }
     if (req.body.password) {
       updates.passwordHash = await bcrypt.hash(String(req.body.password), 10);
@@ -2054,6 +2116,8 @@ router.post('/buses', async (req, res) => {
 
     const plate = String(req.body.plate || '').trim().replace(/\s+/g, ' ');
     if (!plate) return res.status(400).json({ error: 'Registration / plate is required' });
+    const campusId = await validCampusId(schoolId, req.body.campusId);
+    if (!campusId) return res.status(400).json({ error: 'Campus is required' });
     const plateClash = await Bus.findOne({
       schoolId,
       plate: { $regex: `^${plate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
@@ -2064,7 +2128,7 @@ router.post('/buses', async (req, res) => {
 
     const bus = await Bus.create({
       schoolId,
-      campusId: await validCampusId(schoolId, req.body.campusId),
+      campusId,
       plate,
       label: req.body.label || '',
       model: req.body.model || '',
@@ -4139,6 +4203,13 @@ router.post('/kids/onboard', async (req, res) => {
       parentIds,
     } = req.body;
     if (!name) return res.status(400).json({ error: 'name is required' });
+    if (!(await validCampusId(schoolId, req.body.campusId))) {
+      return res.status(400).json({ error: 'Campus is required' });
+    }
+    if (!String(grade || '').trim()) return res.status(400).json({ error: 'Class is required' });
+    if (!['male', 'female', 'other'].includes(gender)) {
+      return res.status(400).json({ error: 'Gender is required' });
+    }
     if (!boarding?.lat || !boarding?.lng) {
       return res.status(400).json({ error: 'boarding.lat and boarding.lng are required' });
     }
@@ -4358,10 +4429,14 @@ router.put('/kids/:id', async (req, res) => {
     delete updates.parent;
     if (updates.campusId !== undefined) {
       updates.campusId = await validCampusId(existing.schoolId, updates.campusId);
+      if (!updates.campusId) return res.status(400).json({ error: 'Campus is required' });
+    }
+    if (updates.grade !== undefined && !String(updates.grade || '').trim()) {
+      return res.status(400).json({ error: 'Class is required' });
     }
     if (updates.dateOfBirth === '') updates.dateOfBirth = null;
-    if (updates.gender != null && !['', 'male', 'female', 'other'].includes(updates.gender)) {
-      delete updates.gender;
+    if (updates.gender !== undefined && !['male', 'female', 'other'].includes(updates.gender)) {
+      return res.status(400).json({ error: 'Gender is required' });
     }
 
     let routeId = updates.routeId || existing.routeId;
@@ -4581,6 +4656,57 @@ function announcementMeta(category) {
   return { category: cat, kind, icon };
 }
 
+function announcementTargetFromBody(body = {}) {
+  const scope = body.scope === 'class' ? 'class' : 'school';
+  const grades = scope === 'class' ? parseAnnouncementGrades(body) : [];
+  return {
+    scope,
+    grade: grades[0] || '',
+    grades,
+    audience: announcementAudienceLabel(scope, grades),
+  };
+}
+
+async function notifyAdminAnnouncement(schoolId, announcement) {
+  const recipientIds = new Set();
+  const grades = announcementGradesOf(announcement);
+  if (announcement.scope === 'class' && grades.length) {
+    const [classRows, kidRows] = await Promise.all([
+      SchoolClass.find({ schoolId, grade: { $in: grades }, active: { $ne: false } }).select('teacherId'),
+      Kid.find({ schoolId, grade: { $in: grades }, active: { $ne: false } }).select('parentIds'),
+    ]);
+    for (const row of classRows) {
+      if (row.teacherId) recipientIds.add(String(row.teacherId));
+    }
+    for (const kid of kidRows) {
+      for (const id of kid.parentIds || []) recipientIds.add(String(id));
+    }
+  } else {
+    const [teachers, parents, kidRows] = await Promise.all([
+      User.find({ schoolId, role: 'teacher', active: { $ne: false } }).select('_id'),
+      User.find({ schoolId, role: 'parent', active: { $ne: false } }).select('_id'),
+      Kid.find({ schoolId, active: { $ne: false } }).select('parentIds'),
+    ]);
+    for (const u of teachers) recipientIds.add(String(u._id));
+    for (const u of parents) recipientIds.add(String(u._id));
+    for (const kid of kidRows) {
+      for (const id of kid.parentIds || []) recipientIds.add(String(id));
+    }
+  }
+  if (!recipientIds.size) return;
+  await createAndEmitNotifications(
+    getIO(),
+    [...recipientIds].map((userId) => ({
+      userId,
+      type: NOTIFICATION_TYPES.ANNOUNCEMENT,
+      key: `announcement:${announcement._id}`,
+      title: announcement.title,
+      body: String(announcement.body || '').slice(0, 400),
+      link: 'announcements',
+    }))
+  );
+}
+
 router.get('/announcements', async (req, res) => {
   try {
     const filter = { ...schoolFilter(req), active: true };
@@ -4600,44 +4726,24 @@ router.post('/announcements', async (req, res) => {
     if (!title?.trim() || !body?.trim()) {
       return res.status(400).json({ error: 'title and body are required' });
     }
+    const target = announcementTargetFromBody(req.body);
+    if (target.scope === 'class' && !target.grades.length) {
+      return res.status(400).json({ error: 'Select at least one class' });
+    }
     const meta = announcementMeta(category);
     const announcement = await Announcement.create({
       schoolId,
       title: title.trim().slice(0, 160),
       body: body.trim().slice(0, 1000),
       ...meta,
-      scope: 'school',
-      audience: 'All Teachers, Parents & Students',
+      ...target,
       authorName: authorName?.trim() || 'School Admin',
       attachmentName: attachmentName || '',
       attachmentUrl: attachmentUrl || '',
       attachmentPublicId: attachmentPublicId || '',
       publishedAt: new Date(),
     });
-    const [teachers, parents, kidRows] = await Promise.all([
-      User.find({ schoolId, role: 'teacher', active: { $ne: false } }).select('_id'),
-      User.find({ schoolId, role: 'parent', active: { $ne: false } }).select('_id'),
-      Kid.find({ schoolId, active: { $ne: false } }).select('parentIds'),
-    ]);
-    const recipientIds = new Set();
-    for (const u of teachers) recipientIds.add(String(u._id));
-    for (const u of parents) recipientIds.add(String(u._id));
-    for (const kid of kidRows) {
-      for (const id of kid.parentIds || []) recipientIds.add(String(id));
-    }
-    if (recipientIds.size) {
-      await createAndEmitNotifications(
-        getIO(),
-        [...recipientIds].map((userId) => ({
-          userId,
-          type: NOTIFICATION_TYPES.ANNOUNCEMENT,
-          key: `announcement:${announcement._id}`,
-          title: announcement.title,
-          body: String(announcement.body || '').slice(0, 400),
-          link: 'announcements',
-        }))
-      );
-    }
+    await notifyAdminAnnouncement(schoolId, announcement);
     res.status(201).json({ announcement });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -4653,6 +4759,20 @@ router.put('/announcements/:id', async (req, res) => {
     if (req.body?.title !== undefined) item.title = String(req.body.title || '').trim().slice(0, 160);
     if (req.body?.body !== undefined) item.body = String(req.body.body || '').trim().slice(0, 1000);
     if (req.body?.category !== undefined) Object.assign(item, announcementMeta(req.body.category));
+    if (req.body?.scope !== undefined || req.body?.grades !== undefined || req.body?.grade !== undefined) {
+      const target = announcementTargetFromBody({
+        scope: req.body.scope !== undefined ? req.body.scope : item.scope,
+        grades: req.body.grades !== undefined || req.body.grade !== undefined
+          ? parseAnnouncementGrades(req.body)
+          : item.grades?.length
+            ? item.grades
+            : item.grade,
+      });
+      if (target.scope === 'class' && !target.grades.length) {
+        return res.status(400).json({ error: 'Select at least one class' });
+      }
+      Object.assign(item, target);
+    }
     if (req.body?.attachmentName !== undefined) item.attachmentName = String(req.body.attachmentName || '');
     if (req.body?.attachmentUrl !== undefined) item.attachmentUrl = String(req.body.attachmentUrl || '');
     if (req.body?.attachmentPublicId !== undefined) {
@@ -4747,11 +4867,34 @@ router.patch('/leave-requests/:id', async (req, res) => {
     if (!['pending', 'approved', 'rejected', 'cancelled'].includes(status)) {
       return res.status(400).json({ error: 'Invalid status' });
     }
+    if (status === 'cancelled' && !['pending', 'approved'].includes(request.status)) {
+      return res.status(409).json({ error: 'Only pending or approved leave can be cancelled' });
+    }
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const start = new Date(request.startDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(request.endDate);
+    end.setHours(0, 0, 0, 0);
+    const stopEarly =
+      status === 'cancelled' &&
+      request.status === 'approved' &&
+      start.getTime() <= today.getTime() &&
+      today.getTime() <= end.getTime();
+
     request.status = status;
     if (reviewNote !== undefined) request.reviewNote = String(reviewNote || '').slice(0, 500);
-    if (['approved', 'rejected'].includes(status)) {
+    if (['approved', 'rejected', 'cancelled'].includes(status)) {
       request.reviewedBy = req.user.id;
       request.reviewedAt = new Date();
+    }
+    if (stopEarly) {
+      request.endDate = today;
+      request.expectedReturnDate = today;
+      if (reviewNote === undefined) {
+        request.reviewNote =
+          'Leave stopped early by school admin because the student returned before the original end date.';
+      }
     }
     await request.save();
     const populated = await LeaveRequest.findById(request._id)
@@ -4759,7 +4902,23 @@ router.patch('/leave-requests/:id', async (req, res) => {
       .populate('parentId', 'name phone email')
       .populate('reviewedBy', 'name email');
     const obj = populated.toObject();
-    res.json({ request: { ...obj, days: leaveDays(obj.startDate, obj.endDate) } });
+    if (status === 'cancelled' && request.parentId) {
+      const kidName = populated.kidId?.name || 'your child';
+      await createAndEmitNotifications(getIO(), [
+        {
+          userId: request.parentId,
+          type: NOTIFICATION_TYPES.SYSTEM,
+          key: `leave:${request._id}:cancelled`,
+          title: stopEarly ? 'Leave stopped' : 'Leave cancelled',
+          body: stopEarly
+            ? `${kidName}'s leave was stopped by the school. They are expected back at school from today.`
+            : `${kidName}'s leave request was cancelled by the school.`,
+          kidId: request.kidId,
+          link: 'leave',
+        },
+      ]).catch(() => {});
+    }
+    res.json({ request: { ...obj, days: leaveDays(obj.startDate, obj.endDate), stoppedEarly: stopEarly } });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

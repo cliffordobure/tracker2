@@ -17,7 +17,7 @@ const router = Router();
 const ATTENDANCE_STATUSES = ['present', 'absent', 'late', 'excused'];
 
 function resolveSchoolId(req) {
-  if (req.user.role === 'school_admin') return req.user.schoolId || null;
+  if (req.user.role === 'school_admin' || req.user.role === 'staff') return req.user.schoolId || null;
   return req.query.schoolId || req.body.schoolId || null;
 }
 

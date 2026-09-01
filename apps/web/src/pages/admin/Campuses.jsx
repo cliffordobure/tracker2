@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../lib/api';
+import LocationMapPicker from '../../components/LocationMapPicker';
+
+const DEFAULT_LOCATION = { lat: -1.2864, lng: 36.8172 };
 
 const emptyForm = {
   name: '',
   address: '',
   phone: '',
-  lat: '',
-  lng: '',
+  lat: DEFAULT_LOCATION.lat,
+  lng: DEFAULT_LOCATION.lng,
   active: true,
 };
 
@@ -26,6 +29,8 @@ export default function Campuses() {
   const [panel, setPanel] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(emptyForm);
+  const [schoolLocation, setSchoolLocation] = useState(DEFAULT_LOCATION);
+  const [mapFocus, setMapFocus] = useState(null);
   const [selected, setSelected] = useState({ kids: [], teachers: [], drivers: [], buses: [], routes: [] });
   const [saving, setSaving] = useState(false);
 
@@ -37,6 +42,14 @@ export default function Campuses() {
 
   useEffect(() => {
     load().catch((e) => setError(e.message));
+    api('/admin/schools')
+      .then((d) => {
+        const loc = d.schools?.[0]?.location;
+        if (Number.isFinite(Number(loc?.lat)) && Number.isFinite(Number(loc?.lng))) {
+          setSchoolLocation({ lat: Number(loc.lat), lng: Number(loc.lng) });
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const totals = useMemo(
@@ -56,14 +69,16 @@ export default function Campuses() {
   const closePanel = () => {
     setPanel(null);
     setEditingId(null);
-    setForm(emptyForm);
+    setForm({ ...emptyForm, lat: schoolLocation.lat, lng: schoolLocation.lng });
+    setMapFocus(null);
   };
 
   const startCreate = () => {
     setError('');
     setSuccess('');
     setEditingId(null);
-    setForm(emptyForm);
+    setForm({ ...emptyForm, lat: schoolLocation.lat, lng: schoolLocation.lng });
+    setMapFocus({ lat: schoolLocation.lat, lng: schoolLocation.lng, zoom: 14, at: Date.now() });
     setPanel('form');
   };
 
@@ -71,14 +86,17 @@ export default function Campuses() {
     setError('');
     setSuccess('');
     setEditingId(campus.id);
+    const lat = Number.isFinite(Number(campus.location?.lat)) ? Number(campus.location.lat) : schoolLocation.lat;
+    const lng = Number.isFinite(Number(campus.location?.lng)) ? Number(campus.location.lng) : schoolLocation.lng;
     setForm({
       name: campus.name || '',
       address: campus.address || '',
       phone: campus.phone || '',
-      lat: campus.location?.lat ?? '',
-      lng: campus.location?.lng ?? '',
+      lat,
+      lng,
       active: campus.active !== false,
     });
+    setMapFocus({ lat, lng, zoom: 15, at: Date.now() });
     setPanel('form');
   };
 
@@ -107,8 +125,8 @@ export default function Campuses() {
         phone: form.phone.trim(),
         active: form.active,
         location: {
-          lat: form.lat === '' ? null : Number(form.lat),
-          lng: form.lng === '' ? null : Number(form.lng),
+          lat: Number.isFinite(Number(form.lat)) ? Number(form.lat) : null,
+          lng: Number.isFinite(Number(form.lng)) ? Number(form.lng) : null,
         },
       };
       if (editingId) {
@@ -247,7 +265,7 @@ export default function Campuses() {
 
       {panel === 'form' && (
         <div className="sa-action-overlay" onClick={closePanel} role="presentation">
-          <aside className="sa-action-modal sa-people-modal" onClick={(e) => e.stopPropagation()}>
+          <aside className="sa-action-modal sa-people-modal sa-campus-form-modal" onClick={(e) => e.stopPropagation()}>
             <header className="sa-stop-detail-bar">
               <h2>{editingId ? 'Edit campus' : 'Add campus'}</h2>
               <button type="button" className="sa-icon-ghost" aria-label="Close" onClick={closePanel}>×</button>
@@ -265,15 +283,27 @@ export default function Campuses() {
                 <span>Phone</span>
                 <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
               </label>
-              <div className="sa-stu-form-row">
-                <label className="sa-field">
-                  <span>Latitude</span>
-                  <input value={form.lat} onChange={(e) => setForm({ ...form, lat: e.target.value })} />
-                </label>
-                <label className="sa-field">
-                  <span>Longitude</span>
-                  <input value={form.lng} onChange={(e) => setForm({ ...form, lng: e.target.value })} />
-                </label>
+              <div className="sa-field">
+                <span>Campus location</span>
+                <LocationMapPicker
+                  hint="Search a place or click the map to pin this campus."
+                  title="Pick campus location"
+                  subtitle="Search a place or click the map to set the campus pin."
+                  stopName={form.name || 'Campus'}
+                  searchPlaceholder="Search estate, landmark, or area…"
+                  center={{ lat: Number(form.lat), lng: Number(form.lng) }}
+                  focus={mapFocus}
+                  mapClassName="map-canvas map-sm sa-campus-map"
+                  onLocationChange={({ lat, lng, address }) => {
+                    setForm((f) => ({
+                      ...f,
+                      lat,
+                      lng,
+                      address: address && !f.address.trim() ? address : f.address,
+                    }));
+                  }}
+                  onFocusChange={setMapFocus}
+                />
               </div>
             </div>
             <div className="sa-people-foot">

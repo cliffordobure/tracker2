@@ -368,7 +368,7 @@ export default function Kids() {
   ];
   const maxStep = 4;
   const canNext = () => {
-    if (step === 1) return Boolean(name.trim());
+    if (step === 1) return Boolean(name.trim() && campusId && grade.trim() && gender);
     if (step === 2) {
       const routeOk = mode === 'edit' || routeMode === 'existing' ? Boolean(routeId) : Boolean(routeName.trim());
       return routeOk && boarding.lat != null && boarding.lng != null;
@@ -380,7 +380,8 @@ export default function Kids() {
     }
     return true;
   };
-  const canSaveEdit = () => Boolean(name.trim() && routeId && boarding.lat != null && boarding.lng != null);
+  const canSaveEdit = () =>
+    Boolean(name.trim() && campusId && grade.trim() && gender && routeId && boarding.lat != null && boarding.lng != null);
 
   const grades = useMemo(() => {
     const fromClasses = schoolClasses.map((c) => c.grade).filter(Boolean);
@@ -850,18 +851,29 @@ export default function Kids() {
             <>
               <h3>Student details</h3>
               <label className="sa-field">
-                <span>Name</span>
+                <span>
+                  Name <em className="sa-req">*</em>
+                </span>
                 <input required value={name} onChange={(e) => setName(e.target.value)} />
               </label>
-              <CampusSelect campuses={campuses} value={campusId} onChange={setCampusId} />
+              <CampusSelect
+                campuses={campuses}
+                value={campusId}
+                onChange={setCampusId}
+                required
+                emptyLabel="Select campus"
+              />
               <label className="sa-field">
                 <span>Admission no.</span>
                 <input value={admissionNo} onChange={(e) => setAdmissionNo(e.target.value)} />
               </label>
               <div className="sa-stu-form-row">
                 <label className="sa-field">
-                  <span>Class / grade</span>
+                  <span>
+                    Class / grade <em className="sa-req">*</em>
+                  </span>
                   <select
+                    required
                     value={grade}
                     onChange={(e) => {
                       const nextGrade = e.target.value;
@@ -918,9 +930,11 @@ export default function Kids() {
               ) : null}
               <div className="sa-stu-form-row">
                 <label className="sa-field">
-                  <span>Gender</span>
-                  <select value={gender} onChange={(e) => setGender(e.target.value)}>
-                    <option value="">Not set</option>
+                  <span>
+                    Gender <em className="sa-req">*</em>
+                  </span>
+                  <select required value={gender} onChange={(e) => setGender(e.target.value)}>
+                    <option value="">Select gender</option>
                     <option value="female">Female</option>
                     <option value="male">Male</option>
                     <option value="other">Other</option>
@@ -1110,6 +1124,10 @@ export default function Kids() {
               <h3>Review</h3>
               <dl className="sa-people-review">
                 <div><dt>Name</dt><dd>{name || '—'}</dd></div>
+                <div>
+                  <dt>Campus</dt>
+                  <dd>{(campuses || []).find((c) => String(c.id || c._id) === String(campusId))?.name || '—'}</dd>
+                </div>
                 <div><dt>Admission no.</dt><dd>{admissionNo || '—'}</dd></div>
                 <div><dt>Class</dt><dd>{[grade, section].filter(Boolean).join(' ') || '—'}</dd></div>
                 <div><dt>Gender / DOB</dt><dd>{[genderLabel(gender), dateOfBirth].filter(Boolean).join(' · ') || '—'}</dd></div>

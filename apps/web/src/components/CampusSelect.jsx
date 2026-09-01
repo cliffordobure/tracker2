@@ -12,6 +12,7 @@ export default function CampusSelect({
   onChange,
   campuses,
   allowEmpty = true,
+  required = false,
   label = 'Campus',
   emptyLabel = 'Unassigned',
 }) {
@@ -36,8 +37,11 @@ export default function CampusSelect({
 
   return (
     <label className="sa-field">
-      <span>{label}</span>
-      <select value={value || ''} onChange={(e) => onChange(e.target.value)}>
+      <span>
+        {label}
+        {required ? <em className="sa-req"> *</em> : null}
+      </span>
+      <select required={required} value={value || ''} onChange={(e) => onChange(e.target.value)}>
         {allowEmpty && <option value="">{emptyLabel}</option>}
         {list.map((c) => (
           <option key={c.id || c._id} value={c.id || c._id}>

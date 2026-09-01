@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { User } from '../models/index.js';
 import { authenticate } from '../middleware/auth.js';
 import { schoolAllowsLogin } from '../lib/schoolAccess.js';
+import { normalizeMenuRights } from '../lib/staffAccess.js';
 
 const router = Router();
 
@@ -15,6 +16,7 @@ function signToken(user) {
       email: user.email,
       name: user.name,
       schoolId: user.schoolId?.toString?.() || user.schoolId || null,
+      menuRights: user.role === 'staff' ? normalizeMenuRights(user.menuRights) : undefined,
     },
     process.env.JWT_SECRET,
     { expiresIn: '7d' }
@@ -66,8 +68,8 @@ router.post('/register', authenticate, async (req, res) => {
 
     const allowed =
       req.user.role === 'super_admin'
-        ? ['super_admin', 'school_admin', 'driver', 'parent', 'teacher']
-        : ['driver', 'parent', 'teacher'];
+        ? ['super_admin', 'school_admin', 'staff', 'driver', 'parent', 'teacher']
+        : ['school_admin', 'staff'];
     if (!allowed.includes(role)) {
       return res.status(400).json({ error: 'Invalid role' });
     }
@@ -76,7 +78,7 @@ router.post('/register', authenticate, async (req, res) => {
     if (req.user.role === 'school_admin') {
       resolvedSchoolId = req.user.schoolId;
     }
-    if (['school_admin', 'driver', 'parent', 'teacher'].includes(role) && !resolvedSchoolId) {
+    if (['school_admin', 'staff', 'driver', 'parent', 'teacher'].includes(role) && !resolvedSchoolId) {
       return res.status(400).json({ error: 'schoolId is required for this role' });
     }
 
@@ -91,6 +93,7 @@ router.post('/register', authenticate, async (req, res) => {
       role,
       phone: phone || '',
       schoolId: resolvedSchoolId,
+      menuRights: role === 'staff' ? normalizeMenuRights(req.body.menuRights) : {},
     });
 
     return res.status(201).json({ user: user.toSafeJSON() });

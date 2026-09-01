@@ -135,6 +135,7 @@ export default function ParentHome() {
     });
     socket.on('notification:new', (n) => {
       setNotifications((prev) => [n, ...prev]);
+      if (n?.title) showToast(n.body ? `${n.title}: ${n.body}` : n.title);
     });
 
     return () => {

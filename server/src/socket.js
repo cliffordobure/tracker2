@@ -23,7 +23,7 @@ export function initSocket(io) {
 
   io.on('connection', (socket) => {
     socket.join(`user:${socket.user.id}`);
-    if (socket.user.role === 'school_admin' && socket.user.schoolId) {
+    if ((socket.user.role === 'school_admin' || socket.user.role === 'staff') && socket.user.schoolId) {
       socket.join(`school:${socket.user.schoolId}`);
     }
 

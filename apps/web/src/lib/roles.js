@@ -3,6 +3,7 @@ export function homePathForRole(role) {
     case 'super_admin':
       return '/super-admin';
     case 'school_admin':
+    case 'staff':
       return '/school-admin';
     case 'driver':
       return '/driver';
@@ -19,5 +20,5 @@ export function homePathForRole(role) {
 }
 
 export function isStaffRole(role) {
-  return role === 'super_admin' || role === 'school_admin' || role === 'admin';
+  return role === 'super_admin' || role === 'school_admin' || role === 'staff' || role === 'admin';
 }

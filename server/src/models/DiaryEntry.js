@@ -17,7 +17,8 @@ const diaryCommentSchema = new mongoose.Schema(
     authorName: { type: String, default: 'Parent', trim: true },
     authorRole: { type: String, default: 'Parent', trim: true },
     authorPhotoUrl: { type: String, default: '' },
-    body: { type: String, required: true, trim: true, maxlength: 800 },
+    body: { type: String, default: '', trim: true, maxlength: 800 },
+    media: { type: [mediaSchema], default: [] },
   },
   { timestamps: true }
 );

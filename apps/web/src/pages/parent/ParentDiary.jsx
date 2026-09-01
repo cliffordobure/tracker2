@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api } from '../../lib/api';
+import { api, uploadFile } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import '../../diary-module.css';
 
@@ -51,6 +51,8 @@ export default function ParentDiary() {
   const [busyId, setBusyId] = useState('');
   const [commentFor, setCommentFor] = useState('');
   const [comment, setComment] = useState('');
+  const [commentFiles, setCommentFiles] = useState([]);
+  const [commentUploading, setCommentUploading] = useState(false);
 
   const load = async (nextKid = kidId) => {
     const qs = new URLSearchParams();
@@ -79,14 +81,35 @@ export default function ParentDiary() {
     }
   };
 
+  const addCommentFiles = async (files) => {
+    const remaining = 4 - commentFiles.length;
+    const batch = [...files].slice(0, remaining);
+    if (!batch.length) return;
+    setCommentUploading(true);
+    setError('');
+    try {
+      const uploaded = [];
+      for (const file of batch) uploaded.push(await uploadFile(file, { folder: 'diary' }));
+      setCommentFiles((prev) => [...prev, ...uploaded]);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setCommentUploading(false);
+    }
+  };
+
   const sendComment = async (entry) => {
     const body = comment.trim();
-    if (!body) return;
+    if (!body && !commentFiles.length) return;
     setBusyId(`c-${entry._id || entry.id}`);
     try {
-      await api(`/parent/diary/${entry._id || entry.id}/comments`, { method: 'POST', body: { body } });
+      await api(`/parent/diary/${entry._id || entry.id}/comments`, {
+        method: 'POST',
+        body: { body, media: commentFiles },
+      });
       showToast('Comment sent to the teacher', 'success');
       setComment('');
+      setCommentFiles([]);
       setCommentFor('');
       await load();
     } catch (e) {
@@ -255,23 +278,75 @@ export default function ParentDiary() {
                       {busyId === id ? 'Saving…' : 'Acknowledge'}
                     </button>
                   )}
-                  <button type="button" className="tw-btn tw-btn-ghost" onClick={() => setCommentFor(commentFor === id ? '' : id)}>
+                  <button
+                    type="button"
+                    className="tw-btn tw-btn-ghost"
+                    onClick={() => {
+                      setCommentFor(commentFor === id ? '' : id);
+                      setComment('');
+                      setCommentFiles([]);
+                    }}
+                  >
                     Comment
                   </button>
                 </div>
                 {(item.comments || []).length > 0 && (
                   <ul className="pdiary-comments">
                     {item.comments.map((c) => (
-                      <li key={c._id}><b>{c.authorName}:</b> {c.body}</li>
+                      <li key={c._id}>
+                        <b>{c.authorName}{c.authorRole ? ` · ${c.authorRole}` : ''}:</b>{' '}
+                        {c.body || ((c.attachments || c.media || []).length ? 'Sent a file' : '')}
+                        {(c.attachments || c.media || []).length > 0 && (
+                          <span className="pdiary-comment-files">
+                            {(c.attachments || c.media).map((f) => (
+                              <a key={f.url} href={f.url} target="_blank" rel="noreferrer">{f.name || f.originalName || 'File'}</a>
+                            ))}
+                          </span>
+                        )}
+                      </li>
                     ))}
                   </ul>
                 )}
                 {commentFor === id && (
                   <div className="pdiary-comment-box">
                     <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Write a comment for the teacher" rows={3} />
-                    <button type="button" className="tw-btn tw-btn-primary" disabled={busyId === `c-${id}`} onClick={() => sendComment(item)}>
-                      Send
-                    </button>
+                    <div className="pdiary-comment-box-actions">
+                      <label className="tw-btn tw-btn-ghost">
+                        {commentUploading ? 'Uploading…' : 'Attach file'}
+                        <input
+                          type="file"
+                          multiple
+                          hidden
+                          disabled={commentUploading || commentFiles.length >= 4}
+                          onChange={(e) => {
+                            addCommentFiles(e.target.files);
+                            e.target.value = '';
+                          }}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className="tw-btn tw-btn-primary"
+                        disabled={busyId === `c-${id}` || commentUploading || (!comment.trim() && !commentFiles.length)}
+                        onClick={() => sendComment(item)}
+                      >
+                        {busyId === `c-${id}` ? 'Sending…' : 'Send'}
+                      </button>
+                    </div>
+                    {commentFiles.length > 0 && (
+                      <div className="pdiary-comment-files">
+                        {commentFiles.map((f) => (
+                          <button
+                            type="button"
+                            key={f.url}
+                            className="diary-file-chip"
+                            onClick={() => setCommentFiles((prev) => prev.filter((x) => x.url !== f.url))}
+                          >
+                            {f.originalName || 'File'} ×
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </article>

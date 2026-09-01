@@ -9,6 +9,7 @@ const TABS = [
   { id: 'pending', label: 'Pending' },
   { id: 'approved', label: 'Approved' },
   { id: 'rejected', label: 'Rejected' },
+  { id: 'cancelled', label: 'Cancelled' },
 ];
 const TYPE_LABEL = {
   vacation: 'Vacation / Holiday',
@@ -61,6 +62,30 @@ function rowId(row) {
   return String(row.id || row._id || '');
 }
 
+function startOfDay(value) {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function isLeaveInProgress(row) {
+  if (row?.status !== 'approved') return false;
+  const start = startOfDay(row.startDate);
+  const end = startOfDay(row.endDate);
+  const today = startOfDay(new Date());
+  if (!start || !end || !today) return false;
+  return start.getTime() <= today.getTime() && today.getTime() <= end.getTime();
+}
+
+function canCancelLeave(row) {
+  return row?.status === 'pending' || row?.status === 'approved';
+}
+
+function cancelLeaveLabel(row) {
+  return isLeaveInProgress(row) ? 'Stop leave' : 'Cancel leave';
+}
+
 function LeaveIcon({ name }) {
   const p = {
     width: 16,
@@ -82,6 +107,14 @@ function LeaveIcon({ name }) {
   }
   if (name === 'check') return <svg {...p}><circle cx="12" cy="12" r="8" /><path d="m8.6 12.2 2.5 2.4 4.4-4.8" /></svg>;
   if (name === 'x') return <svg {...p}><circle cx="12" cy="12" r="8" /><path d="m9 9 6 6M15 9l-6 6" /></svg>;
+  if (name === 'stop') {
+    return (
+      <svg {...p}>
+        <circle cx="12" cy="12" r="8" />
+        <rect x="9" y="9" width="6" height="6" rx="1" />
+      </svg>
+    );
+  }
   if (name === 'chart') {
     return (
       <svg {...p}>
@@ -134,7 +167,7 @@ export default function LeaveRequests() {
   const { showToast } = useAuth();
   const { globalSearch = '' } = useOutletContext() || {};
   const [requests, setRequests] = useState([]);
-  const [stats, setStats] = useState({ pending: 0, approved: 0, rejected: 0, total: 0 });
+  const [stats, setStats] = useState({ pending: 0, approved: 0, rejected: 0, cancelled: 0, total: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [tab, setTab] = useState('all');
@@ -163,6 +196,7 @@ export default function LeaveRequests() {
           pending: rows.filter((r) => r.status === 'pending').length,
           approved: rows.filter((r) => r.status === 'approved').length,
           rejected: rows.filter((r) => r.status === 'rejected').length,
+          cancelled: rows.filter((r) => r.status === 'cancelled').length,
           total: rows.length,
         });
       }
@@ -268,6 +302,16 @@ export default function LeaveRequests() {
   };
 
   const setStatus = async (row, status) => {
+    if (status === 'cancelled') {
+      const stop = isLeaveInProgress(row);
+      const name = row.kidId?.name || 'this student';
+      const ok = window.confirm(
+        stop
+          ? `Stop ${name}'s leave? They will be expected back at school from today.`
+          : `Cancel ${name}'s leave request?`
+      );
+      if (!ok) return;
+    }
     setBusy(true);
     setMenuId('');
     try {
@@ -284,7 +328,14 @@ export default function LeaveRequests() {
         }
         return next;
       });
-      showToast?.(`Request ${status}`, 'success');
+      const done =
+        status === 'cancelled'
+          ? request?.stoppedEarly || isLeaveInProgress(row)
+            ? 'Leave stopped'
+            : 'Leave cancelled'
+          : `Request ${status}`;
+      showToast?.(done, 'success');
+      window.dispatchEvent(new Event('sa-inbox-refresh'));
     } catch (e) {
       showToast?.(e.message, 'error');
     } finally {

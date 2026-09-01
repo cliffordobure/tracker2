@@ -52,11 +52,12 @@ async function emitTripStarted(trip, kids, { eveningBoard = false } = {}) {
       if (eveningBoard) {
         notifications.push({
           userId: parentId,
-          type: 'kid_picked_up',
-          title: 'Leaving school',
-          body: `The bus/van is now leaving school for dropping your child ${kid.name} at ${when}`,
+          type: 'trip_started',
+          title: 'On the evening bus',
+          body: `${kid.name} has left school and is on the way home.`,
           tripId: trip._id,
           kidId: kid._id,
+          key: `${parentId}:evening_start:${trip._id}:${kid._id}`,
         });
       } else {
         notifications.push({
@@ -89,8 +90,9 @@ async function emitTripStarted(trip, kids, { eveningBoard = false } = {}) {
       key: `${driverId}:trip_started:${trip._id}`,
     });
   }
-  const parentNotes = notifications.filter((n) => !n.key);
-  const driverNotes = notifications.filter((n) => n.key);
+  const driverIdStr = driverId ? String(driverId) : '';
+  const parentNotes = notifications.filter((n) => String(n.userId) !== driverIdStr);
+  const driverNotes = notifications.filter((n) => String(n.userId) === driverIdStr);
   if (parentNotes.length) await createAndEmitNotifications(io, parentNotes);
   if (driverNotes.length) {
     try {

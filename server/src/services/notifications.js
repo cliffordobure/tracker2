@@ -94,4 +94,11 @@ export async function notifyTripAssigned(io, trip) {
   });
 }
 
+export function emitChatMessage(io, userIds, payload) {
+  const ids = [...new Set((userIds || []).map((id) => String(id || '')).filter(Boolean))];
+  for (const id of ids) {
+    io?.to(`user:${id}`).emit('message:new', payload);
+  }
+}
+
 export { NOTIFICATION_TYPES };

@@ -8376,6 +8376,69 @@ button.sa-text-link { background: none; border: 0; cursor: pointer; font: inheri
   font-weight: 700;
   color: #334155;
 }
+.sa-notice-sendto {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+}
+.sa-notice-sendto button {
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #475569;
+  border-radius: 9px;
+  min-height: 36px;
+  padding: 0.4rem 0.6rem;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.sa-notice-sendto button.is-on {
+  background: #eef2ff;
+  border-color: #818cf8;
+  color: #3730a3;
+}
+.sa-notice-classes {
+  margin-top: 0.55rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 0.55rem 0.6rem 0.6rem;
+  background: #f8fafc;
+}
+.sa-notice-classes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
+}
+.sa-notice-classes-head em {
+  font-style: normal;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #64748b;
+}
+.sa-notice-class-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.sa-notice-class-chips button {
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #475569;
+  border-radius: 999px;
+  padding: 0.22rem 0.62rem;
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.sa-notice-class-chips button.is-on {
+  background: #6366f1;
+  border-color: #6366f1;
+  color: #fff;
+}
 .sa-notice-compose .sa-field input,
 .sa-notice-compose .sa-field select,
 .sa-notice-compose .sa-field textarea {
@@ -8791,6 +8854,14 @@ button.sa-text-link { background: none; border: 0; cursor: pointer; font: inheri
   font-weight: 650;
 }
 .sa-campus-actions { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+.sa-campus-form-modal { width: min(560px, 100%); }
+.sa-campus-form-modal .sa-people-body { overflow: auto; max-height: min(70vh, 640px); }
+.sa-campus-map {
+  min-height: 200px !important;
+  height: 200px;
+  border-radius: 10px;
+  overflow: hidden;
+}
 .sa-campus-assign { width: min(640px, 100%); }
 .sa-campus-assign-group { margin: 0.9rem 0; }
 .sa-campus-assign-group h3 { margin: 0 0 0.4rem; font-size: 0.92rem; }
@@ -8852,5 +8923,65 @@ button.sa-text-link { background: none; border: 0; cursor: pointer; font: inheri
   font-size: 0.72rem;
   font-weight: 800;
   color: #5b5bf0;
+}
+
+.sa-staff-rights {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.sa-staff-rights > span {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #334155;
+}
+.sa-staff-rights-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  border: 1px solid #dbe3f0;
+  border-radius: 10px;
+  background: #fff;
+  padding: 0.55rem 0.7rem;
+  cursor: pointer;
+  font-size: 0.84rem;
+  color: #0f172a;
+}
+.sa-staff-rights-pop {
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid #dbe3f0;
+  border-radius: 12px;
+  padding: 0.55rem 0.65rem 0.7rem;
+  background: #f8fafc;
+}
+.sa-staff-rights-pop > p {
+  margin: 0 0 0.5rem;
+  font-size: 0.72rem;
+  color: #64748b;
+}
+.sa-staff-rights-row {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin: 0 0 0.35rem;
+}
+.sa-staff-rights-row span { font-size: 0.8rem; color: #334155; }
+.sa-staff-rights-row select {
+  width: auto !important;
+  min-width: 88px;
+  margin: 0 !important;
+}
+.sa-staff-readonly-banner {
+  margin: 0 0 0.75rem;
+  padding: 0.55rem 0.8rem;
+  border-radius: 10px;
+  background: #eff6ff;
+  color: #1e3a8a;
+  font-size: 0.8rem;
 }
 

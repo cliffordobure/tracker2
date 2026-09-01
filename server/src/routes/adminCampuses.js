@@ -3,13 +3,17 @@ import { Campus, School, Kid, User, Bus, Route } from '../models/index.js';
 
 const router = Router();
 
+function isSchoolConsole(role) {
+  return role === 'school_admin' || role === 'staff';
+}
+
 function resolveSchoolId(req) {
-  if (req.user.role === 'school_admin') return req.user.schoolId || null;
+  if (isSchoolConsole(req.user.role)) return req.user.schoolId || null;
   return req.query.schoolId || req.body.schoolId || null;
 }
 
 function assertSchoolAccess(req, schoolId) {
-  if (req.user.role === 'school_admin' && schoolId?.toString() !== req.user.schoolId) {
+  if (isSchoolConsole(req.user.role) && schoolId?.toString() !== req.user.schoolId) {
     return false;
   }
   return true;

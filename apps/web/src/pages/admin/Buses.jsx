@@ -525,7 +525,11 @@ export default function Buses() {
   const year = new Date().getFullYear();
   const menuBus = buses.find((b) => busId(b) === menuId);
   const menuStatus = menuBus ? busStatus(menuBus) : null;
-  const canSave = Boolean(String(form.plate).trim() && Number(form.seats) >= 1);
+  const canSave = Boolean(
+    String(form.plate).trim() &&
+      Number(form.seats) >= 1 &&
+      (editingId || form.campusId)
+  );
   const total = stats?.total ?? buses.length;
   const activeCount = stats?.active ?? buses.filter((b) => busStatus(b).label === 'Active').length;
   const maintenanceCount = stats?.maintenance ?? 0;
@@ -908,7 +912,13 @@ export default function Buses() {
             </button>
           </div>
           {error && <div className="alert">{error}</div>}
-          <CampusSelect campuses={campuses} value={form.campusId} onChange={(campusId) => setForm({ ...form, campusId })} />
+          <CampusSelect
+            campuses={campuses}
+            value={form.campusId}
+            onChange={(campusId) => setForm({ ...form, campusId })}
+            required={!editingId}
+            emptyLabel="Select campus"
+          />
           <div className="sa-stu-form-row">
             <label className="sa-field">
               <span>Label</span>
