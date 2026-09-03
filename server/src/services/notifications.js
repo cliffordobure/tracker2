@@ -3,34 +3,62 @@ import { sendPushToUser } from './push.js';
 import { NOTIFICATION_TYPES } from '@school-tracker/shared';
 import { toIso } from '../lib/clock.js';
 
+function notificationPayload(n, fallback = {}) {
+  const createdAt = toIso(n?.createdAt) || new Date().toISOString();
+  return {
+    id: n?._id?.toString() || '',
+    type: n?.type || fallback.type,
+    title: n?.title || fallback.title,
+    body: n?.body || fallback.body,
+    tripId: (n?.tripId || fallback.tripId)?.toString() || '',
+    kidId: (n?.kidId || fallback.kidId)?.toString() || '',
+    read: !!n?.read,
+    createdAt,
+  };
+}
+
+function emitAndPush(io, userId, payload) {
+  if (!userId || !payload?.title) return;
+  io?.to(`user:${userId}`).emit('notification:new', payload);
+  sendPushToUser(userId, {
+    title: payload.title,
+    body: payload.body,
+    data: {
+      type: payload.type || '',
+      notificationId: payload.id || '',
+      tripId: payload.tripId || '',
+      kidId: payload.kidId || '',
+      createdAt: payload.createdAt,
+    },
+  }).catch((err) => console.warn('[push] notify error:', err.message));
+}
+
 export async function createAndEmitNotifications(io, items) {
   if (!items.length) return [];
 
-  const created = await Notification.insertMany(items);
-  for (const n of created) {
-    const createdAt = toIso(n.createdAt) || new Date().toISOString();
-    const payload = {
-      id: n._id.toString(),
-      type: n.type,
-      title: n.title,
-      body: n.body,
-      tripId: n.tripId?.toString(),
-      kidId: n.kidId?.toString(),
-      read: n.read,
-      createdAt,
-    };
-    io?.to(`user:${n.userId}`).emit('notification:new', payload);
-    sendPushToUser(n.userId, {
-      title: n.title,
-      body: n.body,
-      data: {
-        type: n.type,
-        notificationId: n._id.toString(),
-        tripId: n.tripId?.toString() || '',
-        kidId: n.kidId?.toString() || '',
-        createdAt,
-      },
-    }).catch((err) => console.warn('[push] notify error:', err.message));
+  const created = [];
+  for (const item of items) {
+    if (!item?.userId || !item?.title) continue;
+    let doc = null;
+    try {
+      if (item.key) {
+        doc = await Notification.findOneAndUpdate(
+          { userId: item.userId, key: String(item.key) },
+          { $setOnInsert: { ...item, key: String(item.key) } },
+          { upsert: true, new: true }
+        );
+      } else {
+        doc = await Notification.create(item);
+      }
+    } catch (err) {
+      if (item.key) {
+        doc = await Notification.findOne({ userId: item.userId, key: String(item.key) });
+      }
+      if (!doc) console.warn('[notify] save failed:', err.message);
+    }
+    const payload = notificationPayload(doc, item);
+    emitAndPush(io, item.userId, payload);
+    if (doc) created.push(doc);
   }
   return created;
 }

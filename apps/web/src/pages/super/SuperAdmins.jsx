@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { Empty, PageFoot, PlanBadge, StatusDot } from './shared';
 
-const empty = { schoolId: '', name: '', email: '', phone: '', password: 'password123' };
+const empty = { schoolId: '', name: '', email: '', phone: '', password: '' };
 
 export default function SuperAdmins() {
   const [admins, setAdmins] = useState([]);
@@ -116,8 +116,15 @@ export default function SuperAdmins() {
             <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
           </label>
           <label className="sa-field">
-            <span>Password</span>
-            <input required value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+            <span>
+              Password <em className="sa-req">*</em>
+            </span>
+            <input
+              required
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
+              placeholder="Enter a password"
+            />
           </label>
           <button className="sa-btn sa-btn-primary" type="submit">
             Create admin

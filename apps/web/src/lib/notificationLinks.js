@@ -45,6 +45,7 @@ export function notificationHref(n) {
   if (link === 'register') return '/school-admin/attendance';
   if (link === 'diary') return kidId ? `/school-admin/students/${kidId}` : '/school-admin/noticeboard';
   if (link === 'work') return '/school-admin/assignments';
+  if (link === 'leave') return '/school-admin/leave-requests';
 
   switch (type) {
     case 'trip_started':
@@ -71,6 +72,8 @@ export function notificationHref(n) {
       return '/school-admin/noticeboard';
     case 'message':
       return conversationId ? `/school-admin/messages/${conversationId}` : '/school-admin/messages';
+    case 'leave_request':
+      return '/school-admin/leave-requests';
     case 'reminder':
       if (tripId) return tripHref(n);
       if (kidId) return `/school-admin/students/${kidId}`;
@@ -90,6 +93,7 @@ export function notificationActionLabel(n) {
   if (href.includes('trip-instances')) return 'View Trip';
   if (href.includes('incidents')) return 'View Incident';
   if (href.includes('messages')) return 'Open Message';
+  if (href.includes('leave-requests')) return 'View Leave Request';
   if (href.includes('noticeboard')) return 'View Noticeboard';
   if (href.includes('attendance')) return 'View Attendance';
   if (href.includes('assignments')) return 'View Assignment';

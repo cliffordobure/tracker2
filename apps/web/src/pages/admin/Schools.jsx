@@ -3,7 +3,7 @@ import { api } from '../../lib/api';
 import MapView from '../../components/MapView';
 
 const emptySchool = { name: '', address: '', location: { lat: -1.3965, lng: 36.7542 } };
-const emptyAdmin = { name: '', email: '', phone: '', password: 'password123', schoolId: '' };
+const emptyAdmin = { name: '', email: '', phone: '', password: '', schoolId: '' };
 
 export default function Schools() {
   const [schools, setSchools] = useState([]);
@@ -244,11 +244,12 @@ export default function Schools() {
               />
             </label>
             <label>
-              Password
+              Password <em className="sa-req">*</em>
               <input
                 required
                 value={adminForm.password}
                 onChange={(e) => setAdminForm({ ...adminForm, password: e.target.value })}
+                placeholder="Enter a password"
               />
             </label>
             <button className="btn btn-primary" type="submit">

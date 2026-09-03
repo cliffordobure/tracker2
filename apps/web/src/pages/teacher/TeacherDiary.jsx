@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, uploadFile } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
+import AudiencePicker from '../../components/AudiencePicker';
 import '../../diary-module.css';
 
 const TYPES = [
@@ -65,6 +66,7 @@ export default function TeacherDiary() {
   const [kids, setKids] = useState([]);
   const [grades, setGrades] = useState([]);
   const [form, setForm] = useState(() => emptyForm());
+  const [audience, setAudience] = useState('class');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -91,6 +93,12 @@ export default function TeacherDiary() {
     load().catch((e) => setError(e.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (audience === 'class' && !form.grade && grades.length === 1) {
+      setForm((f) => ({ ...f, grade: grades[0] }));
+    }
+  }, [audience, form.grade, grades]);
 
   const shiftMonth = async (delta) => {
     const next = new Date(cursor.getFullYear(), cursor.getMonth() + delta, 1);
@@ -137,6 +145,8 @@ export default function TeacherDiary() {
       ...form,
       title,
       body: form.lessonSummary || form.body || form.teacherObservation || form.topic,
+      grade: audience === 'all' ? '' : form.grade,
+      kidIds: audience === 'individuals' ? form.kidIds : [],
       status,
       homework: form.label === 'homework'
         ? { enabled: true, title: form.topic || form.homework.title || title, dueDate: form.homework.dueDate || null }
@@ -148,11 +158,22 @@ export default function TeacherDiary() {
     setBusy(true);
     setError('');
     try {
+      if (audience === 'class' && !form.grade) {
+        setError('Pick a class, or send to specific students');
+        setBusy(false);
+        return;
+      }
+      if (audience === 'individuals' && !form.kidIds.length) {
+        setError('Pick at least one student');
+        setBusy(false);
+        return;
+      }
       const payload = buildPayload(status);
       if (editingId) await api(`/teacher/diary/${editingId}`, { method: 'PUT', body: payload });
       else await api('/teacher/diary', { method: 'POST', body: payload });
       showToast(status === 'draft' ? 'Draft saved' : 'Diary published. Parents can acknowledge it.', 'success');
       setForm(emptyForm(selected));
+      setAudience('class');
       setEditingId('');
       await load();
     } catch (err) {
@@ -221,7 +242,18 @@ export default function TeacherDiary() {
   const selectedEntries = entries.filter((e) => ymd(e.date) === selected);
   const open = selectedEntries.find((e) => e._id === openId) || selectedEntries[0] || null;
   const prettyDate = new Date(`${selected}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
-  const audienceKids = form.grade ? kids.filter((k) => k.grade === form.grade) : kids;
+
+  const diaryAudienceLabel = (e) => {
+    const rows = Array.isArray(e.kidIds) ? e.kidIds : [];
+    if (rows.length) {
+      const names = rows.map((k) => (k && typeof k === 'object' ? k.name : '')).filter(Boolean);
+      if (names.length === 1) return names[0];
+      if (names.length === 2) return names.join(', ');
+      if (names.length > 2) return `${names[0]} +${names.length - 1}`;
+      return `${rows.length} student${rows.length === 1 ? '' : 's'}`;
+    }
+    return e.grade || 'Everyone';
+  };
 
   return (
     <div className="tw-split tdiary">
@@ -275,7 +307,7 @@ export default function TeacherDiary() {
                 <h3>{e.topic || e.title}</h3>
                 <p>{e.lessonSummary || e.body || e.typeLabel}</p>
                 <small>
-                  {(e.subjects || [])[0] || e.typeLabel} · {e.time || '—'} · {e.grade || 'Class'}
+                  {(e.subjects || [])[0] || e.typeLabel} · {e.time || '—'} · {diaryAudienceLabel(e)}
                   {e.signatureCount ? ` · ${e.signatureCount} acknowledged` : ' · Awaiting acknowledgement'}
                   {(e.comments || []).length ? ` · ${(e.comments || []).length} comment${(e.comments || []).length === 1 ? '' : 's'}` : ''}
                 </small>
@@ -286,10 +318,14 @@ export default function TeacherDiary() {
                     onClick={(ev) => {
                       ev.stopPropagation();
                       setEditingId(e._id);
+                      {
+                        const kidIds = (e.kidIds || []).map((k) => k._id || k).filter(Boolean);
+                        setAudience(kidIds.length ? 'individuals' : e.grade ? 'class' : 'all');
+                      }
                       setForm({
                         ...emptyForm(selected),
                         ...e,
-                        kidIds: (e.kidIds || []).map((k) => k._id || k),
+                        kidIds: (e.kidIds || []).map((k) => k._id || k).filter(Boolean),
                         homework: {
                           enabled: e.homework?.enabled === true,
                           title: e.homework?.title || '',
@@ -394,40 +430,29 @@ export default function TeacherDiary() {
         <h3>{editingId ? 'Edit entry' : 'Create diary entry'}</h3>
         <label>
           Entry type
-          <select value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })}>
+          <select
+            value={form.label}
+            onChange={(e) => {
+              const label = e.target.value;
+              setForm({ ...form, label });
+              if (['observation', 'behaviour', 'achievement', 'incident'].includes(label)) {
+                setAudience('individuals');
+              }
+            }}
+          >
             {TYPES.map((t) => <option key={t.value} value={t.value}>{t.emoji} {t.label}</option>)}
           </select>
         </label>
-        <label>
-          Class
-          <select value={form.grade} onChange={(e) => setForm({ ...form, grade: e.target.value, kidIds: [] })}>
-            <option value="">All classes</option>
-            {grades.map((g) => <option key={g} value={g}>{g}</option>)}
-          </select>
-        </label>
-        <fieldset className="diary-kids">
-          <legend>Students</legend>
-          <p className="tw-lede" style={{ margin: '0 0 8px' }}>
-            Leave empty for the whole {form.grade || 'school'}. Tick names to send this entry only to those students.
-          </p>
-          {audienceKids.map((k) => {
-            const on = form.kidIds.includes(k._id);
-            return (
-              <label key={k._id} className="diary-kid-row">
-                <input
-                  type="checkbox"
-                  checked={on}
-                  onChange={() => setForm((f) => ({
-                    ...f,
-                    kidIds: on ? f.kidIds.filter((id) => id !== k._id) : [...f.kidIds, k._id],
-                  }))}
-                />
-                {k.name}{k.grade ? ` · ${k.grade}` : ''}
-              </label>
-            );
-          })}
-          {!audienceKids.length && <p className="tw-empty">No students in this class.</p>}
-        </fieldset>
+        <AudiencePicker
+          audience={audience}
+          onAudienceChange={setAudience}
+          grade={form.grade}
+          onGradeChange={(grade) => setForm((f) => ({ ...f, grade }))}
+          grades={grades}
+          kids={kids}
+          kidIds={form.kidIds}
+          onKidIdsChange={(kidIds) => setForm((f) => ({ ...f, kidIds }))}
+        />
         <label>
           Date
           <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />

@@ -16,14 +16,14 @@ const ROUTE_LAYER = 'trip-route-line';
 const ROUTE_GLOW = 'trip-route-glow';
 const PROGRESS_SOURCE = 'trip-progress';
 const PROGRESS_LAYER = 'trip-progress-line';
-const BUS_ZOOM = 15.2;
+const BUS_ZOOM = 16.2;
 const ROUTE_BLUE = '#1d4ed8';
 const ROUTE_BLUE_SOFT = '#93c5fd';
 const PROGRESS_BLUE = '#1e3a8a';
 /** Reroute when driver is farther than this from the drawn path. */
-const OFF_ROUTE_M = 28;
+const OFF_ROUTE_M = 48;
 /** Don't hammer Mapbox Directions more often than this. */
-const REROUTE_MIN_MS = 1200;
+const REROUTE_MIN_MS = 7000;
 
 function createStopElement(stop, { isNext, index }) {
   const el = document.createElement('div');
@@ -426,6 +426,7 @@ export default function MapView({
 
     let lastTs = 0;
     let running = true;
+    let lastProgressIdx = -1;
     const motion = motionRef.current;
 
     const ensureMarker = (pos, heading) => {
@@ -454,7 +455,7 @@ export default function MapView({
       }
 
       if (route.length >= 2) {
-        motion.setRoute(route, { lat: raw.lat, lng: raw.lng });
+        motion.setRoute(route);
         const feed = motion.onGps(route, { lat: raw.lat, lng: raw.lng }, raw.speed);
         const pos = motion.tick(route, dt);
         if (pos) {
@@ -465,36 +466,34 @@ export default function MapView({
 
           if (!liveNavRef.current) {
             const idx = motion.nearestIndex(route);
-            setLine(map, PROGRESS_SOURCE, route.slice(0, Math.max(idx + 1, 2)));
+            if (idx !== lastProgressIdx) {
+              lastProgressIdx = idx;
+              setLine(map, PROGRESS_SOURCE, route.slice(0, Math.max(idx + 1, 2)));
+            }
           }
           if (
             liveNavRef.current &&
-            (feed === 'offRoute' ||
-              motion.state.needsReroute ||
-              distanceToRouteMeters(route, raw) > OFF_ROUTE_M) &&
+            (feed === 'offRoute' || motion.state.needsReroute) &&
             Date.now() - lastRerouteAtRef.current >= REROUTE_MIN_MS
           ) {
             routeKeyRef.current = 'live:stale';
-            lastRerouteAtRef.current = Date.now() - REROUTE_MIN_MS; // allow immediate fetch
           }
 
           if (!hasZoomedToBusRef.current) {
             hasZoomedToBusRef.current = true;
-            map.flyTo({
+            map.jumpTo({
               center: [pos.lng, pos.lat],
               zoom: BUS_ZOOM,
-              speed: 1.15,
-              curve: 1.25,
-              essential: true,
             });
-          } else if (followRef.current && Date.now() - lastFollowMoveRef.current > 400) {
-            lastFollowMoveRef.current = Date.now();
-            map.easeTo({
-              center: [pos.lng, pos.lat],
-              zoom: Math.max(map.getZoom(), BUS_ZOOM - 0.4),
-              duration: 450,
-              essential: true,
-            });
+          } else if (followRef.current) {
+            const now = Date.now();
+            if (now - lastFollowMoveRef.current > 80) {
+              lastFollowMoveRef.current = now;
+              try {
+                map.stop();
+              } catch (_) {}
+              map.setCenter([pos.lng, pos.lat]);
+            }
           }
         }
       } else {
@@ -509,7 +508,16 @@ export default function MapView({
         driverMarkerRef.current.setLngLat([pos.lng, pos.lat]);
         if (!hasZoomedToBusRef.current) {
           hasZoomedToBusRef.current = true;
-          map.flyTo({ center: [pos.lng, pos.lat], zoom: BUS_ZOOM, essential: true });
+          map.jumpTo({ center: [pos.lng, pos.lat], zoom: BUS_ZOOM });
+        } else if (followRef.current) {
+          const now = Date.now();
+          if (now - lastFollowMoveRef.current > 80) {
+            lastFollowMoveRef.current = now;
+            try {
+              map.stop();
+            } catch (_) {}
+            map.setCenter([pos.lng, pos.lat]);
+          }
         }
       }
 

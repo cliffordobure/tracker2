@@ -3,7 +3,7 @@ import { Link, useOutletContext } from 'react-router-dom';
 import { api } from '../../lib/api';
 
 const PAGE_SIZES = [10, 25, 50];
-const empty = { name: '', email: '', phone: '', password: 'parent123', active: true };
+const empty = { name: '', email: '', phone: '', password: '', active: true };
 
 function initials(name = '') {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -153,7 +153,11 @@ export default function Parents() {
         await api(`/admin/parents/${parentId(editing)}`, { method: 'PUT', body });
         setNotice(`${form.name} updated.`);
       } else {
-        await api('/admin/parents', { method: 'POST', body: { ...body, password: form.password || 'parent123' } });
+        if (!String(form.password || '').trim()) {
+          setError('Password is required');
+          return;
+        }
+        await api('/admin/parents', { method: 'POST', body: { ...body, password: form.password.trim() } });
         setNotice(`${form.name} added.`);
       }
       setOpen(false);
@@ -424,7 +428,7 @@ export default function Parents() {
                     required={!editing}
                     value={form.password}
                     onChange={(e) => setForm({ ...form, password: e.target.value })}
-                    placeholder={editing ? 'Leave blank to keep current' : 'parent123'}
+                    placeholder={editing ? 'Leave blank to keep current' : 'Enter a password'}
                   />
                 </label>
               </div>

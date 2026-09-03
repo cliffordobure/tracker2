@@ -79,6 +79,10 @@ function classLabel(c) {
   return [c.grade, c.section].filter(Boolean).join(' ') || c.grade || 'Class';
 }
 
+function classTargetKey(c) {
+  return classLabel(c).trim();
+}
+
 function NoticeIcon({ name }) {
   const p = {
     width: 16,
@@ -386,7 +390,7 @@ export default function Noticeboard() {
                 role="radio"
                 aria-checked={form.scope === 'school'}
                 className={form.scope === 'school' ? 'is-on' : ''}
-                onClick={() => setForm((f) => ({ ...f, scope: 'school' }))}
+                onClick={() => setForm((f) => ({ ...f, scope: 'school', grades: [] }))}
               >
                 All
               </button>
@@ -413,13 +417,13 @@ export default function Noticeboard() {
                       type="button"
                       className="sa-text-link"
                       onClick={() => {
-                        const all = classes.map((c) => c.grade).filter(Boolean);
+                        const all = classes.map(classTargetKey).filter(Boolean);
                         const selected = new Set(form.grades);
                         const allOn = all.length > 0 && all.every((g) => selected.has(g));
                         setForm((f) => ({ ...f, grades: allOn ? [] : all }));
                       }}
                     >
-                      {classes.every((c) => !c.grade || form.grades.includes(c.grade)) && form.grades.length
+                      {classes.every((c) => !classTargetKey(c) || form.grades.includes(classTargetKey(c))) && form.grades.length
                         ? 'Clear'
                         : 'Select all'}
                     </button>
@@ -428,18 +432,20 @@ export default function Noticeboard() {
                 {classes.length ? (
                   <div className="sa-notice-class-chips">
                     {classes.map((c) => {
-                      const grade = c.grade;
+                      const grade = classTargetKey(c);
                       if (!grade) return null;
-                      const on = form.grades.includes(grade);
+                      const on = form.grades.includes(grade) || (!!c.grade && form.grades.includes(c.grade));
                       return (
                         <button
-                          key={c.id || grade}
+                          key={c.id || c._id || grade}
                           type="button"
                           className={on ? 'is-on' : ''}
                           onClick={() =>
                             setForm((f) => ({
                               ...f,
-                              grades: on ? f.grades.filter((g) => g !== grade) : [...f.grades, grade],
+                              grades: on
+                                ? f.grades.filter((g) => g !== grade && g !== c.grade)
+                                : [...f.grades.filter((g) => g !== c.grade), grade],
                             }))
                           }
                         >

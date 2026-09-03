@@ -122,8 +122,12 @@ export default function ParentHome() {
       refresh();
     };
 
+    const onTripStarted = () => {
+      refresh();
+    };
+
     socket.on('location:update', onLocation);
-    socket.on('trip:started', refresh);
+    socket.on('trip:started', onTripStarted);
     socket.on('kid:picked_up', onPickedUp);
     socket.on('kid:dropped_off', () => {
       showToast('Your child was dropped off');
@@ -140,7 +144,7 @@ export default function ParentHome() {
 
     return () => {
       socket.off('location:update', onLocation);
-      socket.off('trip:started', refresh);
+      socket.off('trip:started', onTripStarted);
       socket.off('kid:picked_up', onPickedUp);
       socket.off('kid:dropped_off');
       socket.off('trip:completed');

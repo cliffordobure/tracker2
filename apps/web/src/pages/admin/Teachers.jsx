@@ -9,7 +9,7 @@ const emptyForm = {
   name: '',
   email: '',
   phone: '',
-  password: 'password123',
+  password: '',
   employeeId: '',
   department: '',
   qualification: '',
@@ -232,7 +232,11 @@ export default function Teachers() {
         await api(`/admin/teachers/${editingId}`, { method: 'PUT', body });
         setSuccess(`${form.name} updated.`);
       } else {
-        await api('/admin/teachers', { method: 'POST', body: { ...body, password: form.password || 'password123' } });
+        if (!String(form.password || '').trim()) {
+          setError('Password is required');
+          return;
+        }
+        await api('/admin/teachers', { method: 'POST', body: { ...body, password: form.password.trim() } });
         setSuccess(`${form.name} added.`);
       }
       closePanel();
@@ -622,8 +626,21 @@ export default function Teachers() {
           </div>
           <CampusSelect campuses={campuses} value={form.campusId} onChange={(campusId) => setForm({ ...form, campusId })} />
           <label className="sa-field">
-            <span>{editingId ? 'New password (optional)' : 'Password'}</span>
-            <input value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+            <span>
+              {editingId ? (
+                'New password (optional)'
+              ) : (
+                <>
+                  Password <em className="sa-req">*</em>
+                </>
+              )}
+            </span>
+            <input
+              required={!editingId}
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
+              placeholder={editingId ? 'Leave blank to keep current' : 'Enter a password'}
+            />
           </label>
           <MediaPicker
             label="Photo"

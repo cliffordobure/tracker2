@@ -1025,9 +1025,9 @@ export default function UsersRoles() {
           <div className="sa-card">
             <h3>Import users</h3>
             <p className="sa-muted">
-              CSV header must include <code>name</code>, <code>email</code>, and <code>role</code>. Role must be{' '}
-              <code>school_admin</code> or <code>staff</code>. Optional:{' '}
-              <code>phone</code>, <code>department</code>, <code>password</code>.
+              CSV header must include <code>name</code>, <code>email</code>, <code>role</code>, and{' '}
+              <code>password</code>. Role must be <code>school_admin</code> or <code>staff</code>. Optional:{' '}
+              <code>phone</code>, <code>department</code>.
             </p>
             <input
               type="file"

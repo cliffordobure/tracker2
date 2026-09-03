@@ -8,7 +8,6 @@ const TABS = [
   { id: 'all', label: 'All Requests' },
   { id: 'pending', label: 'Pending' },
   { id: 'approved', label: 'Approved' },
-  { id: 'rejected', label: 'Rejected' },
   { id: 'cancelled', label: 'Cancelled' },
 ];
 const TYPE_LABEL = {
@@ -83,7 +82,22 @@ function canCancelLeave(row) {
 }
 
 function cancelLeaveLabel(row) {
-  return isLeaveInProgress(row) ? 'Stop leave' : 'Cancel leave';
+  return isLeaveInProgress(row) ? 'Stop leave' : 'Cancel';
+}
+
+function isCancelledLeave(status) {
+  return status === 'cancelled' || status === 'rejected';
+}
+
+function leaveStatusLabel(status) {
+  if (isCancelledLeave(status)) return 'Cancelled';
+  if (status === 'approved') return 'Approved';
+  if (status === 'pending') return 'Pending';
+  return status || 'Pending';
+}
+
+function leaveStatusClass(status) {
+  return isCancelledLeave(status) ? 'cancelled' : status || 'pending';
 }
 
 function LeaveIcon({ name }) {
@@ -232,8 +246,12 @@ export default function LeaveRequests() {
 
   const filtered = useMemo(() => {
     const rows = requests.filter((r) => {
-      if (tab !== 'all' && r.status !== tab) return false;
-      if (filters.status && r.status !== filters.status) return false;
+      if (tab === 'cancelled') {
+        if (!isCancelledLeave(r.status)) return false;
+      } else if (tab !== 'all' && r.status !== tab) return false;
+      if (filters.status === 'cancelled') {
+        if (!isCancelledLeave(r.status)) return false;
+      } else if (filters.status && r.status !== filters.status) return false;
       if (filters.leaveType && r.leaveType !== filters.leaveType) return false;
       if (filters.grade && r.kidId?.grade !== filters.grade) return false;
       if (filters.from) {
@@ -355,7 +373,7 @@ export default function LeaveRequests() {
         fmtDate(r.startDate),
         fmtDate(r.endDate),
         r.reason || '',
-        r.status,
+        leaveStatusLabel(r.status),
         fmtDateTime(r.createdAt),
       ]
         .map((v) => `"${String(v).replace(/"/g, '""')}"`)
@@ -373,7 +391,7 @@ export default function LeaveRequests() {
   const kpis = [
     { id: 'pending', label: 'Pending Requests', value: loading ? '…' : stats.pending, hint: 'Awaiting review', link: 'View all pending', tint: 'orange', icon: 'clock' },
     { id: 'approved', label: 'Approved', value: loading ? '…' : stats.approved, hint: 'Requests approved', link: 'View all approved', tint: 'green', icon: 'check' },
-    { id: 'rejected', label: 'Rejected', value: loading ? '…' : stats.rejected, hint: 'Requests rejected', link: 'View all rejected', tint: 'rose', icon: 'x' },
+    { id: 'cancelled', label: 'Cancelled', value: loading ? '…' : (stats.cancelled || 0) + (stats.rejected || 0), hint: 'Requests cancelled', link: 'View all cancelled', tint: 'rose', icon: 'x' },
     { id: 'all', label: 'Total Requests', value: loading ? '…' : stats.total, hint: 'All time', link: 'View all requests', tint: 'sky', icon: 'chart' },
   ];
 
@@ -457,7 +475,6 @@ export default function LeaveRequests() {
             <option value="">All Status</option>
             <option value="pending">Pending</option>
             <option value="approved">Approved</option>
-            <option value="rejected">Rejected</option>
             <option value="cancelled">Cancelled</option>
           </select>
           <input type="date" value={filters.from} onChange={(e) => setFilters((f) => ({ ...f, from: e.target.value }))} aria-label="From date" />
@@ -505,7 +522,7 @@ export default function LeaveRequests() {
                       <td>{fmtDate(r.endDate)}</td>
                       <td className="sa-leave-reason">{r.reason || '—'}</td>
                       <td>
-                        <span className={`sa-status sa-status-${r.status}`}>{r.status}</span>
+                        <span className={`sa-status sa-status-${leaveStatusClass(r.status)}`}>{leaveStatusLabel(r.status)}</span>
                       </td>
                       <td>{fmtDateTime(r.createdAt)}</td>
                       <td>
@@ -532,8 +549,8 @@ export default function LeaveRequests() {
                               <button type="button" disabled={busy || r.status === 'approved'} onClick={() => setStatus(r, 'approved')}>
                                 Approve
                               </button>
-                              <button type="button" disabled={busy || r.status === 'rejected'} onClick={() => setStatus(r, 'rejected')}>
-                                Reject
+                              <button type="button" disabled={busy || !canCancelLeave(r)} onClick={() => setStatus(r, 'cancelled')}>
+                                {cancelLeaveLabel(r)}
                               </button>
                             </div>
                           )}
@@ -605,7 +622,7 @@ export default function LeaveRequests() {
           <div className="sa-card sa-modal-form sa-leave-detail">
             <header className="sa-modal-head">
               <h3 id="leave-detail-title">Request Details</h3>
-              <p className="sa-muted">Review this leave request and approve or reject it.</p>
+              <p className="sa-muted">Review this leave request and approve or cancel it.</p>
             </header>
             <div className="sa-modal-body">
               <div className="sa-drawer-student">
@@ -664,7 +681,7 @@ export default function LeaveRequests() {
                 <div>
                   <dt>Status</dt>
                   <dd>
-                    <span className={`sa-status sa-status-${selected.status}`}>{selected.status}</span>
+                    <span className={`sa-status sa-status-${leaveStatusClass(selected.status)}`}>{leaveStatusLabel(selected.status)}</span>
                   </dd>
                 </div>
               </dl>
@@ -676,10 +693,10 @@ export default function LeaveRequests() {
               <button
                 type="button"
                 className="sa-btn sa-btn-danger"
-                disabled={busy || selected.status === 'rejected'}
-                onClick={() => setStatus(selected, 'rejected')}
+                disabled={busy || !canCancelLeave(selected)}
+                onClick={() => setStatus(selected, 'cancelled')}
               >
-                Reject
+                {cancelLeaveLabel(selected)}
               </button>
               <button
                 type="button"

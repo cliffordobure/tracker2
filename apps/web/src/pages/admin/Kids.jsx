@@ -1,24 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
-import MapView from '../../components/MapView';
 import MediaPicker from '../../components/MediaPicker';
-import LocationSearch from '../../components/LocationSearch';
 import CampusSelect, { campusRefId } from '../../components/CampusSelect';
 
-const emptyParent = { name: '', email: '', phone: '', password: 'parent123' };
+const emptyParent = { name: '', email: '', phone: '', password: '' };
 const PAGE_SIZES = [10, 25, 50];
 
-function coordsFromStop(stop) {
-  const loc = stop?.location;
-  if (!loc) return null;
-  if (loc.lat != null && loc.lng != null) {
-    return { lat: Number(loc.lat), lng: Number(loc.lng) };
-  }
-  if (Array.isArray(loc.coordinates) && loc.coordinates.length >= 2) {
-    return { lat: Number(loc.coordinates[1]), lng: Number(loc.coordinates[0]) };
-  }
-  return null;
+function stopIdOf(stop) {
+  return String(stop?._id || stop?.id || stop || '');
+}
+
+function stopRouteId(stop) {
+  const r = stop?.routeId;
+  if (!r) return '';
+  if (typeof r === 'object') return String(r._id || r.id || '');
+  return String(r);
+}
+
+function stopHaystack(stop) {
+  return [stop?.name, stop?.area, stop?.address, stop?.routeName].filter(Boolean).join(' ').toLowerCase();
 }
 
 function parentKey(p) {
@@ -89,8 +90,8 @@ export default function Kids() {
   const [kids, setKids] = useState([]);
   const [stats, setStats] = useState(null);
   const [routes, setRoutes] = useState([]);
+  const [stops, setStops] = useState([]);
   const [parents, setParents] = useState([]);
-  const [school, setSchool] = useState(null);
   const [schoolClasses, setSchoolClasses] = useState([]);
   const [mode, setMode] = useState('create');
   const [panel, setPanel] = useState(null);
@@ -118,8 +119,8 @@ export default function Kids() {
   const [routeMode, setRouteMode] = useState('existing');
   const [routeId, setRouteId] = useState('');
   const [routeName, setRouteName] = useState('');
-  const [boarding, setBoarding] = useState({ lat: -1.39, lng: 36.74, stopName: '' });
-  const [mapFocus, setMapFocus] = useState(null);
+  const [homeStopId, setHomeStopId] = useState('');
+  const [stopSearch, setStopSearch] = useState('');
   const [parentMode, setParentMode] = useState('new');
   const [parent, setParent] = useState(emptyParent);
   const [parentIds, setParentIds] = useState([]);
@@ -128,27 +129,20 @@ export default function Kids() {
   const [campusId, setCampusId] = useState('');
 
   const load = async () => {
-    const [k, r, p, s, cls] = await Promise.all([
+    const [k, r, p, cls, st] = await Promise.all([
       api(`/admin/kids${campusFilter ? `?campusId=${campusFilter}` : ''}`),
       api('/admin/routes'),
       api('/admin/parents'),
-      api('/admin/schools'),
       api('/admin/classes').catch(() => ({ classes: [] })),
+      api('/admin/stops').catch(() => ({ stops: [] })),
     ]);
     setKids(k.kids || []);
     setStats(k.stats || null);
     setRoutes(r.routes || []);
     setParents(p.parents || []);
-    setSchool(s.schools[0] || null);
     setSchoolClasses(cls.classes || []);
+    setStops(st.stops || []);
     setRouteId((id) => id || r.routes[0]?._id || '');
-    if (s.schools[0]?.location) {
-      setBoarding((b) => ({
-        ...b,
-        lat: b.lat ?? s.schools[0].location.lat,
-        lng: b.lng ?? s.schools[0].location.lng,
-      }));
-    }
   };
 
   useEffect(() => {
@@ -178,18 +172,14 @@ export default function Kids() {
     setActive(true);
     setRouteMode('existing');
     setRouteName('');
-    setBoarding({
-      lat: school?.location?.lat ?? -1.39,
-      lng: school?.location?.lng ?? 36.74,
-      stopName: '',
-    });
+    setHomeStopId('');
+    setStopSearch('');
     setParentMode('new');
     setParent(emptyParent);
     setParentIds([]);
     setParentSearch('');
     setPhoto(null);
     setCampusId('');
-    setMapFocus(null);
   };
 
   const startCreate = () => {
@@ -216,12 +206,8 @@ export default function Kids() {
     setRouteMode('existing');
     setRouteId(kid.routeId?._id || kid.routeId || routes[0]?._id || '');
     setRouteName('');
-    const loc = coordsFromStop(kid.homeStopId);
-    setBoarding({
-      lat: loc?.lat ?? school?.location?.lat ?? -1.39,
-      lng: loc?.lng ?? school?.location?.lng ?? 36.74,
-      stopName: kid.homeStopId?.name || '',
-    });
+    setHomeStopId(stopIdOf(kid.homeStopId));
+    setStopSearch('');
     setParentMode('existing');
     setParent(emptyParent);
     setParentIds((kid.parentIds || []).map(parentKey).filter(Boolean));
@@ -266,11 +252,7 @@ export default function Kids() {
         grade,
         campusId: campusId || null,
         ...extraFields(),
-        boarding: {
-          lat: boarding.lat,
-          lng: boarding.lng,
-          stopName: boarding.stopName || `${name} boarding`,
-        },
+        homeStopId,
         photoUrl: photo?.url || '',
         photoPublicId: photo?.publicId || '',
       };
@@ -299,11 +281,7 @@ export default function Kids() {
         active,
         routeId,
         parentIds,
-        boarding: {
-          lat: boarding.lat,
-          lng: boarding.lng,
-          stopName: boarding.stopName || `${name} boarding`,
-        },
+        homeStopId,
         photoUrl: photo?.url || '',
         photoPublicId: photo?.publicId || '',
       };
@@ -360,6 +338,42 @@ export default function Kids() {
       .slice(0, 25);
   }, [parents, parentSearch]);
 
+  const routeStops = useMemo(() => {
+    if (!routeId) return [];
+    return stops.filter((s) => {
+      if (stopRouteId(s) !== String(routeId)) return false;
+      if (s.type === 'school') return false;
+      if (s.active === false) return false;
+      return true;
+    });
+  }, [stops, routeId]);
+
+  const filteredStops = useMemo(() => {
+    const needle = stopSearch.trim().toLowerCase();
+    if (!needle) return routeStops;
+    const words = needle.split(/\s+/).filter(Boolean);
+    return routeStops.filter((s) => {
+      const hay = stopHaystack(s);
+      return words.every((word) => hay.includes(word));
+    });
+  }, [routeStops, stopSearch]);
+
+  const selectedStop = useMemo(
+    () => stops.find((s) => String(s._id) === String(homeStopId)) || null,
+    [stops, homeStopId]
+  );
+
+  const pickRoute = (id) => {
+    setRouteId(id);
+    setStopSearch('');
+    setHomeStopId((current) => {
+      const stillOnRoute = stops.some(
+        (s) => String(s._id) === String(current) && stopRouteId(s) === String(id)
+      );
+      return stillOnRoute ? current : '';
+    });
+  };
+
   const STEPS = [
     { n: 1, label: 'Details' },
     { n: 2, label: 'Academic' },
@@ -370,8 +384,8 @@ export default function Kids() {
   const canNext = () => {
     if (step === 1) return Boolean(name.trim() && campusId && grade.trim() && gender);
     if (step === 2) {
-      const routeOk = mode === 'edit' || routeMode === 'existing' ? Boolean(routeId) : Boolean(routeName.trim());
-      return routeOk && boarding.lat != null && boarding.lng != null;
+      if (mode === 'create' && routeMode === 'new') return false;
+      return Boolean(routeId && homeStopId);
     }
     if (step === 3) {
       if (mode === 'edit') return true;
@@ -381,7 +395,7 @@ export default function Kids() {
     return true;
   };
   const canSaveEdit = () =>
-    Boolean(name.trim() && campusId && grade.trim() && gender && routeId && boarding.lat != null && boarding.lng != null);
+    Boolean(name.trim() && campusId && grade.trim() && gender && routeId && homeStopId);
 
   const grades = useMemo(() => {
     const fromClasses = schoolClasses.map((c) => c.grade).filter(Boolean);
@@ -970,7 +984,15 @@ export default function Kids() {
                   <button type="button" className={routeMode === 'existing' ? 'active' : ''} onClick={() => setRouteMode('existing')}>
                     Existing route
                   </button>
-                  <button type="button" className={routeMode === 'new' ? 'active' : ''} onClick={() => setRouteMode('new')}>
+                  <button
+                    type="button"
+                    className={routeMode === 'new' ? 'active' : ''}
+                    onClick={() => {
+                      setRouteMode('new');
+                      setHomeStopId('');
+                      setStopSearch('');
+                    }}
+                  >
                     Create route
                   </button>
                 </div>
@@ -978,7 +1000,7 @@ export default function Kids() {
               {mode === 'edit' || routeMode === 'existing' ? (
                 <label className="sa-field">
                   <span>Select route</span>
-                  <select value={routeId} onChange={(e) => setRouteId(e.target.value)}>
+                  <select value={routeId} onChange={(e) => pickRoute(e.target.value)}>
                     {routes.map((r) => (
                       <option key={r._id} value={r._id}>
                         {r.name}
@@ -998,43 +1020,54 @@ export default function Kids() {
           {step === 2 && (
             <>
               <h3>Boarding / drop-off point</h3>
-              <p className="hint">Search an area to zoom in, then click the map to mark the boarding point.</p>
-              <label className="sa-field">
-                <span>Stop name</span>
-                <input
-                  value={boarding.stopName}
-                  onChange={(e) => setBoarding((b) => ({ ...b, stopName: e.target.value }))}
-                  placeholder={`${name || 'Student'} boarding`}
-                />
-              </label>
-              <LocationSearch
-                proximity={school?.location || boarding}
-                placeholder="Search estate, road, or landmark…"
-                onSelect={(place) => {
-                  setBoarding((b) => ({
-                    ...b,
-                    lat: place.lat,
-                    lng: place.lng,
-                    stopName: b.stopName.trim() ? b.stopName : place.name,
-                  }));
-                  setMapFocus({ lat: place.lat, lng: place.lng, zoom: 16.4, at: Date.now() });
-                }}
-              />
-              <MapView
-                center={{ lat: boarding.lat, lng: boarding.lng }}
-                zoom={14}
-                focus={mapFocus}
-                onMapClick={(loc) => setBoarding((b) => ({ ...b, ...loc }))}
-                stops={[
-                  ...(school?.location ? [{ name: school.name, type: 'school', location: school.location }] : []),
-                  {
-                    name: boarding.stopName || 'Boarding',
-                    type: 'home',
-                    location: { lat: boarding.lat, lng: boarding.lng },
-                  },
-                ]}
-                className="map-canvas map-sm"
-              />
+              {mode === 'create' && routeMode === 'new' ? (
+                <p className="hint">
+                  Add the new route and its stops on the Stops page first, then assign the student to that route here.
+                </p>
+              ) : (
+                <div className="sa-stop-picker">
+                  <p className="hint">Search and select an existing boarding stop on this route.</p>
+                  <label className="sa-field">
+                    <span>
+                      Stop name <em className="sa-req">*</em>
+                    </span>
+                    <input
+                      value={stopSearch}
+                      onChange={(e) => setStopSearch(e.target.value)}
+                      placeholder="Search stop name, area, or address…"
+                      autoComplete="off"
+                    />
+                  </label>
+                  {selectedStop && !stopSearch.trim() ? (
+                    <p className="sa-stop-picked">
+                      <strong>{selectedStop.name}</strong>
+                      <small>
+                        {[selectedStop.area, selectedStop.address].filter(Boolean).join(' · ') || 'Currently assigned'}
+                      </small>
+                    </p>
+                  ) : null}
+                  {routeStops.length === 0 ? (
+                    <p className="sa-muted">No boarding stops on this route yet. Add them on the Stops page first.</p>
+                  ) : filteredStops.length === 0 ? (
+                    <p className="sa-muted">No stops match “{stopSearch.trim()}”.</p>
+                  ) : (
+                    <ul className="sa-stop-hits">
+                      {filteredStops.map((s) => {
+                        const on = String(s._id) === String(homeStopId);
+                        return (
+                          <li key={s._id}>
+                            <button type="button" className={on ? 'is-on' : ''} onClick={() => setHomeStopId(String(s._id))}>
+                              <strong>{s.name}</strong>
+                              <span>{[s.area, s.address].filter(Boolean).join(' · ') || 'Boarding stop'}</span>
+                              <em>{on ? 'Selected' : 'Select'}</em>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              )}
             </>
           )}
 
@@ -1111,8 +1144,15 @@ export default function Kids() {
                     <input value={parent.phone} onChange={(e) => setParent({ ...parent, phone: e.target.value })} />
                   </label>
                   <label className="sa-field">
-                    <span>Password</span>
-                    <input required value={parent.password} onChange={(e) => setParent({ ...parent, password: e.target.value })} />
+                    <span>
+                      Password <em className="sa-req">*</em>
+                    </span>
+                    <input
+                      required
+                      value={parent.password}
+                      onChange={(e) => setParent({ ...parent, password: e.target.value })}
+                      placeholder="Enter a password"
+                    />
                   </label>
                 </>
               )}
@@ -1132,7 +1172,7 @@ export default function Kids() {
                 <div><dt>Class</dt><dd>{[grade, section].filter(Boolean).join(' ') || '—'}</dd></div>
                 <div><dt>Gender / DOB</dt><dd>{[genderLabel(gender), dateOfBirth].filter(Boolean).join(' · ') || '—'}</dd></div>
                 <div><dt>Route</dt><dd>{routeMode === 'new' ? routeName : (routes.find((r) => r._id === routeId)?.name || '—')}</dd></div>
-                <div><dt>Stop</dt><dd>{boarding.stopName || '—'}</dd></div>
+                <div><dt>Stop</dt><dd>{selectedStop?.name || '—'}</dd></div>
                 <div>
                   <dt>Guardian</dt>
                   <dd>

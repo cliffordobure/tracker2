@@ -74,6 +74,14 @@ const bottomItems = [
   { to: '/school-admin/school', label: 'Settings', icon: 'settings' },
 ];
 
+function badgeCountFor(kind, counts) {
+  if (kind === 'unread') return counts.unread;
+  if (kind === 'incidents') return counts.incidentCount;
+  if (kind === 'messages') return counts.messageCount;
+  if (kind === 'leave') return counts.leaveCount;
+  return 0;
+}
+
 function applyInboxCounts(data, setUnread, setIncidentCount, setMessageCount, setLeaveCount) {
   setUnread(Number(data.unread) || 0);
   setIncidentCount(Number(data.incidents) || 0);
@@ -342,9 +350,11 @@ export default function SchoolAdminLayout() {
     const s = getSocket();
     s?.on('notification:new', refresh);
     window.addEventListener('sa-inbox-refresh', refresh);
+    const tick = window.setInterval(refresh, 25000);
     return () => {
       s?.off('notification:new', refresh);
       window.removeEventListener('sa-inbox-refresh', refresh);
+      window.clearInterval(tick);
     };
   }, []);
 
@@ -545,37 +555,32 @@ export default function SchoolAdminLayout() {
 
         <nav className="sa-nav" aria-label="School admin">
           {visibleNavItems.map((item) => {
-            const count =
-              item.badge === 'unread'
-                ? unread
-                : item.badge === 'incidents'
-                  ? incidentCount
-                  : item.badge === 'messages'
-                    ? messageCount
-                    : item.badge === 'leave'
-                      ? leaveCount
-                      : 0;
+            const count = badgeCountFor(item.badge, { unread, incidentCount, messageCount, leaveCount });
             return (
               <NavLink key={item.to + item.label} to={item.to} end={item.end} className="sa-nav-link" title={item.label}>
                 <span className="sa-nav-icon" aria-hidden="true">
                   <NavIcon name={item.icon} />
+                  {item.badge && count > 0 ? (
+                    <i className="sa-nav-badge" aria-label={`${count} new`}>{count > 9 ? '9+' : count}</i>
+                  ) : null}
                 </span>
                 <span>{item.label}</span>
                 {item.icon === 'live' && <em className="sa-nav-live">Live</em>}
-                {item.badge && count > 0 && <i className="sa-nav-badge">{count > 9 ? '9+' : count}</i>}
               </NavLink>
             );
           })}
           {visibleExtraItems.length > 0 && <p className="sa-nav-section-title">More</p>}
           {visibleExtraItems.map((item) => {
-            const count = item.badge === 'leave' ? leaveCount : 0;
+            const count = badgeCountFor(item.badge, { unread, incidentCount, messageCount, leaveCount });
             return (
               <NavLink key={item.to} to={item.to} title={item.label} className="sa-nav-link">
                 <span className="sa-nav-icon" aria-hidden="true">
                   <NavIcon name={item.icon} />
+                  {item.badge && count > 0 ? (
+                    <i className="sa-nav-badge" aria-label={`${count} new`}>{count > 9 ? '9+' : count}</i>
+                  ) : null}
                 </span>
                 <span>{item.label}</span>
-                {item.badge && count > 0 && <i className="sa-nav-badge">{count > 9 ? '9+' : count}</i>}
               </NavLink>
             );
           })}
@@ -745,7 +750,19 @@ export default function SchoolAdminLayout() {
                 <path d="M6 8a6 6 0 1 1 12 0c0 7 3 7 3 9H3c0-2 3-2 3-9" />
                 <path d="M10 21h4" />
               </svg>
-              {unread > 0 && <i className="sa-bell-dot" />}
+              {unread > 0 && <i className="sa-bell-count">{unread > 9 ? '9+' : unread}</i>}
+            </button>
+            <button
+              type="button"
+              className="sa-icon-btn"
+              aria-label="Messages"
+              onClick={() => navigate('/school-admin/messages')}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                <rect x="3" y="5" width="18" height="14" rx="2" />
+                <path d="m3 7 9 7 9-7" />
+              </svg>
+              {messageCount > 0 && <i className="sa-bell-count">{messageCount > 9 ? '9+' : messageCount}</i>}
             </button>
             <span className="sa-user-avatar sa-top-avatar">{prettyName(user?.name || 'A').slice(0, 1)}</span>
           </div>
@@ -759,7 +776,7 @@ export default function SchoolAdminLayout() {
                   const btn = e.target.closest('button, a.sa-btn-primary');
                   if (!btn) return;
                   const text = String(btn.textContent || btn.getAttribute('aria-label') || '').toLowerCase();
-                  if (!/\b(add|create|save|delete|remove|approve|reject|import|assign|new |update|submit)\b/.test(text)) return;
+                  if (!/\b(add|create|save|delete|remove|approve|reject|cancel|stop|import|assign|new |update|submit)\b/.test(text)) return;
                   e.preventDefault();
                   e.stopPropagation();
                 }

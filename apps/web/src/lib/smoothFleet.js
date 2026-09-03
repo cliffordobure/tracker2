@@ -1,5 +1,5 @@
 import mapboxgl from 'mapbox-gl';
-import { createBoltCarElement, setBoltCarHeading, setBoltCarLabel, setBoltCarSelected } from './mapMarkers';
+import { createBoltCarElement, setBoltCarHeading, setBoltCarLabel, setBoltCarDetail, setBoltCarSelected } from './mapMarkers';
 import { connectSocket } from './socket';
 import { createVehicleMotion } from './vehicleMotion';
 
@@ -7,6 +7,28 @@ export function tripPlate(trip) {
   const plate = String(trip?.busId?.plate || '').trim();
   if (plate) return plate;
   return trip?.busId?.label || trip?.tripCode || 'Bus';
+}
+
+export function tripDriverName(trip) {
+  return String(trip?.driverId?.name || '').trim();
+}
+
+function fleetSpeedKmh(item, loc, target) {
+  if (typeof item?.speedKmh === 'number' && Number.isFinite(item.speedKmh) && item.speedKmh >= 0) {
+    return Math.round(item.speedKmh);
+  }
+  const mps = target?.speedMps ?? speedMpsFrom(loc, null);
+  if (typeof mps === 'number' && Number.isFinite(mps) && mps >= 0) {
+    return Math.round(mps * 3.6);
+  }
+  return null;
+}
+
+function fleetHoverDetail(trip, item, loc, target) {
+  const plate = tripPlate(trip);
+  const kmh = fleetSpeedKmh(item, loc, target);
+  const speed = kmh != null ? `${kmh} km/h` : '';
+  return [plate, speed].filter(Boolean).join(' · ');
 }
 
 export function normalizeMapPoint(value) {
@@ -181,12 +203,13 @@ export function syncFleetVehicles({
     coords.push([lng, lat]);
 
     const plate = tripPlate(trip);
+    const driverName = tripDriverName(trip) || plate;
     const selected = selectedId === tripId || selectedId === id;
     const speedMps = speedMpsFrom(loc || pending, item.speedKmh);
     const prev = targetsRef.current.get(id) || pending;
     const at = pingTime(loc?.at);
     const keepLive = prev && at && prev.at && at < prev.at;
-    targetsRef.current.set(id, {
+    const nextTarget = {
       tripId,
       lat: keepLive ? prev.lat : lat,
       lng: keepLive ? prev.lng : lng,
@@ -199,12 +222,14 @@ export function syncFleetVehicles({
       plate,
       selected,
       at: keepLive ? prev.at : at || prev?.at || 0,
-    });
+    };
+    targetsRef.current.set(id, nextTarget);
+    const detail = fleetHoverDetail(trip, item, loc, nextTarget);
 
     let entry = markersRef.current.get(id);
     if (!entry) {
       const heading = loc?.heading ?? prev?.heading;
-      const el = createBoltCarElement({ heading, selected, label: plate, pulse });
+      const el = createBoltCarElement({ heading, selected, label: driverName, detail, pulse });
       if (scale) el.style.transform = `scale(${scale})`;
       if (onSelect) {
         el.style.cursor = 'pointer';
@@ -219,12 +244,14 @@ export function syncFleetVehicles({
       const motion = createVehicleMotion();
       motion.onGps([], { lat, lng }, speedMps);
       if (Number.isFinite(heading)) motion.state.heading = heading;
-      markersRef.current.set(id, { marker, motion, tripId });
+      markersRef.current.set(id, { marker, motion, tripId, lastDetail: detail });
     } else {
       entry.tripId = tripId;
       const el = entry.marker.getElement();
-      setBoltCarLabel(el, plate);
+      setBoltCarLabel(el, driverName);
+      setBoltCarDetail(el, detail);
       setBoltCarSelected(el, selected);
+      entry.lastDetail = detail;
     }
   }
 
@@ -272,20 +299,26 @@ export function startSmoothFleetLoop({
         : Number.isFinite(target.heading)
           ? target.heading
           : entry.motion.state.heading || 0;
-      setBoltCarHeading(entry.marker.getElement(), heading);
+      const el = entry.marker.getElement();
+      setBoltCarHeading(el, heading);
+      const kmh = Number.isFinite(target.speedMps) ? Math.round(target.speedMps * 3.6) : null;
+      const detail = [target.plate, kmh != null ? `${kmh} km/h` : ''].filter(Boolean).join(' · ');
+      if (detail && entry.lastDetail !== detail) {
+        entry.lastDetail = detail;
+        setBoltCarDetail(el, detail);
+      }
 
       if (
         followSelected &&
         map &&
         selectedId === id &&
-        Date.now() - lastFollow > 450
+        Date.now() - lastFollow > 80
       ) {
         lastFollow = Date.now();
-        map.easeTo({
-          center: [pos.lng, pos.lat],
-          duration: 420,
-          essential: true,
-        });
+        try {
+          map.stop();
+        } catch (_) {}
+        map.setCenter([pos.lng, pos.lat]);
       }
     }
 

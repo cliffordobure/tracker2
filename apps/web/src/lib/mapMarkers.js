@@ -4,11 +4,13 @@ export function createBoltCarElement({
   heading = 0,
   selected = false,
   label = '',
+  detail = '',
   pulse = true,
 } = {}) {
   const el = document.createElement('div');
   el.className = `marker-bolt-car${selected ? ' is-selected' : ''}${pulse ? ' is-pulse' : ''}`;
-  el.title = label || 'Bus';
+  el.removeAttribute('title');
+  el.setAttribute('aria-label', [label, detail].filter(Boolean).join(', ') || 'Bus');
 
   const deg = Number.isFinite(heading) && heading >= 0 ? heading : 0;
   const uid = `bolt${Math.random().toString(36).slice(2, 9)}`;
@@ -36,6 +38,7 @@ export function createBoltCarElement({
         </svg>
       </div>
       ${label ? `<span class="marker-bolt-label">${escapeHtml(label)}</span>` : ''}
+      ${detail ? `<span class="marker-bolt-detail">${escapeHtml(detail)}</span>` : ''}
     </div>
   `;
   return el;
@@ -54,14 +57,21 @@ export function setBoltCarSelected(el, selected) {
   el.classList.toggle('is-selected', !!selected);
 }
 
+function syncBoltCarA11y(el) {
+  const label = el.querySelector('.marker-bolt-label')?.textContent || '';
+  const detail = el.querySelector('.marker-bolt-detail')?.textContent || '';
+  el.removeAttribute('title');
+  el.setAttribute('aria-label', [label, detail].filter(Boolean).join(', ') || 'Bus');
+}
+
 export function setBoltCarLabel(el, label) {
   if (!el) return;
   const text = String(label || '').trim();
-  el.title = text || 'Bus';
   const inner = el.querySelector('.marker-bolt-inner');
   let span = el.querySelector('.marker-bolt-label');
   if (!text) {
     span?.remove();
+    syncBoltCarA11y(el);
     return;
   }
   if (!span) {
@@ -70,6 +80,26 @@ export function setBoltCarLabel(el, label) {
     inner?.appendChild(span);
   }
   span.textContent = text;
+  syncBoltCarA11y(el);
+}
+
+export function setBoltCarDetail(el, detail) {
+  if (!el) return;
+  const text = String(detail || '').trim();
+  const inner = el.querySelector('.marker-bolt-inner');
+  let span = el.querySelector('.marker-bolt-detail');
+  if (!text) {
+    span?.remove();
+    syncBoltCarA11y(el);
+    return;
+  }
+  if (!span) {
+    span = document.createElement('span');
+    span.className = 'marker-bolt-detail';
+    inner?.appendChild(span);
+  }
+  span.textContent = text;
+  syncBoltCarA11y(el);
 }
 
 function escapeHtml(s) {

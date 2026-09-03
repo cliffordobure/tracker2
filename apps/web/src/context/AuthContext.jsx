@@ -5,6 +5,20 @@ import { unregisterParentWebPush } from '../lib/webPush';
 
 const AuthContext = createContext(null);
 
+function bindParentTripToasts(socket, showToast) {
+  if (!socket) return;
+  let lastAt = 0;
+  socket.on('notification:new', (n) => {
+    lastAt = Date.now();
+    showToast(`${n.title}: ${n.body}`, 'success');
+  });
+  socket.on('trip:started', (payload) => {
+    const alert = payload?.alert;
+    if (!alert?.title || Date.now() - lastAt < 4000) return;
+    showToast(alert.body ? `${alert.title}: ${alert.body}` : alert.title, 'success');
+  });
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -24,10 +38,7 @@ export function AuthProvider({ children }) {
     api('/auth/me')
       .then(({ user: u }) => {
         setUser(u);
-        const s = connectSocket();
-        s?.on('notification:new', (n) => {
-          showToast(`${n.title}: ${n.body}`, 'success');
-        });
+        bindParentTripToasts(connectSocket(), showToast);
       })
       .catch(() => {
         localStorage.removeItem('token');
@@ -43,10 +54,7 @@ export function AuthProvider({ children }) {
       });
       localStorage.setItem('token', token);
       setUser(u);
-      const s = connectSocket();
-      s?.on('notification:new', (n) => {
-        showToast(`${n.title}: ${n.body}`, 'success');
-      });
+      bindParentTripToasts(connectSocket(), showToast);
       return u;
     },
     [showToast]

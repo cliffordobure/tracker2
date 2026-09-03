@@ -73,7 +73,7 @@ function tripStatus(status) {
 
 function tone(n) {
   if (n.incident || n.type === 'trip_cancelled' || n.important) return 'alert';
-  if (['late_pickup_request', 'attendance_alert', 'reminder'].includes(n.type)) return 'warning';
+  if (['late_pickup_request', 'attendance_alert', 'reminder', 'leave_request'].includes(n.type)) return 'warning';
   if (n.type === 'announcement') return 'announce';
   if (['kid_picked_up', 'kid_dropped_off', 'assignment', 'teacher_note', 'diary'].includes(n.type)) return 'person';
   if (ROUTE_ICON.has(n.type)) return 'bus';

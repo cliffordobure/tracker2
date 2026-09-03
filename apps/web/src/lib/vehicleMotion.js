@@ -223,18 +223,17 @@ export function createVehicleMotion() {
       if (id === state.routeId) return;
       state.routeId = id;
       if (!route?.length || route.length < 2) {
-        state.displayM = 0;
-        state.targetM = 0;
-        if (snapGps) state.display = snapGps;
+        if (snapGps && !state.display) state.display = snapGps;
         state.needsReroute = false;
         return;
       }
-      const anchor = snapGps || state.display || pointAtDistance(route, state.displayM);
-      const proj = projectOntoRoute(route, anchor) || projectOntoRouteNear(route, anchor, 0);
+      const keep = state.display || snapGps || pointAtDistance(route, state.displayM);
+      const leftover = Math.max(0, state.targetM - state.displayM);
+      const proj =
+        projectOntoRouteNear(route, keep, state.displayM) || projectOntoRoute(route, keep);
       state.displayM = proj?.distanceAlong || 0;
-      state.targetM = state.displayM;
-      state.display = proj?.point || pointAtDistance(route, state.displayM);
-      state.heading = proj?.bearing || bearingAtDistance(route, state.displayM);
+      state.targetM = state.displayM + leftover;
+      state.display = proj?.point || state.display || pointAtDistance(route, state.displayM);
       state.needsReroute = false;
       state.offRouteStreak = 0;
       state.behindStreak = 0;

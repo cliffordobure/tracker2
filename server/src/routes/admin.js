@@ -35,6 +35,8 @@ import { getIO } from '../socket.js';
 import {
   announcementAudienceLabel,
   announcementGradesOf,
+  audienceKeysMatch,
+  kidAudienceKeys,
   parseAnnouncementGrades,
 } from '../lib/announcements.js';
 import {
@@ -3109,7 +3111,8 @@ router.post('/parents', async (req, res) => {
 
     const { email, password, name, phone } = req.body;
     if (!name || !email) return res.status(400).json({ error: 'name and email are required' });
-    const passwordHash = await bcrypt.hash(password || 'parent123', 10);
+    if (!String(password || '').trim()) return res.status(400).json({ error: 'Password is required' });
+    const passwordHash = await bcrypt.hash(String(password).trim(), 10);
     const parent = await User.create({
       email: email.toLowerCase().trim(),
       passwordHash,
@@ -3425,7 +3428,12 @@ router.post('/drivers', async (req, res) => {
       employeeId,
     } = req.body;
     if (!email || !name) return res.status(400).json({ error: 'name and email are required' });
-    const passwordHash = await bcrypt.hash(password || 'driver123', 10);
+    if (!String(password || '').trim()) return res.status(400).json({ error: 'Password is required' });
+    const campusId = await validCampusId(schoolId, req.body.campusId);
+    if (!campusId) return res.status(400).json({ error: 'Campus is required' });
+    const routeIds = Array.isArray(assignedRouteIds) ? assignedRouteIds.filter(Boolean) : [];
+    if (!routeIds.length) return res.status(400).json({ error: 'Preferred routes are required' });
+    const passwordHash = await bcrypt.hash(String(password).trim(), 10);
     const user = await User.create({
       email: email.toLowerCase().trim(),
       passwordHash,
@@ -3433,7 +3441,7 @@ router.post('/drivers', async (req, res) => {
       phone: phone || '',
       role: 'driver',
       schoolId,
-      campusId: await validCampusId(schoolId, req.body.campusId),
+      campusId,
       photoUrl: req.body.photoUrl || '',
       photoPublicId: req.body.photoPublicId || '',
       employeeId: employeeId || '',
@@ -3443,7 +3451,7 @@ router.post('/drivers', async (req, res) => {
       vehiclePlate: vehiclePlate || '',
       vehicleModel: vehicleModel || '',
       vehicleColor: vehicleColor || '',
-      assignedRouteIds: assignedRouteIds || [],
+      assignedRouteIds: routeIds,
       busId: busId || null,
       licenseNumber: licenseNumber || '',
       licenseExpiry: parseOptionalDate(licenseExpiry) || null,
@@ -3775,7 +3783,8 @@ router.post('/teachers', async (req, res) => {
 
     const { email, password, name, phone, gender, department, qualification, employeeId, jobTitle, idNumber } = req.body;
     if (!email || !name) return res.status(400).json({ error: 'name and email are required' });
-    const passwordHash = await bcrypt.hash(password || 'password123', 10);
+    if (!String(password || '').trim()) return res.status(400).json({ error: 'Password is required' });
+    const passwordHash = await bcrypt.hash(String(password).trim(), 10);
     const allowedGender = ['', 'female', 'male', 'other'];
     const teacher = await User.create({
       email: email.toLowerCase().trim(),
@@ -4182,7 +4191,7 @@ router.post('/kids', async (req, res) => {
   }
 });
 
-/** One-shot student onboarding: route + boarding map point + parent. */
+/** One-shot student onboarding: route + existing boarding stop + parent. */
 router.post('/kids/onboard', async (req, res) => {
   try {
     let schoolId = resolveSchoolId(req);
@@ -4210,9 +4219,7 @@ router.post('/kids/onboard', async (req, res) => {
     if (!['male', 'female', 'other'].includes(gender)) {
       return res.status(400).json({ error: 'Gender is required' });
     }
-    if (!boarding?.lat || !boarding?.lng) {
-      return res.status(400).json({ error: 'boarding.lat and boarding.lng are required' });
-    }
+    const selectedStopId = String(req.body.homeStopId || boarding?.stopId || '').trim();
 
     let route;
     if (routeId) {
@@ -4227,7 +4234,6 @@ router.post('/kids/onboard', async (req, res) => {
         name: routeName,
         description: req.body.routeDescription || '',
       });
-      // School stop at school location
       const school = await School.findById(schoolId);
       if (school?.location?.lat != null) {
         await Stop.create({
@@ -4242,18 +4248,33 @@ router.post('/kids/onboard', async (req, res) => {
       return res.status(400).json({ error: 'routeId or routeName is required' });
     }
 
-    const maxOrder = await Stop.findOne({ routeId: route._id }).sort({ order: -1 });
-    const order = (maxOrder?.order ?? 0) + 1;
-    const stop = await Stop.create({
-      routeId: route._id,
-      name: boarding.stopName || `${name} boarding`,
-      type: 'home',
-      order,
-      location: { lat: Number(boarding.lat), lng: Number(boarding.lng) },
-    });
+    let stop = null;
+    if (selectedStopId) {
+      stop = await Stop.findById(selectedStopId);
+      if (!stop) return res.status(404).json({ error: 'Stop not found' });
+      if (String(stop.routeId) !== String(route._id)) {
+        return res.status(400).json({ error: 'Stop does not belong to the selected route' });
+      }
+    } else if (boarding?.lat != null && boarding?.lng != null) {
+      const maxOrder = await Stop.findOne({ routeId: route._id }).sort({ order: -1 });
+      stop = await Stop.create({
+        routeId: route._id,
+        name: boarding.stopName || `${name} boarding`,
+        type: 'home',
+        order: (maxOrder?.order ?? 0) + 1,
+        location: { lat: Number(boarding.lat), lng: Number(boarding.lng) },
+      });
+    } else {
+      return res.status(400).json({ error: 'Select a boarding stop' });
+    }
 
     const linkedParentIds = [...(parentIds || [])];
     let createdParent = null;
+    if (parent?.email || parent?.name) {
+      if (!parent?.email || !parent?.name || !String(parent?.password || '').trim()) {
+        return res.status(400).json({ error: 'Parent name, email, and password are required' });
+      }
+    }
     if (parent?.email && parent?.name && parent?.password) {
       const passwordHash = await bcrypt.hash(parent.password, 10);
       createdParent = await User.create({
@@ -4459,7 +4480,16 @@ router.put('/kids/:id', async (req, res) => {
       updates.routeId = routeId;
     }
 
-    if (boarding?.lat != null && boarding?.lng != null && routeId) {
+    const selectedStopId = String(req.body.homeStopId || boarding?.stopId || '').trim();
+    if (selectedStopId) {
+      const stop = await Stop.findById(selectedStopId);
+      if (!stop) return res.status(404).json({ error: 'Stop not found' });
+      if (routeId && String(stop.routeId) !== String(routeId)) {
+        return res.status(400).json({ error: 'Stop does not belong to the selected route' });
+      }
+      updates.homeStopId = stop._id;
+      if (!updates.routeId) updates.routeId = stop.routeId;
+    } else if (boarding?.lat != null && boarding?.lng != null && routeId) {
       const lat = Number(boarding.lat);
       const lng = Number(boarding.lng);
       const stopName = String(boarding.stopName || `${existing.name} boarding`).trim();
@@ -4657,28 +4687,33 @@ function announcementMeta(category) {
 }
 
 function announcementTargetFromBody(body = {}) {
-  const scope = body.scope === 'class' ? 'class' : 'school';
-  const grades = scope === 'class' ? parseAnnouncementGrades(body) : [];
+  const grades = parseAnnouncementGrades(body);
+  const scope = body.scope === 'class' || (body.category === 'class' && grades.length) ? 'class' : 'school';
+  const selected = scope === 'class' ? grades : [];
   return {
     scope,
-    grade: grades[0] || '',
-    grades,
-    audience: announcementAudienceLabel(scope, grades),
+    grade: selected[0] || '',
+    grades: selected,
+    audience: announcementAudienceLabel(scope, selected),
   };
 }
 
 async function notifyAdminAnnouncement(schoolId, announcement) {
   const recipientIds = new Set();
   const grades = announcementGradesOf(announcement);
-  if (announcement.scope === 'class' && grades.length) {
+  if (announcement.scope === 'class') {
+    if (!grades.length) return;
     const [classRows, kidRows] = await Promise.all([
-      SchoolClass.find({ schoolId, grade: { $in: grades }, active: { $ne: false } }).select('teacherId'),
-      Kid.find({ schoolId, grade: { $in: grades }, active: { $ne: false } }).select('parentIds'),
+      SchoolClass.find({ schoolId, active: { $ne: false } }).select('teacherId grade section'),
+      Kid.find({ schoolId, active: { $ne: false } }).select('parentIds grade section'),
     ]);
     for (const row of classRows) {
-      if (row.teacherId) recipientIds.add(String(row.teacherId));
+      if (row.teacherId && audienceKeysMatch(kidAudienceKeys(row), grades)) {
+        recipientIds.add(String(row.teacherId));
+      }
     }
     for (const kid of kidRows) {
+      if (!audienceKeysMatch(kidAudienceKeys(kid), grades)) continue;
       for (const id of kid.parentIds || []) recipientIds.add(String(id));
     }
   } else {

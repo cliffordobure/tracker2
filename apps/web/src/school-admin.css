@@ -143,6 +143,7 @@
 }
 
 .sa-nav-icon {
+  position: relative;
   width: 1.4rem;
   text-align: center;
   opacity: 0.85;
@@ -1207,6 +1208,7 @@
 }
 
 .sa-shell--navy .sa-nav-icon {
+  position: relative;
   width: 22px;
   display: inline-flex;
   align-items: center;
@@ -1271,10 +1273,12 @@
   font-style: normal;
 }
 .sa-shell--navy .sa-nav-badge {
-  background: #6366f1;
-  min-width: 18px;
-  height: 18px;
-  font-size: 0.625rem;
+  background: #ef4444;
+  color: #fff;
+  min-width: 16px;
+  height: 16px;
+  font-size: 0.58rem;
+  border: 1.5px solid #0f172a;
 }
 
 .sa-shell--navy .sa-topbar {
@@ -1350,17 +1354,25 @@
   display: grid;
   place-items: center;
 }
-.sa-shell--navy .sa-icon-btn .sa-bell-dot {
+.sa-shell--navy .sa-icon-btn .sa-bell-dot,
+.sa-shell--navy .sa-icon-btn .sa-bell-count {
   position: absolute;
-  top: 8px;
-  right: 9px;
-  width: 8px;
-  height: 8px;
-  min-width: 8px;
-  padding: 0;
+  top: -3px;
+  right: -4px;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 4px;
   border-radius: 999px;
   background: #ef4444;
+  color: #fff;
   border: 2px solid #fff;
+  font-size: 0.58rem;
+  font-weight: 800;
+  font-style: normal;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.2);
 }
 
 .sa-shell--navy .sa-user {
@@ -4165,6 +4177,40 @@ button.sa-text-link {
   border-radius: 10px;
 }
 .sa-stop-form-body .sa-stu-form-row { gap: 0.65rem; }
+.sa-time-select { position: relative; }
+.sa-time-select-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 0.48rem 0.7rem;
+  background: #fff;
+  color: #0f172a;
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.sa-time-select-btn.is-open { border-color: #818cf8; }
+.sa-time-select-pop {
+  margin-top: 0.4rem;
+  padding: 0.7rem;
+  border: 1px solid #dbe3f0;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.1);
+  display: grid;
+  gap: 0.65rem;
+}
+.sa-time-select-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+.sa-time-select-row .sa-field { margin: 0; }
+.sa-time-select-done { width: 100%; justify-content: center; }
 .sa-req { color: #ef4444; font-weight: 700; }
 .sa-stop-form-intro {
   display: flex;
@@ -5699,25 +5745,29 @@ button.sa-text-link {
 
 .sa-nav-link { position: relative; }
 .sa-nav-badge {
-  margin-left: auto;
-  min-width: 18px;
-  height: 18px;
+  position: absolute;
+  top: -7px;
+  right: -9px;
+  margin: 0;
+  min-width: 16px;
+  height: 16px;
   border-radius: 999px;
   background: #ef4444;
   color: #fff;
-  font-size: 0.68rem;
+  font-size: 0.58rem;
   font-style: normal;
   display: grid;
   place-items: center;
-  padding: 0 5px;
-  font-weight: 700;
+  padding: 0 4px;
+  font-weight: 800;
   line-height: 1;
+  border: 1.5px solid #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.25);
+  pointer-events: none;
 }
 .sa-shell.is-collapsed .sa-nav-badge {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  margin: 0;
+  top: -6px;
+  right: -8px;
 }
 
 .sa-students.sa-notify,
@@ -8867,6 +8917,56 @@ button.sa-text-link { background: none; border: 0; cursor: pointer; font: inheri
 .sa-campus-assign-group h3 { margin: 0 0 0.4rem; font-size: 0.92rem; }
 .sa-campus-assign-group ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.28rem; }
 .sa-campus-assign-group small { color: #64748b; font-weight: 600; }
+
+.sa-stop-picker { display: grid; gap: 0.7rem; }
+.sa-stop-picked {
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+  border-radius: 12px;
+  background: #eef2ff;
+  color: #312e81;
+  display: grid;
+  gap: 0.12rem;
+}
+.sa-stop-picked strong { font-size: 0.86rem; }
+.sa-stop-picked small { color: #4338ca; font-size: 0.75rem; }
+.sa-stop-hits {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+  max-height: 220px;
+  overflow: auto;
+}
+.sa-stop-hits button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  gap: 0.1rem 0.6rem;
+  text-align: left;
+  border: 1px solid #dbe3f0;
+  border-radius: 12px;
+  padding: 0.55rem 0.7rem;
+  background: #fff;
+  cursor: pointer;
+}
+.sa-stop-hits button.is-on {
+  border-color: #818cf8;
+  background: #eef2ff;
+}
+.sa-stop-hits strong { font-size: 0.88rem; color: #0f172a; }
+.sa-stop-hits span { grid-column: 1; color: #64748b; font-size: 0.75rem; }
+.sa-stop-hits em {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  align-self: center;
+  font-style: normal;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #5b5bf0;
+}
 
 .sa-parent-search { display: grid; gap: 0.7rem; }
 .sa-parent-picked,

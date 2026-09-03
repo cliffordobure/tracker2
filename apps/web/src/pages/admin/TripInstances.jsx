@@ -4,6 +4,7 @@ import { api } from '../../lib/api';
 import { TRIP_TABS, useTripTab, writeTripTab } from '../../lib/tripTabs';
 import { fmtSchoolDate, fmtSchoolTime, tripStartLabel } from '../../lib/schoolTime';
 import MapView from '../../components/MapView';
+import TimeSelect from '../../components/TimeSelect';
 import TripScheduling from './TripScheduling';
 import TripOutings from './TripOutings';
 
@@ -1131,10 +1132,13 @@ export default function TripInstances() {
                   <span>Date</span>
                   <input type="date" value={createForm.serviceDate} onChange={(e) => setCreateForm({ ...createForm, serviceDate: e.target.value })} />
                 </label>
-                <label className="sa-field">
+                <div className="sa-field">
                   <span>Time</span>
-                  <input type="time" value={createForm.scheduledTime} onChange={(e) => setCreateForm({ ...createForm, scheduledTime: e.target.value })} />
-                </label>
+                  <TimeSelect
+                    value={createForm.scheduledTime}
+                    onChange={(scheduledTime) => setCreateForm({ ...createForm, scheduledTime })}
+                  />
+                </div>
               </div>
               <div className="sa-stu-form-row">
                 <label className="sa-field">
@@ -1195,10 +1199,13 @@ export default function TripInstances() {
                   ))}
                 </select>
               </label>
-              <label className="sa-field">
+              <div className="sa-field">
                 <span>Time</span>
-                <input type="time" value={editForm.scheduledTime} onChange={(e) => setEditForm({ ...editForm, scheduledTime: e.target.value })} />
-              </label>
+                <TimeSelect
+                  value={editForm.scheduledTime}
+                  onChange={(scheduledTime) => setEditForm({ ...editForm, scheduledTime })}
+                />
+              </div>
             </div>
             <div className="sa-stop-form-foot">
               <button type="button" className="sa-btn sa-btn-outline" onClick={() => { setPanel(null); setEditing(null); }}>Cancel</button>

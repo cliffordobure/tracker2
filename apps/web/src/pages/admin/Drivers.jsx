@@ -9,7 +9,7 @@ const emptyForm = {
   name: '',
   email: '',
   phone: '',
-  password: 'password123',
+  password: '',
   employeeId: '',
   licenseNumber: '',
   licenseExpiry: '',
@@ -332,7 +332,21 @@ export default function Drivers() {
         await api(`/admin/drivers/${editingId}`, { method: 'PUT', body });
         setSuccess(`${form.name} updated.`);
       } else {
-        await api('/admin/drivers', { method: 'POST', body: { ...body, password: form.password || 'password123' } });
+        if (!form.campusId) {
+          setError('Campus is required');
+          return;
+        }
+        if (!String(form.password || '').trim()) {
+          setError('Password is required');
+          return;
+        }
+        if (!form.assignedRouteIds.length) {
+          setError('Preferred routes are required');
+          return;
+        }
+        body.campusId = form.campusId;
+        body.password = form.password.trim();
+        await api('/admin/drivers', { method: 'POST', body });
         setSuccess(`${form.name} added.`);
       }
       closePanel();
@@ -390,7 +404,11 @@ export default function Drivers() {
   };
 
   const year = new Date().getFullYear();
-  const canSave = Boolean(form.name.trim() && form.email.trim() && (editingId || form.password));
+  const canSave = Boolean(
+    form.name.trim() &&
+      form.email.trim() &&
+      (editingId || (form.password.trim() && form.campusId && form.assignedRouteIds.length))
+  );
   const kpis = [
     {
       label: 'Total Drivers',
@@ -721,7 +739,13 @@ export default function Drivers() {
             <span>Email</span>
             <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
           </label>
-          <CampusSelect campuses={campuses} value={form.campusId} onChange={(campusId) => setForm({ ...form, campusId })} />
+          <CampusSelect
+            campuses={campuses}
+            value={form.campusId}
+            onChange={(campusId) => setForm({ ...form, campusId })}
+            required={!editingId}
+            emptyLabel="Select campus"
+          />
           <div className="sa-stu-form-row">
             <label className="sa-field">
               <span>Phone</span>
@@ -768,7 +792,10 @@ export default function Drivers() {
             </label>
           </div>
           <fieldset className="checkbox-set">
-            <legend>Preferred routes</legend>
+            <legend>
+              Preferred routes
+              {!editingId ? <em className="sa-req"> *</em> : null}
+            </legend>
             {routes.length ? (
               routes.map((r) => (
                 <label key={r._id} className="check">
@@ -781,12 +808,25 @@ export default function Drivers() {
                 </label>
               ))
             ) : (
-              <p className="sa-muted">No routes yet.</p>
+              <p className="sa-muted">Add a route first — at least one preferred route is required.</p>
             )}
           </fieldset>
           <label className="sa-field">
-            <span>{editingId ? 'New password (optional)' : 'Password'}</span>
-            <input value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+            <span>
+              {editingId ? (
+                'New password (optional)'
+              ) : (
+                <>
+                  Password <em className="sa-req">*</em>
+                </>
+              )}
+            </span>
+            <input
+              required={!editingId}
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
+              placeholder={editingId ? 'Leave blank to keep current' : 'Enter a password'}
+            />
           </label>
           <MediaPicker
             label="Photo"

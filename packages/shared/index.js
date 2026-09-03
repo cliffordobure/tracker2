@@ -55,6 +55,7 @@ export const NOTIFICATION_TYPES = {
   DIARY: 'diary',
   ANNOUNCEMENT: 'announcement',
   MESSAGE: 'message',
+  LEAVE_REQUEST: 'leave_request',
   REMINDER: 'reminder',
   SYSTEM: 'system',
 };

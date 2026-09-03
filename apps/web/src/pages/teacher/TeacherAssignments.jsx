@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
+import AudiencePicker from '../../components/AudiencePicker';
 
 const empty = {
   title: '',
@@ -71,12 +72,12 @@ export default function TeacherAssignments() {
         kidIds: audience === 'individuals' ? form.kidIds : [],
       };
       if (audience === 'class' && !payload.grade) {
-        setError('Select a class, or send to all classes / individual students');
+        setError('Pick a class, or send to specific students');
         setBusy(false);
         return;
       }
       if (audience === 'individuals' && !payload.kidIds.length) {
-        setError('Select at least one student');
+        setError('Pick at least one student');
         setBusy(false);
         return;
       }
@@ -246,63 +247,16 @@ export default function TeacherAssignments() {
           Subject
           <input value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} placeholder="English" />
         </label>
-        <label>
-          Send to
-          <select
-            value={audience}
-            onChange={(e) => {
-              const next = e.target.value;
-              setAudience(next);
-              setForm((f) => ({
-                ...f,
-                kidIds: next === 'individuals' ? f.kidIds : [],
-                grade: next === 'all' ? '' : f.grade,
-              }));
-            }}
-          >
-            <option value="all">All classes</option>
-            <option value="class">One class</option>
-            <option value="individuals">Individual students</option>
-          </select>
-        </label>
-        {audience !== 'all' && (
-          <label>
-            Class
-            <select
-              value={form.grade}
-              onChange={(e) => setForm({ ...form, grade: e.target.value, kidIds: audience === 'individuals' ? [] : form.kidIds })}
-            >
-              <option value="">{audience === 'individuals' ? 'All classes (filter)' : 'Select class'}</option>
-              {grades.map((g) => (
-                <option key={g} value={g}>
-                  {g}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        {audience === 'individuals' && (
-          <fieldset className="diary-kids">
-            <legend>Students</legend>
-            {(form.grade ? kids.filter((k) => k.grade === form.grade) : kids).map((k) => {
-              const on = form.kidIds.includes(k._id);
-              return (
-                <label key={k._id} className="diary-kid-row">
-                  <input
-                    type="checkbox"
-                    checked={on}
-                    onChange={() => setForm((f) => ({
-                      ...f,
-                      kidIds: on ? f.kidIds.filter((id) => id !== k._id) : [...f.kidIds, k._id],
-                    }))}
-                  />
-                  {k.name}{k.grade ? ` · ${k.grade}` : ''}
-                </label>
-              );
-            })}
-            {!kids.length && <p className="tw-empty">No students found.</p>}
-          </fieldset>
-        )}
+        <AudiencePicker
+          audience={audience}
+          onAudienceChange={setAudience}
+          grade={form.grade}
+          onGradeChange={(grade) => setForm((f) => ({ ...f, grade }))}
+          grades={grades}
+          kids={kids}
+          kidIds={form.kidIds}
+          onKidIdsChange={(kidIds) => setForm((f) => ({ ...f, kidIds }))}
+        />
         <label>
           Due date
           <input type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />

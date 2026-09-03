@@ -6,6 +6,7 @@ import { createAndEmitNotifications } from '../services/notifications.js';
 import { datesForSchedule } from '../services/tripScheduleService.js';
 import { isCloudinaryConfigured } from '../services/cloudinary.js';
 import { formatClock, formatDayClock } from '../lib/clock.js';
+import { stripApprovedLeaveFromKids } from '../lib/leave.js';
 
 const router = Router();
 router.use(authenticate, requireRole('driver'));
@@ -309,6 +310,10 @@ async function boardingForTrip(trip) {
 
 async function serializeDriverTripCard(trip) {
   const obj = typeof trip.toObject === 'function' ? trip.toObject() : { ...trip };
+  obj.kidIds = await stripApprovedLeaveFromKids(
+    obj.kidIds,
+    obj.serviceDate || obj.scheduledFor || obj.startedAt || new Date()
+  );
   const routeId = obj.routeId?._id || obj.routeId;
   const ends = await routeEnds(routeId, obj.direction);
   const board = await boardingForTrip(obj);

@@ -42,7 +42,9 @@ import {
   announcementAudienceLabel,
   announcementGradesOf,
   announcementVisibleToGrades,
+  audienceKeysFromKids,
   classAnnouncementVisibleOr,
+  kidAudienceKeys,
 } from '../lib/announcements.js';
 
 const router = Router();
@@ -1067,7 +1069,7 @@ async function buildParentDocuments(parentId, query = {}) {
   const scopedKids = kidFilter ? kids.filter((k) => String(k._id) === kidFilter) : kids;
   const schoolIds = [...new Set(scopedKids.map((k) => k.schoolId?._id || k.schoolId).filter(Boolean))];
   const kidIds = scopedKids.map((k) => k._id);
-  const grades = [...new Set(scopedKids.map((k) => k.grade).filter(Boolean))];
+  const grades = audienceKeysFromKids(scopedKids);
   const from = startOfDay(new Date(Date.now() - 180 * 24 * 60 * 60 * 1000));
 
   const [diaryEntries, announcements, statements, leaves] = await Promise.all([
@@ -2196,6 +2198,7 @@ router.get('/overview', async (req, res) => {
     const kidIds = kids.map((k) => k._id);
     const schoolIds = [...new Set(kids.map((k) => k.schoolId?._id?.toString() || k.schoolId?.toString()).filter(Boolean))];
     const grades = [...new Set(kids.map((k) => k.grade).filter(Boolean))];
+    const announcementGrades = audienceKeysFromKids(kids);
     const today = startOfDay();
 
     const [activeTrips, notifications, announcements, holidays, assignments, marks] = await Promise.all([
@@ -2211,7 +2214,7 @@ router.get('/overview', async (req, res) => {
             schoolId: { $in: schoolIds },
             active: true,
             archived: { $ne: true },
-            $or: classAnnouncementVisibleOr(grades),
+            $or: classAnnouncementVisibleOr(announcementGrades),
           })
             .sort({ publishedAt: -1, createdAt: -1 })
             .limit(20)
@@ -2998,6 +3001,7 @@ async function buildParentDiaryFeed(kids, query = {}, userId = null) {
       active: { $ne: false },
       archived: { $ne: true },
       publishedAt: { $gte: from },
+      $or: classAnnouncementVisibleOr(audienceKeysFromKids(scopedKids.length ? scopedKids : kids)),
     })
       .sort({ publishedAt: -1 })
       .limit(40),
@@ -3049,7 +3053,7 @@ async function buildParentDiaryFeed(kids, query = {}, userId = null) {
     });
   }
   for (const a of announcements) {
-    const kidGrades = kids.map((k) => k.grade).filter(Boolean);
+    const kidGrades = audienceKeysFromKids(scopedKids.length ? scopedKids : kids);
     if (!announcementVisibleToGrades(a, kidGrades)) continue;
     const classLabel = announcementGradesOf(a).join(', ');
     items.push({
@@ -4513,6 +4517,7 @@ function serializeParentLeave(row) {
   return {
     _id: doc._id,
     status,
+    statusLabel: status === 'rejected' || status === 'cancelled' ? 'Cancelled' : status === 'approved' ? 'Approved' : 'Pending',
     leaveType: doc.leaveType || 'vacation',
     leaveTypeLabel: leaveTypeLabel(doc.leaveType),
     durationType: doc.durationType || 'short',
@@ -4698,6 +4703,26 @@ router.post('/leave-requests', async (req, res) => {
     const populated = await LeaveRequest.findById(created._id)
       .populate(leaveKidPopulate)
       .populate('reviewedBy', 'name photoUrl jobTitle');
+    const staff = await User.find({
+      schoolId: kid.schoolId,
+      role: { $in: ['school_admin', 'staff'] },
+      active: { $ne: false },
+    }).select('_id');
+    if (staff.length) {
+      const kidName = populated?.kidId?.name || kid.name || 'A student';
+      await createAndEmitNotifications(
+        getIO(),
+        staff.map((admin) => ({
+          userId: admin._id,
+          type: NOTIFICATION_TYPES.LEAVE_REQUEST || NOTIFICATION_TYPES.SYSTEM,
+          key: `leave:${created._id}`,
+          title: `Leave request · ${kidName}`,
+          body: `${kidName} has a new leave request waiting for review.`,
+          kidId: kid._id,
+          link: 'leave',
+        })),
+      );
+    }
     res.status(201).json({ request: serializeParentLeave(populated) });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -5166,7 +5191,7 @@ router.get('/announcements', async (req, res) => {
 
 router.post('/announcements/:id/read', async (req, res) => {
   try {
-    const { schoolIds } = await parentNoticeContext(req.user.id);
+    const { schoolIds, grades } = await parentNoticeContext(req.user.id);
     const allowedSchools = new Set(schoolIds);
     const announcement = await Announcement.findById(req.params.id);
     if (!announcement || !announcement.active || announcement.archived) {
@@ -5174,6 +5199,9 @@ router.post('/announcements/:id/read', async (req, res) => {
     }
     if (!allowedSchools.has(announcement.schoolId.toString())) {
       return res.status(403).json({ error: 'Not allowed' });
+    }
+    if (!announcementVisibleToGrades(announcement, grades)) {
+      return res.status(404).json({ error: 'Announcement not found' });
     }
     await Announcement.updateOne({ _id: announcement._id }, { $addToSet: { readBy: req.user.id } });
     res.json({ ok: true, announcement: serializeParentAnnouncement(
@@ -5713,10 +5741,10 @@ async function parentNoticeContext(userId) {
   const kids = await Kid.find({
     parentIds: { $in: parentIds },
     active: { $ne: false },
-  }).select('schoolId grade');
+  }).select('schoolId grade section');
   const schoolIds = [...new Set(kids.map((k) => k.schoolId?.toString()).filter(Boolean))];
   if (!schoolIds.length && me?.schoolId) schoolIds.push(String(me.schoolId));
-  const grades = [...new Set(kids.map((k) => k.grade).filter(Boolean))];
+  const grades = audienceKeysFromKids(kids);
   return { parentIds, kids, schoolIds, grades };
 }
 
@@ -6183,9 +6211,10 @@ function serializeCalendarEventDetail(row, { kid, schoolName } = {}) {
 
 router.get('/calendar', async (req, res) => {
   try {
-    const kids = await Kid.find({ parentIds: req.user.id, active: true }).select('name grade schoolId photoUrl');
+    const kids = await Kid.find({ parentIds: req.user.id, active: true }).select('name grade section schoolId photoUrl');
     const schoolIds = [...new Set(kids.map((k) => k.schoolId?.toString()).filter(Boolean))];
     const grades = [...new Set(kids.map((k) => k.grade).filter(Boolean))];
+    const announcementGrades = audienceKeysFromKids(kids);
     const kidId = String(req.query.kidId || '');
     const selectedKid = kids.find((k) => String(k._id) === kidId) || null;
 
@@ -6235,7 +6264,7 @@ router.get('/calendar', async (req, res) => {
             publishedAt: { $gte: windowFrom, $lte: windowTo },
             $and: [
               { $or: [{ kind: 'event' }, { category: 'events' }] },
-              { $or: classAnnouncementVisibleOr(selectedKid?.grade ? [selectedKid.grade] : grades) },
+              { $or: classAnnouncementVisibleOr(selectedKid ? kidAudienceKeys(selectedKid) : announcementGrades) },
             ],
           }).sort({ publishedAt: 1 })
         : [],
@@ -6440,12 +6469,20 @@ router.get('/messages', async (req, res) => {
       filter.$and.push({ $or: [{ title: rx }, { lastMessage: rx }, { roleLabel: rx }] });
     }
 
-    const [rows, contacts, unread] = await Promise.all([
+    const [rows, contacts, unread, chatRows] = await Promise.all([
       Conversation.find(filter).sort({ lastMessageAt: -1 }).limit(80),
       parentMessageContacts(schoolId),
       Notification.countDocuments({ userId: req.user.id, read: { $ne: true } }),
+      Conversation.find({
+        $and: [
+          parentConversationClause(parentIds, req.user.id),
+          { $nor: [{ sourceKey: /^sample:/ }] },
+          { archived: { $ne: true } },
+        ],
+      }).select('unreadCount'),
     ]);
     const staffMap = await staffMapForConversations(rows);
+    const chatUnread = chatRows.reduce((sum, row) => sum + (Number(row.unreadCount) || 0), 0);
 
     res.json({
       conversations: rows.map((row) => {
@@ -6454,6 +6491,7 @@ router.get('/messages', async (req, res) => {
       }),
       contacts,
       unread,
+      chatUnread,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

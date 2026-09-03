@@ -673,6 +673,7 @@ router.post('/announcements', async (req, res) => {
       category: categoryFromKind(kind),
       scope: 'class',
       grade,
+      grades: [grade],
       audience: String(req.body?.audience || grade).trim().slice(0, 120),
       authorName: teacher?.name || 'Teacher',
       attachmentName: req.body?.attachmentName || '',
@@ -704,7 +705,10 @@ router.put('/announcements/:id', async (req, res) => {
       item.kind = req.body.kind;
       item.category = categoryFromKind(req.body.kind);
     }
-    if (req.body?.grade !== undefined) item.grade = String(req.body.grade || '').trim();
+    if (req.body?.grade !== undefined) {
+      item.grade = String(req.body.grade || '').trim();
+      item.grades = item.grade ? [item.grade] : [];
+    }
     if (req.body?.audience !== undefined) item.audience = String(req.body.audience || '').trim().slice(0, 120);
     if (req.body?.icon !== undefined) item.icon = iconFromKind(item.kind, String(req.body.icon || '').trim());
     if (!item.title || !item.body) return res.status(400).json({ error: 'title and body are required' });

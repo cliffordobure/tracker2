@@ -14,7 +14,7 @@ const emptyForm = {
   adminName: '',
   adminEmail: '',
   adminPhone: '',
-  adminPassword: 'password123',
+  adminPassword: '',
 };
 
 export default function SuperSchools() {
@@ -53,12 +53,17 @@ export default function SuperSchools() {
         plan: form.plan,
         status: form.status,
       };
-      if (form.adminEmail) {
+      if (form.adminEmail || form.adminName) {
+        if (!String(form.adminPassword || '').trim()) {
+          setError('Password is required when creating a school admin');
+          setSaving(false);
+          return;
+        }
         body.admin = {
           name: form.adminName,
           email: form.adminEmail,
           phone: form.adminPhone,
-          password: form.adminPassword,
+          password: form.adminPassword.trim(),
         };
       }
       await api('/admin/platform/schools', { method: 'POST', body });
@@ -252,8 +257,15 @@ export default function SuperSchools() {
             <input value={form.adminPhone} onChange={(e) => setForm({ ...form, adminPhone: e.target.value })} />
           </label>
           <label className="sa-field">
-            <span>Password</span>
-            <input value={form.adminPassword} onChange={(e) => setForm({ ...form, adminPassword: e.target.value })} />
+            <span>
+              Password {(form.adminEmail || form.adminName) ? <em className="sa-req">*</em> : null}
+            </span>
+            <input
+              required={Boolean(form.adminEmail || form.adminName)}
+              value={form.adminPassword}
+              onChange={(e) => setForm({ ...form, adminPassword: e.target.value })}
+              placeholder="Required if creating an admin"
+            />
           </label>
           <button className="sa-btn sa-btn-primary" disabled={saving} type="submit">
             {saving ? 'Admitting…' : 'Admit school'}

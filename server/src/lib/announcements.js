@@ -1,6 +1,10 @@
+export function normalizeAnnouncementGrade(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
 export function announcementGradesOf(row = {}) {
   const list = [...(Array.isArray(row.grades) ? row.grades : []), row.grade];
-  return [...new Set(list.map((g) => String(g || '').trim()).filter(Boolean))];
+  return [...new Set(list.map(normalizeAnnouncementGrade).filter(Boolean))];
 }
 
 export function parseAnnouncementGrades(body = {}) {
@@ -10,7 +14,7 @@ export function parseAnnouncementGrades(body = {}) {
     : String(raw)
         .split(',')
         .map((part) => part.trim());
-  return [...new Set(list.map((g) => String(g || '').trim()).filter(Boolean))];
+  return [...new Set(list.map(normalizeAnnouncementGrade).filter(Boolean))];
 }
 
 export function announcementAudienceLabel(scope, grades = []) {
@@ -22,19 +26,50 @@ export function announcementAudienceLabel(scope, grades = []) {
   return 'All Teachers, Parents & Students';
 }
 
+export function kidAudienceKeys(kid = {}) {
+  const grade = normalizeAnnouncementGrade(kid.grade);
+  const section = normalizeAnnouncementGrade(kid.section);
+  const combined = [grade, section].filter(Boolean).join(' ');
+  return [...new Set([grade, combined].filter(Boolean))];
+}
+
+export function audienceKeysFromKids(kids = []) {
+  return [...new Set((kids || []).flatMap((kid) => kidAudienceKeys(kid)))];
+}
+
+export function announcementIsClassTargeted(row = {}) {
+  return row.scope === 'class' || announcementGradesOf(row).length > 0;
+}
+
+export function audienceKeysMatch(keys = [], targets = []) {
+  const allowed = new Set((keys || []).map(normalizeAnnouncementGrade).filter(Boolean));
+  return (targets || []).some((grade) => allowed.has(normalizeAnnouncementGrade(grade)));
+}
+
+function schoolWideAnnouncementClause() {
+  return {
+    $and: [
+      { scope: { $ne: 'class' } },
+      { $or: [{ grades: { $exists: false } }, { grades: { $size: 0 } }, { grades: null }] },
+      { $or: [{ grade: { $exists: false } }, { grade: '' }, { grade: null }] },
+    ],
+  };
+}
+
 export function classAnnouncementVisibleOr(grades = []) {
-  return [
-    { scope: { $ne: 'class' } },
-    { scope: 'class', grade: { $in: grades } },
-    { scope: 'class', grades: { $in: grades } },
-    { category: 'class', grade: { $in: grades } },
-  ];
+  const allowed = [...new Set((grades || []).map(normalizeAnnouncementGrade).filter(Boolean))];
+  const clauses = [schoolWideAnnouncementClause()];
+  if (allowed.length) {
+    clauses.push({ grade: { $in: allowed } }, { grades: { $in: allowed } });
+  }
+  return clauses;
 }
 
 export function announcementVisibleToGrades(row, grades = []) {
-  if (!row || row.scope !== 'class') return true;
+  if (!row) return false;
   const targets = announcementGradesOf(row);
-  if (!targets.length) return true;
-  const allowed = new Set((grades || []).map((g) => String(g || '').trim()).filter(Boolean));
-  return targets.some((grade) => allowed.has(grade));
+  if (!announcementIsClassTargeted(row) || !targets.length) {
+    return row.scope !== 'class';
+  }
+  return audienceKeysMatch(grades, targets);
 }

@@ -11,6 +11,7 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 import { getIO } from '../socket.js';
 import { createAndEmitNotifications } from '../services/notifications.js';
 import { formatClock, formatDateTime } from '../lib/clock.js';
+import { stripApprovedLeaveFromKids } from '../lib/leave.js';
 
 const router = Router();
 
@@ -93,7 +94,13 @@ async function emitTripStarted(trip, kids, { eveningBoard = false } = {}) {
   const driverIdStr = driverId ? String(driverId) : '';
   const parentNotes = notifications.filter((n) => String(n.userId) !== driverIdStr);
   const driverNotes = notifications.filter((n) => String(n.userId) === driverIdStr);
-  if (parentNotes.length) await createAndEmitNotifications(io, parentNotes);
+  if (parentNotes.length) {
+    try {
+      await createAndEmitNotifications(io, parentNotes);
+    } catch (err) {
+      console.warn('[trips] parent start notify failed:', err.message);
+    }
+  }
   if (driverNotes.length) {
     try {
       await createAndEmitNotifications(io, driverNotes);
@@ -110,7 +117,18 @@ async function emitTripStarted(trip, kids, { eveningBoard = false } = {}) {
   if (driverId) io?.to(`user:${driverId}`).emit('trip:started', { trip: populated });
   for (const kid of kids) {
     for (const parentId of kid.parentIds || []) {
-      io?.to(`user:${parentId}`).emit('trip:started', { trip: populated, kidId: kid._id });
+      const alert = eveningBoard
+        ? {
+            type: 'trip_started',
+            title: 'On the evening bus',
+            body: `${kid.name} has left school and is on the way home.`,
+          }
+        : {
+            type: 'trip_started',
+            title: 'Leaving school',
+            body: `The bus/van is now leaving school to pick your child ${kid.name} at ${when}`,
+          };
+      io?.to(`user:${parentId}`).emit('trip:started', { trip: populated, kidId: kid._id, alert });
     }
   }
 
@@ -798,9 +816,16 @@ router.get('/:id', authenticate, async (req, res) => {
       Stop.find({ routeId: trip.routeId._id || trip.routeId }).sort({ order: 1 }),
     ]);
 
+    const payload = typeof trip.toObject === 'function' ? trip.toObject() : trip;
+    const ridingKids = await stripApprovedLeaveFromKids(
+      payload.kidIds,
+      payload.serviceDate || payload.scheduledFor || payload.startedAt || new Date()
+    );
+    payload.kidIds = ridingKids;
+
     // Only school + home stops for kids on this trip (drop leftover route stops)
     const homeIds = new Set(
-      (trip.kidIds || [])
+      (ridingKids || [])
         .map((k) => (k.homeStopId?._id || k.homeStopId)?.toString())
         .filter(Boolean)
     );
@@ -808,7 +833,7 @@ router.get('/:id', authenticate, async (req, res) => {
     const homes = allStops.filter((s) => s.type !== 'school' && homeIds.has(s._id.toString()));
     const stops = [...(school ? [school] : []), ...homes];
 
-    res.json({ trip, events, stops });
+    res.json({ trip: payload, events, stops });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

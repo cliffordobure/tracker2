@@ -169,7 +169,7 @@ export default function ParentDiary() {
     <div className="pdiary">
       <div>
         <h2>{first}&apos;s diary</h2>
-        <p className="tw-lede">Lessons, homework, achievements, and notes from the teacher. Acknowledge what you have read.</p>
+        <p className="tw-lede">Lessons, homework, achievements, and notes from the teacher. Reply with a comment or file.</p>
       </div>
       {error && <div className="tw-alert">{error}</div>}
 
@@ -233,6 +233,7 @@ export default function ParentDiary() {
           {dayItems.map((item) => {
             const hw = homeworkList(item);
             const id = item._id || item.id;
+            const canComment = (item.source || 'diary') === 'diary' && !item.sample;
             return (
               <article key={id} className="pdiary-card">
                 <div className="pdiary-kicker">{item.typeEmoji || '📚'} <strong>{item.typeLabel || item.category || 'Diary'}</strong></div>
@@ -278,17 +279,19 @@ export default function ParentDiary() {
                       {busyId === id ? 'Saving…' : 'Acknowledge'}
                     </button>
                   )}
-                  <button
-                    type="button"
-                    className="tw-btn tw-btn-ghost"
-                    onClick={() => {
-                      setCommentFor(commentFor === id ? '' : id);
-                      setComment('');
-                      setCommentFiles([]);
-                    }}
-                  >
-                    Comment
-                  </button>
+                  {canComment ? (
+                    <button
+                      type="button"
+                      className="tw-btn tw-btn-ghost"
+                      onClick={() => {
+                        setCommentFor(commentFor === id ? '' : id);
+                        setComment('');
+                        setCommentFiles([]);
+                      }}
+                    >
+                      Comment
+                    </button>
+                  ) : null}
                 </div>
                 {(item.comments || []).length > 0 && (
                   <ul className="pdiary-comments">
@@ -307,7 +310,7 @@ export default function ParentDiary() {
                     ))}
                   </ul>
                 )}
-                {commentFor === id && (
+                {canComment && commentFor === id && (
                   <div className="pdiary-comment-box">
                     <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Write a comment for the teacher" rows={3} />
                     <div className="pdiary-comment-box-actions">

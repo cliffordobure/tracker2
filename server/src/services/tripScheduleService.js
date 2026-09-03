@@ -8,6 +8,7 @@ import { notifyTripAssigned } from './notifications.js';
 import { getIO } from '../socket.js';
 import { EDIT_SCOPES } from '@school-tracker/shared';
 import { fromAppZonedDateTime } from '../lib/clock.js';
+import { stripApprovedLeaveFromKids } from '../lib/leave.js';
 
 function parseDateInput(dateInput) {
   if (dateInput == null || dateInput === '') return new Date();
@@ -238,6 +239,7 @@ export async function generateInstancesForSchedule(
     }
 
     const payload = instancePayload(schedule, serviceDate, exception);
+    payload.kidIds = await stripApprovedLeaveFromKids(payload.kidIds, serviceDate);
     const conflict = await findPeriodConflict({
       schoolId: payload.schoolId,
       busId: payload.busId,

@@ -243,24 +243,6 @@ export default function DriverHome() {
     if (first) showToast(`First stop: ${first.name}`, 'success');
   };
 
-  const startTrip = async (routeId, direction) => {
-    setError('');
-    try {
-      const data = await api('/trips', {
-        method: 'POST',
-        body: { routeId, direction },
-      });
-      const t = data.trip;
-      if (data.boarding || t.status === 'scheduled') {
-        await beginBoarding(t);
-        return;
-      }
-      await activateTrip(t, direction);
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
   const startScheduled = async (scheduledTrip) => {
     setError('');
     try {
@@ -433,35 +415,7 @@ export default function DriverHome() {
             </div>
           )}
 
-          {routes.map((route) => (
-            <div key={route._id} className="panel">
-              <div className="panel-head">
-                <div>
-                  <h2>{route.name}</h2>
-                  <p className="muted">
-                    {route.schoolId?.name} · {route.kids?.length || 0} kids · ad-hoc fallback
-                  </p>
-                </div>
-                <div className="row-actions">
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => startTrip(route._id, 'to_school')}
-                  >
-                    Start morning
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => startTrip(route._id, 'to_home')}
-                  >
-                    Start evening
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-          {!todayTrips.length && !routes.length && (
+          {!todayTrips.length && (
             <p>No trips for today. Ask your school admin to create a trip schedule.</p>
           )}
         </div>
