@@ -1,7 +1,7 @@
 const API_URL =
   import.meta.env.VITE_API_URL ||
   (import.meta.env.PROD
-    ? 'https://tracker2-j8vr.onrender.com'
+    ? 'https://api.tracktoto.co.ke'
     : 'http://localhost:4001');
 
 function getToken() {
