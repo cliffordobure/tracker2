@@ -2204,6 +2204,29 @@ function messageClockLabel(value) {
   return formatClock(value);
 }
 
+function contactAsDriverThread(contact) {
+  return {
+    _id: null,
+    contactId: contact._id,
+    type: 'direct',
+    kind: contact.kind || 'parent',
+    title: contact.name,
+    roleLabel: contact.roleLabel || (contact.kind === 'admin' ? 'Admin' : 'Parent'),
+    subtitle: contact.subtitle || '',
+    avatarKind: contact.kind || 'parent',
+    photoUrl: contact.photoUrl || '',
+    phone: contact.phone || '',
+    lastMessage: '',
+    lastMessageAt: null,
+    timeLabel: '',
+    unreadCount: 0,
+    archived: false,
+    parentId: contact.kind === 'admin' ? null : contact._id,
+    counterpartUserId: contact.kind === 'admin' ? contact._id : null,
+    draft: true,
+  };
+}
+
 function serializeDriverConversation(row) {
   const doc = row.toObject ? row.toObject() : row;
   const kind = doc.avatarKind === 'admin' || doc.roleLabel === 'Administration'
@@ -2251,7 +2274,10 @@ function serializeDriverChatMessage(row, driverId) {
 }
 
 async function driverMessageContacts(userId) {
-  const profile = await DriverProfile.findOne({ userId: userId });
+  const [profile, user] = await Promise.all([
+    DriverProfile.findOne({ userId }),
+    User.findById(userId).select('schoolId'),
+  ]);
   const { start, end } = dayBounds();
   const todayTrips = await Trip.find({
     driverId: userId,
@@ -2261,22 +2287,46 @@ async function driverMessageContacts(userId) {
       { status: 'active' },
     ],
   }).select('routeId schoolId kidIds');
-  const routeIds = new Set(todayTrips.map((t) => String(t.routeId)).filter((id) => id && id !== 'undefined'));
-  for (const id of profile?.assignedRouteIds || []) routeIds.add(String(id));
-  const kidIds = todayTrips.flatMap((t) => t.kidIds || []).filter(Boolean);
-  const kidQuery = { active: true, $or: [] };
-  if (routeIds.size) kidQuery.$or.push({ routeId: { $in: [...routeIds] } });
-  if (kidIds.length) kidQuery.$or.push({ _id: { $in: kidIds } });
-  const kids = kidQuery.$or.length
-    ? await Kid.find(kidQuery).select('name grade photoUrl parentIds schoolId')
+  const routeIds = new Set();
+  const schoolIds = new Set();
+  const kidIds = [];
+  for (const t of todayTrips) {
+    const routeId = asObjectId(t.routeId);
+    if (routeId) routeIds.add(routeId);
+    const schoolId = asObjectId(t.schoolId);
+    if (schoolId) schoolIds.add(schoolId);
+    for (const kidId of t.kidIds || []) {
+      const id = asObjectId(kidId);
+      if (id) kidIds.push(id);
+    }
+  }
+  for (const id of profile?.assignedRouteIds || []) {
+    const routeId = asObjectId(id);
+    if (routeId) routeIds.add(routeId);
+  }
+  const userSchool = asObjectId(user?.schoolId);
+  if (userSchool) schoolIds.add(userSchool);
+  if (!schoolIds.size && routeIds.size) {
+    const routes = await Route.find({ _id: { $in: [...routeIds] } }).select('schoolId');
+    for (const route of routes) {
+      const schoolId = asObjectId(route.schoolId);
+      if (schoolId) schoolIds.add(schoolId);
+    }
+  }
+  const kidOr = [];
+  if (routeIds.size) kidOr.push({ routeId: { $in: [...routeIds] } });
+  if (kidIds.length) kidOr.push({ _id: { $in: kidIds } });
+  const kids = kidOr.length
+    ? await Kid.find({ active: true, $or: kidOr }).select('name grade photoUrl parentIds schoolId').limit(400)
     : [];
   const parentIds = new Set();
-  const schoolIds = new Set();
   const kidsByParent = new Map();
   for (const kid of kids) {
-    if (kid.schoolId) schoolIds.add(String(kid.schoolId));
+    const schoolId = asObjectId(kid.schoolId);
+    if (schoolId) schoolIds.add(schoolId);
     for (const pid of kid.parentIds || []) {
-      const id = String(pid);
+      const id = asObjectId(pid);
+      if (!id) continue;
       parentIds.add(id);
       if (!kidsByParent.has(id)) kidsByParent.set(id, []);
       kidsByParent.get(id).push(kid.name);
@@ -2400,6 +2450,12 @@ async function driverSendMessage(convo, driver, body) {
   return message;
 }
 
+function asObjectId(value) {
+  if (!value) return '';
+  const id = typeof value === 'object' ? String(value._id || value.id || '') : String(value);
+  return /^[a-fA-F0-9]{24}$/.test(id) ? id : '';
+}
+
 async function currentDriverTripCard(userId) {
   const { start, end } = dayBounds();
   const active = await Trip.findOne({ driverId: userId, status: 'active' })
@@ -2426,6 +2482,42 @@ async function currentDriverTripCard(userId) {
   return scheduled ? serializeDriverTripCard(scheduled) : null;
 }
 
+async function lightDriverTripBanner(userId) {
+  const { start, end } = dayBounds();
+  const active = await Trip.findOne({ driverId: userId, status: 'active' })
+    .populate('routeId', 'name')
+    .populate('busId', 'plate label');
+  const trip =
+    active ||
+    (await Trip.findOne({
+      driverId: userId,
+      status: 'scheduled',
+      $or: [
+        { serviceDate: { $gte: start, $lte: end } },
+        { scheduledFor: { $gte: start, $lte: end } },
+      ],
+    })
+      .populate('routeId', 'name')
+      .populate('busId', 'plate label')
+      .sort({ sequence: 1, scheduledFor: 1 }));
+  if (!trip) return null;
+  const startLabel = formatClock(trip.startedAt || trip.scheduledFor);
+  return {
+    _id: trip._id,
+    status: trip.status,
+    direction: trip.direction,
+    period: trip.period,
+    timeRange: startLabel,
+    startTime: startLabel,
+    endTime: '',
+    originName: trip.routeId?.name || '',
+    destinationName: '',
+    busId: trip.busId
+      ? { plate: trip.busId.plate || '', label: trip.busId.label || '' }
+      : null,
+  };
+}
+
 router.get('/messages', async (req, res) => {
   try {
     const q = String(req.query.q || '').trim();
@@ -2441,9 +2533,9 @@ router.get('/messages', async (req, res) => {
     }
     const [rows, contacts, trip, profile] = await Promise.all([
       Conversation.find(filter).sort({ lastMessageAt: -1 }).limit(80),
-      driverMessageContacts(req.user.id),
-      currentDriverTripCard(req.user.id),
-      DriverProfile.findOne({ userId: req.user.id }).populate('busId', 'plate label seats'),
+      driverMessageContacts(req.user.id).catch(() => ({ schoolId: null, parents: [], admins: [] })),
+      lightDriverTripBanner(req.user.id).catch(() => null),
+      DriverProfile.findOne({ userId: req.user.id }).populate('busId', 'plate label seats').catch(() => null),
     ]);
     const conversations = rows.map(serializeDriverConversation).filter((c) => {
       if (tab === 'parents') return c.kind === 'parent';
@@ -2453,15 +2545,31 @@ router.get('/messages', async (req, res) => {
       return tab === 'all' || tab === '';
     });
     const all = rows.map(serializeDriverConversation);
+    const haveParent = new Set(all.filter((c) => c.parentId).map((c) => String(c.parentId)));
+    const haveAdmin = new Set(all.filter((c) => c.kind === 'admin' && c.counterpartUserId).map((c) => String(c.counterpartUserId)));
+    const drafts = [];
+    if (tab !== 'archived' && tab !== 'drivers') {
+      for (const parent of contacts.parents || []) {
+        if (haveParent.has(String(parent._id))) continue;
+        if (tab === 'admins') continue;
+        drafts.push(contactAsDriverThread(parent));
+      }
+      for (const admin of contacts.admins || []) {
+        if (haveAdmin.has(String(admin._id))) continue;
+        if (tab === 'parents') continue;
+        drafts.push(contactAsDriverThread(admin));
+      }
+    }
+    const inbox = [...conversations, ...drafts];
     const bus = trip?.busId || profile?.busId;
     res.json({
-      conversations,
+      conversations: inbox,
       contacts: [...contacts.parents, ...contacts.admins],
       counts: {
-        all: all.filter((c) => !c.archived).length,
-        parents: all.filter((c) => !c.archived && c.kind === 'parent').length,
+        all: all.filter((c) => !c.archived).length + drafts.length,
+        parents: all.filter((c) => !c.archived && c.kind === 'parent').length + drafts.filter((d) => d.kind === 'parent').length,
         drivers: all.filter((c) => !c.archived && c.kind === 'driver').length,
-        admins: all.filter((c) => !c.archived && c.kind === 'admin').length,
+        admins: all.filter((c) => !c.archived && c.kind === 'admin').length + drafts.filter((d) => d.kind === 'admin').length,
         archived: all.filter((c) => c.archived).length,
       },
       trip,
