@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../lib/api';
 import '../teacher.css';
@@ -143,8 +143,33 @@ export default function TeacherLayout() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [unread, setUnread] = useState(0);
+  const [params, setParams] = useSearchParams();
   const title = pageTitle(location.pathname);
   const initial = (user?.name || 'T').slice(0, 1).toUpperCase();
+  const isHome = location.pathname === '/teacher';
+  const isRegister = location.pathname === '/teacher/register';
+  const isDiary = location.pathname === '/teacher/diary';
+  const isWork = location.pathname === '/teacher/assignments';
+  const isStudents = location.pathname === '/teacher/students';
+  const isPlans = location.pathname === '/teacher/resources';
+  const isTimetable = location.pathname === '/teacher/timetable';
+  const isAnnounce = location.pathname === '/teacher/announcements';
+  const isMessages = location.pathname === '/teacher/messages' || location.pathname.startsWith('/teacher/messages/');
+  const isNotes = location.pathname === '/teacher/notes';
+  const isClass = location.pathname === '/teacher/class';
+  const isNotif = location.pathname === '/teacher/notifications';
+  const isProfile = location.pathname === '/teacher/profile';
+  const isDash = isHome || isRegister || isDiary || isPlans;
+  const firstName = (user?.name || 'Teacher').trim().split(/\s+/)[0];
+  const hour = new Date().getHours();
+  const hello = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+  const sun = hour < 17 ? '☀️' : '🌙';
+  const todayLong = new Date().toLocaleDateString(undefined, {
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -196,6 +221,23 @@ export default function TeacherLayout() {
         </nav>
 
         <div className="tw-sidebar-foot">
+          <div className="tw-promo">
+            <span aria-hidden="true">{isDiary ? '🌱' : isAnnounce ? '📣' : isMessages ? '💬' : isNotes ? '👨‍👩‍👧' : isNotif ? '🔔' : '🎓'}</span>
+            <strong>{isDiary ? 'Teach Today Build Tomorrow' : 'Better Learning Together'}</strong>
+            <small>
+              {isDiary
+                ? 'Every learner matters.'
+                : isAnnounce
+                  ? 'Share updates. Build community.'
+                  : isMessages
+                    ? 'Communicate. Support. Grow.'
+                    : isNotes
+                      ? 'Parents. Teachers. Brighter futures.'
+                      : isNotif
+                        ? 'Stay informed. Make a difference.'
+                        : 'Support today. Brighter tomorrow.'}
+            </small>
+          </div>
           <button type="button" className="tw-user-mini tw-user-link" onClick={() => navigate('/teacher/profile')}>
             <span>{user?.photoUrl ? <img src={user.photoUrl} alt="" /> : initial}</span>
             <div>
@@ -210,16 +252,90 @@ export default function TeacherLayout() {
       </aside>
 
       <div className="tw-main">
-        <header className="tw-topbar">
+        <header className={`tw-topbar${isDash ? ' is-dash' : ''}${isWork || isStudents || isTimetable || isAnnounce || isMessages || isNotes || isClass || isNotif || isProfile ? ' is-work' : ''}${isPlans ? ' is-plans' : ''}`}>
           <button type="button" className="tw-menu-btn" aria-label="Open menu" onClick={() => setOpen(true)}>
             <span />
             <span />
             <span />
           </button>
-          <div>
-            <p className="tw-kicker">Teacher</p>
-            <h1>{title}</h1>
-          </div>
+          {isHome ? (
+            <div className="tw-dash-hello">
+              <h1>
+                {hello}, {firstName}! {sun}
+              </h1>
+              <p>Here&apos;s what&apos;s happening in your classes today.</p>
+            </div>
+          ) : isRegister ? (
+            <div className="tw-dash-hello">
+              <h1>Hello, {firstName} 👋</h1>
+              <p>Manage your class attendance with ease.</p>
+            </div>
+          ) : isDiary ? (
+            <div className="tw-dash-hello">
+              <h1>
+                {hello}, {firstName}! 👋
+              </h1>
+              <p>Record, reflect, and make a difference today.</p>
+            </div>
+          ) : isPlans ? (
+            <div className="tw-dash-hello">
+              <h1>
+                {hello}, {firstName}! 👋
+              </h1>
+              <p>Plan, teach and inspire. Great lessons create brighter futures.</p>
+            </div>
+          ) : isWork || isStudents || isTimetable || isAnnounce || isMessages || isNotes || isClass || isNotif || isProfile ? null : (
+            <div>
+              <p className="tw-kicker">Teacher</p>
+              <h1>{title}</h1>
+            </div>
+          )}
+          {isHome && (
+            <div className="tw-dash-date">
+              <strong>{todayLong}</strong>
+              <small>Stay consistent, make a difference!</small>
+            </div>
+          )}
+          {(isDiary || isWork || isStudents || isPlans || isTimetable || isAnnounce || isMessages || isNotes || isClass || isNotif || isProfile) && (
+            <label className="tw-top-search">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                <circle cx="11" cy="11" r="6.5" />
+                <path d="m16 16 4 4" />
+              </svg>
+              <input
+                value={params.get('q') || ''}
+                onChange={(e) => {
+                  const next = new URLSearchParams(params);
+                  if (e.target.value) next.set('q', e.target.value);
+                  else next.delete('q');
+                  setParams(next, { replace: true });
+                }}
+                placeholder={
+                  isProfile
+                    ? 'Search students, classes, or announcements...'
+                    : isNotif
+                      ? 'Search notifications, messages, or reminders...'
+                      : isClass
+                        ? 'Search classes, students, or subjects...'
+                        : isNotes
+                          ? 'Search students, parents or notes...'
+                          : isMessages
+                            ? 'Search messages, parents, or students...'
+                            : isAnnounce
+                              ? 'Search announcements, classes, or keywords...'
+                              : isTimetable
+                                ? 'Search classes, subjects, or timetable...'
+                                : isPlans
+                                  ? 'Search plans, resources, subjects...'
+                                  : isStudents
+                                    ? 'Search students, parents or classes...'
+                                    : isWork
+                                      ? 'Search students, assignments, or classes...'
+                                      : 'Search students, subjects, or entries...'
+                }
+              />
+            </label>
+          )}
           <div className="tw-topbar-actions">
             <button
               type="button"
@@ -230,13 +346,28 @@ export default function TeacherLayout() {
               <NavIcon name="bell" />
               {unread > 0 ? <em>{unread > 9 ? '9+' : unread}</em> : null}
             </button>
-            <div className="tw-topbar-user">
+            {(isDiary || isPlans) && (
+              <button
+                type="button"
+                className="tw-bell"
+                aria-label={isPlans ? 'Create lesson plan' : 'Create diary entry'}
+                onClick={() => document.getElementById(isPlans ? 'tplan-create' : 'tdia-create')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </button>
+            )}
+            <button type="button" className="tw-topbar-user tw-user-link" onClick={() => navigate('/teacher/profile')}>
               <span className="tw-avatar">{user?.photoUrl ? <img src={user.photoUrl} alt="" /> : initial}</span>
               <div>
                 <strong>{user?.name || 'Teacher'}</strong>
                 <small>{user?.email}</small>
               </div>
-            </div>
+              <svg className="tw-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </button>
           </div>
         </header>
         <div className="tw-content">

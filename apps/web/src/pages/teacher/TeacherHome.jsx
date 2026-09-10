@@ -3,26 +3,34 @@ import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 
-function todayLabel() {
-  return new Date().toLocaleDateString(undefined, {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'short',
-  });
+function dueLabel(value) {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return `Due ${d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`;
 }
+
+function initialOf(name) {
+  return (name || 'S').trim().charAt(0).toUpperCase();
+}
+
+const tones = ['green', 'purple', 'orange', 'blue'];
 
 export default function TeacherHome() {
   const { user } = useAuth();
   const [data, setData] = useState(null);
+  const [kids, setKids] = useState([]);
   const [notices, setNotices] = useState([]);
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
-    const [overview, announcements] = await Promise.all([
+    const [overview, announcements, roster] = await Promise.all([
       api('/teacher/overview'),
       api('/teacher/announcements').catch(() => ({ announcements: [] })),
+      api('/teacher/kids').catch(() => ({ kids: [] })),
     ]);
     setData(overview);
+    setKids((roster.kids || []).slice(0, 6));
     setNotices((announcements.important || announcements.announcements || []).slice(0, 3));
     setError('');
   }, []);
@@ -40,188 +48,156 @@ export default function TeacherHome() {
   }
 
   const stats = data?.stats || {};
-  const school = data?.school;
   const teacher = data?.teacher || user;
-  const unmarked = data?.unmarked || [];
   const assignments = data?.assignments || [];
-  const notes = data?.recentNotes || [];
-  const firstClass = data?.grades?.[0] || '';
+  const roster = kids.length ? kids : (data?.unmarked || []);
 
   return (
-    <div className="tw-page">
+    <div className="td-home">
       {error && <div className="tw-alert">{error}</div>}
 
-      <section className="tw-hero">
+      <section className="td-banner">
         <div>
-          <p className="tw-kicker" style={{ color: 'rgba(244,255,251,0.75)' }}>
-            Good day, {teacher?.name?.split(' ')[0] || 'Teacher'}
-          </p>
-          <h2>{school?.name || 'Class workspace'}</h2>
-          <p>Mark the register, post the diary, set work, and message a parent when needed.</p>
+          <p className="td-banner-kicker">Teacher workspace</p>
+          <h2>Inspire. Teach. Transform.</h2>
+          <p>Every lesson you teach creates a brighter future.</p>
+          <blockquote>Stay consistent. Make a difference for {teacher?.name?.split(' ')[0] || 'your'} class today.</blockquote>
         </div>
-        <div className="tw-hero-date">
-          <small>Today</small>
-          <strong>{todayLabel()}</strong>
+        <div className="td-banner-art" aria-hidden="true">
+          <span className="td-art-board">Better Students<br />Brighter Tomorrows</span>
+          <span className="td-art-books">📚</span>
+          <span className="td-art-pencils">✏️</span>
         </div>
       </section>
 
-      <div className="tw-metrics">
-        <div className="tw-metric">
-          <span>Students</span>
-          <strong>{stats.students ?? 0}</strong>
-        </div>
-        <div className="tw-metric">
-          <span>Register</span>
-          <strong>
-            {stats.markedToday ?? 0}/{stats.students ?? 0}
-          </strong>
-        </div>
-        <div className="tw-metric is-present">
-          <span>Present</span>
-          <strong>{stats.present ?? 0}</strong>
-        </div>
-        <div className="tw-metric is-away">
-          <span>Absent / late</span>
-          <strong>{(stats.absent || 0) + (stats.late || 0)}</strong>
-        </div>
-        <div className="tw-metric">
-          <span>Assignments</span>
-          <strong>{stats.assignments ?? 0}</strong>
-        </div>
-      </div>
-
-      <div className="tw-actions">
-        <Link className="tw-action" to="/teacher/register">
-          <span className="tw-action-icon">✓</span>
-          <strong>Take attendance</strong>
-          <span>Mark today’s register</span>
-        </Link>
-        <Link className="tw-action" to="/teacher/diary">
-          <span className="tw-action-icon">✎</span>
-          <strong>Class diary</strong>
-          <span>Photos and the day’s story</span>
-        </Link>
-        <Link className="tw-action" to="/teacher/assignments">
-          <span className="tw-action-icon">☰</span>
-          <strong>Set work</strong>
-          <span>Homework and classwork</span>
-        </Link>
-        <Link className="tw-action" to="/teacher/timetable">
-          <span className="tw-action-icon">▦</span>
-          <strong>Timetable</strong>
-          <span>This week’s periods</span>
-        </Link>
-        <Link className="tw-action" to={firstClass ? `/teacher/class?grade=${encodeURIComponent(firstClass)}` : '/teacher/students'}>
-          <span className="tw-action-icon">⌂</span>
-          <strong>My classes</strong>
-          <span>Roster and class notes</span>
-        </Link>
-        <Link className="tw-action" to="/teacher/messages">
-          <span className="tw-action-icon">✉</span>
-          <strong>Messages</strong>
-          <span>Chat with a parent</span>
-        </Link>
-      </div>
-
-      <div className="tw-grid">
-        <div className="tw-panel">
-          <div className="tw-panel-head">
-            <div>
-              <h3>Register still open</h3>
-              <p>Students not marked on today’s class register</p>
-            </div>
-            <Link className="tw-btn tw-btn-primary" to="/teacher/register">
-              Mark
-            </Link>
+      <div className="td-stats">
+        <article className="td-stat td-stat--mint">
+          <span className="td-stat-ico">👥</span>
+          <div>
+            <strong>{stats.students ?? 0}</strong>
+            <small>My Students</small>
           </div>
-          <ul className="tw-list">
-            {unmarked.map((k) => (
+        </article>
+        <article className="td-stat td-stat--blue">
+          <span className="td-stat-ico">✓</span>
+          <div>
+            <strong>
+              {stats.markedToday ?? 0} / {stats.students ?? 0}
+            </strong>
+            <small>Today&apos;s Register</small>
+          </div>
+        </article>
+        <article className="td-stat td-stat--orange">
+          <span className="td-stat-ico">☰</span>
+          <div>
+            <strong>{stats.assignments ?? 0}</strong>
+            <small>Assignments</small>
+          </div>
+        </article>
+        <article className="td-stat td-stat--purple">
+          <span className="td-stat-ico">▦</span>
+          <div>
+            <strong>{stats.classes ?? 0}</strong>
+            <small>Classes Today</small>
+          </div>
+        </article>
+      </div>
+
+      <div className="td-grid">
+        <section className="td-card">
+          <div className="td-card-head">
+            <h3>My Students</h3>
+            <Link to="/teacher/students">View all</Link>
+          </div>
+          <ul className="td-people">
+            {roster.map((k) => (
               <li key={k._id}>
+                <span className="td-ava">{k.photoUrl ? <img src={k.photoUrl} alt="" /> : initialOf(k.name)}</span>
                 <div>
                   <strong>{k.name}</strong>
-                  <div className="tw-muted">{k.grade || 'No grade'}</div>
+                  <small>{k.grade || 'Student'}</small>
                 </div>
-                <Link to={`/teacher/students/${k._id}`}>Profile</Link>
+                <Link className="td-pill" to={`/teacher/students/${k._id}`}>
+                  Profile
+                </Link>
               </li>
             ))}
-            {!unmarked.length && <p className="tw-empty">All students on the register have been marked.</p>}
+            {!roster.length && <p className="tw-empty">No students on your list yet.</p>}
           </ul>
-        </div>
+        </section>
 
-        <div className="tw-page">
-          <div className="tw-panel">
-            <div className="tw-panel-head">
-              <div>
-                <h3>Announcements</h3>
-                <p>Latest school and class notices</p>
-              </div>
-              <Link className="tw-btn tw-btn-ghost" to="/teacher/announcements">
-                View all
-              </Link>
-            </div>
-            <ul className="tw-list">
-              {notices.map((a) => (
-                <li key={a._id}>
-                  <div>
-                    <strong>{a.title}</strong>
-                    <div className="tw-muted">{a.kind || a.scope || 'Notice'}</div>
-                  </div>
-                </li>
-              ))}
-              {!notices.length && <p className="tw-empty">No announcements yet.</p>}
-            </ul>
+        <section className="td-card">
+          <div className="td-card-head">
+            <h3>Recent Assignments</h3>
+            <Link to="/teacher/assignments">View all</Link>
           </div>
+          <ul className="td-work">
+            {assignments.slice(0, 5).map((a, i) => (
+              <li key={a._id}>
+                <span className={`td-dot td-dot--${tones[i % tones.length]}`}>✎</span>
+                <div>
+                  <strong>{a.title}</strong>
+                  <small>
+                    {a.subject || 'Class'}
+                    {a.grade ? ` · ${a.grade}` : ''}
+                  </small>
+                </div>
+                <em>{dueLabel(a.dueDate) || 'Set'}</em>
+              </li>
+            ))}
+            {!assignments.length && <p className="tw-empty">No assignments yet.</p>}
+          </ul>
+        </section>
 
-          <div className="tw-panel">
-            <div className="tw-panel-head">
-              <div>
-                <h3>Assignments</h3>
-                <p>Work you have set for the class</p>
-              </div>
-              <Link className="tw-btn tw-btn-secondary" to="/teacher/assignments">
-                Set work
-              </Link>
+        <div className="td-stack">
+          <section className="td-card">
+            <div className="td-card-head">
+              <h3>Announcements</h3>
+              <Link to="/teacher/announcements">View all</Link>
             </div>
-            <ul className="tw-list">
-              {assignments.slice(0, 4).map((a) => (
-                <li key={a._id}>
-                  <div>
-                    <strong>{a.title}</strong>
-                    <div className="tw-muted">
-                      {a.subject || 'Class'}
-                      {a.grade ? ` · ${a.grade}` : ''}
+            {notices.length ? (
+              <ul className="td-work">
+                {notices.map((a) => (
+                  <li key={a._id}>
+                    <span className="td-dot td-dot--orange">!</span>
+                    <div>
+                      <strong>{a.title}</strong>
+                      <small>{a.kind || a.scope || 'Notice'}</small>
                     </div>
-                  </div>
-                </li>
-              ))}
-              {!assignments.length && <p className="tw-empty">No assignments yet.</p>}
-            </ul>
-          </div>
-
-          <div className="tw-panel">
-            <div className="tw-panel-head">
-              <div>
-                <h3>Parent updates</h3>
-                <p>Recent notes sent to guardians</p>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="td-empty">
+                <span aria-hidden="true">📢</span>
+                <p>No announcements yet.</p>
               </div>
-              <Link className="tw-btn tw-btn-ghost" to="/teacher/notes">
-                Message
+            )}
+          </section>
+
+          <section className="td-card">
+            <div className="td-card-head">
+              <h3>Quick Actions</h3>
+            </div>
+            <div className="td-quick">
+              <Link to="/teacher/register">
+                <span className="td-quick-ico td-stat--mint">✓</span>
+                Take Attendance
+              </Link>
+              <Link to="/teacher/diary">
+                <span className="td-quick-ico td-stat--blue">✎</span>
+                Class Diary
+              </Link>
+              <Link to="/teacher/assignments">
+                <span className="td-quick-ico td-stat--purple">☰</span>
+                Set Work
+              </Link>
+              <Link to="/teacher/timetable">
+                <span className="td-quick-ico td-stat--orange">▦</span>
+                View Timetable
               </Link>
             </div>
-            <ul className="tw-list">
-              {notes.slice(0, 4).map((n) => (
-                <li key={n._id}>
-                  <div>
-                    <strong>{n.title}</strong>
-                    <div className="tw-muted">
-                      {n.kidId?.name || 'Student'} · {n.category}
-                    </div>
-                  </div>
-                </li>
-              ))}
-              {!notes.length && <p className="tw-empty">No parent updates sent yet.</p>}
-            </ul>
-          </div>
+          </section>
         </div>
       </div>
     </div>

@@ -571,6 +571,7 @@ function serializeAnnouncement(a, userId) {
     teacherId,
     mine: Boolean(userId && teacherId && teacherId === String(userId)),
     archived: a.archived === true,
+    draft: a.draft === true,
     attachmentUrl: a.attachmentUrl || '',
     attachmentName: a.attachmentName || '',
     publishedAt: a.publishedAt || a.createdAt,
@@ -610,6 +611,7 @@ router.get('/announcements', async (req, res) => {
       schoolId,
       active: true,
       archived: archived ? true : { $ne: true },
+      draft: req.query.scope === 'mine' ? { $in: [true, false] } : { $ne: true },
       sourceKey: { $not: /^sample:/ },
       $or: [
         { scope: 'class', teacherId: req.user.id },
@@ -663,6 +665,7 @@ router.post('/announcements', async (req, res) => {
     const kind = ANNOUNCEMENT_KINDS.includes(req.body?.kind) ? req.body.kind : 'general';
     const grade = String(req.body?.grade || '').trim();
     if (!grade) return res.status(400).json({ error: 'grade is required' });
+    const draft = req.body?.draft === true || req.body?.status === 'draft';
     const announcement = await Announcement.create({
       schoolId,
       teacherId: req.user.id,
@@ -679,9 +682,12 @@ router.post('/announcements', async (req, res) => {
       attachmentName: req.body?.attachmentName || '',
       attachmentUrl: req.body?.attachmentUrl || '',
       attachmentPublicId: req.body?.attachmentPublicId || '',
+      draft,
       publishedAt: new Date(),
     });
-    await notifyAnnouncementParents(schoolId, { grade, title: announcement.title, body: announcement.body });
+    if (!draft) {
+      await notifyAnnouncementParents(schoolId, { grade, title: announcement.title, body: announcement.body });
+    }
     await upsertTeacherNotification(req.user.id, `announcement:${announcement._id}`, {
       type: NOTIFICATION_TYPES.ANNOUNCEMENT,
       title: announcement.title,
@@ -1687,6 +1693,7 @@ function applyAssignmentFields(assignment, body) {
   if (body.media !== undefined) assignment.media = normalizeAssignmentMedia(body.media);
   if (body.allowLateSubmission !== undefined) assignment.allowLateSubmission = body.allowLateSubmission === true;
   if (body.showMarks !== undefined) assignment.showMarks = body.showMarks !== false;
+  if (['classwork', 'homework', 'quiz'].includes(body.kind)) assignment.kind = body.kind;
   if (body.status === 'draft' || body.status === 'published') assignment.status = body.status;
   if (body.active === false) assignment.active = false;
   if (body.rubric !== undefined) {

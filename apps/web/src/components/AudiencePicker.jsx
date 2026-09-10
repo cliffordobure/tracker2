@@ -24,6 +24,7 @@ export default function AudiencePicker({
   kids = [],
   kidIds = [],
   onKidIdsChange,
+  hideGrade = false,
 }) {
   const [query, setQuery] = useState('');
 
@@ -64,7 +65,7 @@ export default function AudiencePicker({
           </button>
         ))}
       </div>
-      {audience !== 'all' && (
+      {audience !== 'all' && !hideGrade && (
         <label className="audience-picker-field">
           {audience === 'individuals' ? 'Class filter (optional)' : 'Class'}
           <select

@@ -30,6 +30,7 @@ const announcementSchema = new mongoose.Schema(
     icon: { type: String, default: '' },
     sourceKey: { type: String, default: '', index: true },
     archived: { type: Boolean, default: false, index: true },
+    draft: { type: Boolean, default: false, index: true },
     authorName: { type: String, default: 'Admin' },
     attachmentName: { type: String, default: '' },
     attachmentUrl: { type: String, default: '' },

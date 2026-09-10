@@ -30,6 +30,7 @@ const assignmentSchema = new mongoose.Schema(
       title: { type: String, default: '', trim: true, maxlength: 160 },
       body: { type: String, default: '', trim: true, maxlength: 2000 },
     },
+    kind: { type: String, enum: ['classwork', 'homework', 'quiz'], default: 'classwork' },
     status: { type: String, enum: ['draft', 'published'], default: 'published' },
     active: { type: Boolean, default: true },
   },
