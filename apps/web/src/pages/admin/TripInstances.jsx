@@ -93,6 +93,13 @@ function statusMeta(status) {
   return { key: 'muted', label: status || '—' };
 }
 
+function tripTypeMeta(t) {
+  if (t?.kind === 'outing' || t?.outingId) return { key: 'tour', label: 'Tours' };
+  const scheduleType = t?.scheduleId && typeof t.scheduleId === 'object' ? t.scheduleId.scheduleType : '';
+  if (scheduleType && scheduleType !== 'ONE_TIME') return { key: 'daily', label: 'Daily' };
+  return { key: 'scheduled', label: 'Scheduled' };
+}
+
 function prettySchool(name) {
   const raw = String(name || 'School').trim();
   return raw.replace(/\b\w/g, (c) => c.toUpperCase());
@@ -309,6 +316,7 @@ export default function TripInstances() {
             bus?.label,
             bus?.plate,
             t.status,
+            tripTypeMeta(t).label,
           ]
             .filter(Boolean)
             .join(' ')
@@ -455,13 +463,14 @@ export default function TripInstances() {
 
   const exportRows = () => {
     const rows = selected.size ? filtered.filter((t) => selected.has(tripId(t))) : filtered;
-    const header = ['Trip ID', 'Date', 'Route', 'Driver', 'Vehicle', 'Start', 'End', 'Status', 'Students', 'Duration'];
+    const header = ['Trip ID', 'Date', 'Type', 'Route', 'Driver', 'Vehicle', 'Start', 'End', 'Status', 'Students', 'Duration'];
     const lines = [
       header.join(','),
       ...rows.map((t) =>
         [
           csvEscape(tripCodeOf(t)),
           csvEscape(fmtDate(t.serviceDate || t.scheduledFor)),
+          csvEscape(tripTypeMeta(t).label),
           csvEscape(routeOf(t)?.name),
           csvEscape(driverOf(t)?.name),
           csvEscape(vehicleLabel(busOf(t))),
@@ -728,6 +737,7 @@ export default function TripInstances() {
                     <input type="checkbox" checked={allOnPageSelected} onChange={toggleAllPage} aria-label="Select page" />
                   </th>
                   <th>Trip ID</th>
+                  <th>Type</th>
                   <th>Route</th>
                   <th>Driver</th>
                   <th>Vehicle</th>
@@ -742,6 +752,7 @@ export default function TripInstances() {
                 {slice.map((t) => {
                   const id = tripId(t);
                   const meta = statusMeta(t.status);
+                  const type = tripTypeMeta(t);
                   const driver = driverOf(t);
                   const bus = busOf(t);
                   const route = routeOf(t);
@@ -764,6 +775,9 @@ export default function TripInstances() {
                           </strong>
                           <small>{fmtDate(t.serviceDate || t.scheduledFor) || '—'}</small>
                         </div>
+                      </td>
+                      <td>
+                        <span className={`sa-trip-kind is-${type.key}`}>{type.label}</span>
                       </td>
                       <td>
                         <div className="sa-rt-name">
@@ -814,7 +828,6 @@ export default function TripInstances() {
                       <td>
                         <div className="sa-trips-status-cell">
                           <span className={`sa-stu-status is-${meta.key}`}>{meta.label}</span>
-                          {t.kind === 'outing' ? <em className="sa-tour-pill">Tour</em> : null}
                         </div>
                       </td>
                       <td>
@@ -1000,6 +1013,7 @@ export default function TripInstances() {
               </div>
             </div>
             <dl className="sa-stop-detail-grid">
+              <div className="sa-stop-detail-field"><div><dt>Type</dt><dd>{tripTypeMeta(detailTrip).label}</dd></div></div>
               <div className="sa-stop-detail-field"><div><dt>Route</dt><dd>{routeOf(detailTrip)?.name || '—'}</dd></div></div>
               <div className="sa-stop-detail-field"><div><dt>Date</dt><dd>{fmtDate(detailTrip.serviceDate || detailTrip.scheduledFor) || '—'}</dd></div></div>
               <div className="sa-stop-detail-field"><div><dt>Driver</dt><dd>{driverOf(detailTrip)?.name || '—'}</dd></div></div>

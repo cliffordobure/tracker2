@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { DriverProfile, Route, Stop, Kid, Trip, TripEvent, LocationPing, Notification, DeviceToken, User, Conversation, Message, TripSchedule, School, MediaAsset } from '../models/index.js';
+import { DriverProfile, Route, Stop, Kid, Trip, TripEvent, LocationPing, Notification, DeviceToken, User, Conversation, Message, TripSchedule, School, MediaAsset, SchoolOuting } from '../models/index.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { getIO } from '../socket.js';
 import { createAndEmitNotifications } from '../services/notifications.js';
@@ -880,6 +880,124 @@ router.get('/trips/today', async (req, res) => {
       .populate('kidIds', 'name grade')
       .sort({ period: 1, sequence: 1, scheduledFor: 1 });
     res.json({ trips: await Promise.all(trips.map((t) => serializeDriverTripCard(t))) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+function planTypeOfTrip(trip) {
+  if (trip.kind === 'outing' || trip.outingId) return 'tours';
+  const st = trip.scheduleId && typeof trip.scheduleId === 'object' ? trip.scheduleId.scheduleType : '';
+  if (st && st !== 'ONE_TIME') return 'daily';
+  return 'emergency';
+}
+
+function serializePlannerTrip(trip) {
+  const obj = typeof trip.toObject === 'function' ? trip.toObject() : { ...trip };
+  const outing = obj.outingId && typeof obj.outingId === 'object' ? obj.outingId : null;
+  const schedule = obj.scheduleId && typeof obj.scheduleId === 'object' ? obj.scheduleId : null;
+  const route = obj.routeId && typeof obj.routeId === 'object' ? obj.routeId : null;
+  const bus = obj.busId && typeof obj.busId === 'object' ? obj.busId : null;
+  const start = obj.startedAt
+    ? new Date(obj.startedAt)
+    : combineServiceTime(obj.serviceDate, schedule?.scheduledTime || obj.scheduledTime, obj.scheduledFor);
+  return {
+    _id: obj._id,
+    source: 'trip',
+    planType: planTypeOfTrip(obj),
+    tripCode: obj.tripCode || '',
+    status: obj.status,
+    period: obj.period || '',
+    direction: obj.direction || '',
+    title: outing?.title || schedule?.name || route?.name || obj.tripCode || 'Trip',
+    subtitle: outing?.location || route?.name || '',
+    location: outing?.location || '',
+    serviceDate: obj.serviceDate || obj.scheduledFor || start,
+    startAt: start,
+    startTime: formatDriverClock(start) || obj.scheduledTime || '',
+    busLabel: [bus?.label, bus?.plate].filter(Boolean).join(' · '),
+    studentCount: Array.isArray(obj.kidIds) ? obj.kidIds.length : 0,
+    scheduleType: schedule?.scheduleType || '',
+    notes: outing?.notes || '',
+  };
+}
+
+function serializePlannerOuting(outing) {
+  return {
+    _id: outing._id,
+    source: 'outing',
+    planType: 'tours',
+    tripCode: '',
+    status: outing.status === 'upcoming' ? 'scheduled' : outing.status,
+    period: '',
+    direction: '',
+    title: outing.title || 'Tour',
+    subtitle: outing.location || 'Educational tour',
+    location: outing.location || '',
+    serviceDate: outing.startAt,
+    startAt: outing.startAt,
+    endAt: outing.endAt,
+    startTime: formatDriverClock(outing.startAt),
+    busLabel: '',
+    studentCount: Array.isArray(outing.kidIds) ? outing.kidIds.length : 0,
+    scheduleType: '',
+    notes: outing.notes || '',
+  };
+}
+
+router.get('/trips/planner', async (req, res) => {
+  try {
+    const from = dayBounds().start;
+    const ahead = new Date(from);
+    ahead.setDate(ahead.getDate() + 21);
+    ahead.setHours(23, 59, 59, 999);
+
+    const [trips, outings] = await Promise.all([
+      Trip.find({
+        driverId: req.user.id,
+        status: { $in: ['scheduled', 'active'] },
+        $or: [
+          { serviceDate: { $gte: from, $lte: ahead } },
+          { scheduledFor: { $gte: from, $lte: ahead } },
+          { status: 'active' },
+        ],
+      })
+        .populate('routeId', 'name')
+        .populate('busId', 'plate label')
+        .populate('scheduleId', 'name scheduledTime scheduleType')
+        .populate('outingId', 'title location notes startAt endAt')
+        .select('tripCode status period direction kind serviceDate scheduledFor scheduledTime startedAt kidIds routeId busId scheduleId outingId')
+        .sort({ serviceDate: 1, scheduledFor: 1, period: 1 })
+        .limit(120),
+      SchoolOuting.find({
+        driverId: req.user.id,
+        active: { $ne: false },
+        status: { $in: ['upcoming'] },
+        startAt: { $gte: from, $lte: ahead },
+      })
+        .select('title location notes startAt endAt kidIds tripId status')
+        .sort({ startAt: 1 })
+        .limit(40),
+    ]);
+
+    const linkedOutingIds = new Set(
+      trips
+        .map((t) => String(t.outingId?._id || t.outingId || ''))
+        .filter((id) => id && id !== 'undefined')
+    );
+    const items = [
+      ...trips.map(serializePlannerTrip),
+      ...outings.filter((o) => !linkedOutingIds.has(String(o._id))).map(serializePlannerOuting),
+    ].sort((a, b) => new Date(a.startAt || a.serviceDate || 0) - new Date(b.startAt || b.serviceDate || 0));
+
+    res.json({
+      items,
+      counts: {
+        daily: items.filter((i) => i.planType === 'daily').length,
+        emergency: items.filter((i) => i.planType === 'emergency').length,
+        tours: items.filter((i) => i.planType === 'tours').length,
+      },
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

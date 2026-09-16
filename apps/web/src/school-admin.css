@@ -4383,7 +4383,20 @@ button.sa-text-link {
   font-size: 0.75rem;
   color: #0f172a;
 }
-.sa-trips-table { min-width: 1040px; }
+.sa-trips-table { min-width: 1120px; }
+.sa-trip-kind {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.48rem;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.sa-trip-kind.is-daily { background: #ecfdf5; color: #047857; }
+.sa-trip-kind.is-scheduled { background: #eff6ff; color: #1d4ed8; }
+.sa-trip-kind.is-tour { background: #eef2ff; color: #4338ca; }
 .sa-trips-table .sa-rt-name strong .sa-text-link {
   color: #0f172a;
   font-size: 0.78rem;
