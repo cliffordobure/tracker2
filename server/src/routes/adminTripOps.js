@@ -454,7 +454,24 @@ router.delete('/trip-schedules/:id', async (req, res) => {
     if (!assertSchoolAccess(req, existing.schoolId)) {
       return res.status(403).json({ error: 'Cannot delete schedule from another school' });
     }
-    // Cancel future scheduled instances; keep history
+
+    const hard = req.query.hard === 'true' || req.query.hard === '1';
+    if (hard) {
+      const doomed = await Trip.find({
+        scheduleId: existing._id,
+        status: { $in: ['scheduled', 'cancelled'] },
+      }).select('_id');
+      const ids = doomed.map((t) => t._id);
+      if (ids.length) {
+        await TripEvent.deleteMany({ tripId: { $in: ids } });
+        await Trip.deleteMany({ _id: { $in: ids } });
+      }
+      await ScheduleException.deleteMany({ scheduleId: existing._id });
+      await existing.deleteOne();
+      return res.json({ ok: true, deleted: true, removedTrips: ids.length });
+    }
+
+    // Soft-off: cancel future scheduled instances; keep the template and history
     await Trip.updateMany(
       {
         scheduleId: existing._id,
@@ -468,6 +485,72 @@ router.delete('/trip-schedules/:id', async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/trip-schedules/:id/activate', async (req, res) => {
+  try {
+    const existing = await TripSchedule.findById(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Schedule not found' });
+    if (!assertSchoolAccess(req, existing.schoolId)) {
+      return res.status(403).json({ error: 'Cannot activate schedule from another school' });
+    }
+
+    // Deactivate leaves cancelled leftovers; revive those so generate can fill gaps.
+    const leftovers = await Trip.find({
+      scheduleId: existing._id,
+      status: 'cancelled',
+      serviceDate: { $gte: startOfDay(new Date()) },
+    });
+    const revived = [];
+    const reviveConflicts = [];
+    for (const trip of leftovers) {
+      const conflict = await findPeriodConflict({
+        schoolId: existing.schoolId,
+        busId: existing.busId,
+        driverId: existing.driverId,
+        serviceDate: trip.serviceDate,
+        period: existing.period || trip.period,
+        excludeTripId: trip._id,
+      });
+      if (conflict) {
+        reviveConflicts.push({
+          serviceDate: trip.serviceDate,
+          conflictTripCode: conflict.tripCode,
+          bus: conflict.busId,
+          driver: conflict.driverId,
+        });
+        continue;
+      }
+      trip.status = 'scheduled';
+      trip.busId = existing.busId;
+      trip.driverId = existing.driverId;
+      trip.routeId = existing.routeId;
+      trip.direction = existing.direction;
+      trip.period = existing.period;
+      trip.scheduledTime = normalizeClock(existing.scheduledTime);
+      trip.scheduledFor = scheduledForFrom(trip.serviceDate, trip.scheduledTime);
+      await trip.save();
+      revived.push(trip);
+    }
+
+    const result = await applyScheduleEdit(existing._id, { active: true, regenerate: req.body?.regenerate !== false });
+    const schedule = await populateSchedule(TripSchedule.findById(result.schedule._id));
+    res.json({
+      schedule,
+      revivedCount: revived.length,
+      updatedCount: result.updated.length,
+      conflicts: [...reviveConflicts, ...(result.conflicts || [])],
+      generation: result.generation
+        ? {
+            created: result.generation.created.length,
+            skipped: result.generation.skipped.length,
+            conflicts: result.generation.conflicts,
+          }
+        : null,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 
@@ -850,6 +933,49 @@ router.post('/trip-instances/:id/cancel', async (req, res) => {
       );
     }
     await notifyTripCancelled(getIO(), trip);
+    const populated = await populateTrip(Trip.findById(trip._id));
+    res.json({ trip: populated });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/trip-instances/:id/restore', async (req, res) => {
+  try {
+    const trip = await Trip.findById(req.params.id);
+    if (!trip) return res.status(404).json({ error: 'Trip instance not found' });
+    if (!assertSchoolAccess(req, trip.schoolId)) {
+      return res.status(403).json({ error: 'Cannot activate trip from another school' });
+    }
+    if (trip.status !== 'cancelled') {
+      return res.status(400).json({ error: 'Only cancelled trips can be activated' });
+    }
+
+    const conflict = await findPeriodConflict({
+      schoolId: trip.schoolId,
+      busId: trip.busId,
+      driverId: trip.driverId,
+      serviceDate: trip.serviceDate || trip.scheduledFor || new Date(),
+      period: trip.period,
+      excludeTripId: trip._id,
+    });
+    if (conflict) {
+      return res.status(409).json({
+        error: 'Conflict with another trip that day/period',
+        conflictTripCode: conflict.tripCode,
+      });
+    }
+
+    if (trip.scheduleId && trip.serviceDate) {
+      await ScheduleException.deleteOne({
+        scheduleId: trip.scheduleId,
+        serviceDate: startOfDay(trip.serviceDate),
+        type: 'SKIP',
+      });
+    }
+
+    trip.status = 'scheduled';
+    await trip.save();
     const populated = await populateTrip(Trip.findById(trip._id));
     res.json({ trip: populated });
   } catch (err) {

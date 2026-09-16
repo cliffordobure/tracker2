@@ -385,6 +385,19 @@ export default function TripInstances() {
     }
   };
 
+  const restoreTrip = async (t) => {
+    if (!confirm(`Activate ${tripCodeOf(t)} and put it back on the schedule?`)) return;
+    setError('');
+    try {
+      await api(`/admin/trip-instances/${tripId(t)}/restore`, { method: 'POST', body: {} });
+      setInfo('Trip activated.');
+      if (detail && tripId(detail) === tripId(t)) setDetail(null);
+      await load();
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
   const deleteTrip = async (t) => {
     if (!confirm(`Delete ${tripCodeOf(t)}? This cannot be undone.`)) return;
     setError('');
@@ -813,6 +826,11 @@ export default function TripInstances() {
                             Edit
                           </button>
                         ) : null}
+                        {t.status === 'cancelled' ? (
+                          <button type="button" className="sa-text-link" onClick={() => restoreTrip(t)}>
+                            Activate
+                          </button>
+                        ) : null}
                         {t.status === 'scheduled' || t.status === 'cancelled' ? (
                           <button type="button" className="sa-text-link is-danger" onClick={() => deleteTrip(t)}>
                             Delete
@@ -1025,6 +1043,9 @@ export default function TripInstances() {
               {detailTrip.status === 'scheduled' ? (
                 <button type="button" className="sa-btn sa-btn-primary" onClick={() => { setDetail(null); openEdit(detailTrip); }}>Edit trip</button>
               ) : null}
+              {detailTrip.status === 'cancelled' ? (
+                <button type="button" className="sa-btn sa-btn-primary" onClick={() => { setDetail(null); restoreTrip(detailTrip); }}>Activate</button>
+              ) : null}
               {detailTrip.status === 'scheduled' || detailTrip.status === 'cancelled' ? (
                 <button type="button" className="sa-btn sa-btn-outline" onClick={() => { setDetail(null); deleteTrip(detailTrip); }}>Delete</button>
               ) : (
@@ -1071,6 +1092,12 @@ export default function TripInstances() {
                 <button type="button" className="is-danger" onClick={() => { setMenuId(''); cancelTrip(menuTrip); }}>
                   <i aria-hidden="true"><TripKpiGlyph name="x" /></i>
                   <span><strong>Cancel trip</strong><em>Stop this instance from running</em></span>
+                </button>
+              ) : null}
+              {menuTrip.status === 'cancelled' ? (
+                <button type="button" onClick={() => { setMenuId(''); restoreTrip(menuTrip); }}>
+                  <i aria-hidden="true"><ActionGlyph name="edit" /></i>
+                  <span><strong>Activate trip</strong><em>Put this cancelled trip back on the schedule</em></span>
                 </button>
               ) : null}
               {menuTrip.status === 'scheduled' || menuTrip.status === 'cancelled' ? (

@@ -128,9 +128,10 @@ export default function TripScheduling({ embedded = false, onBindCreate }) {
       busId: f.busId || b.buses[0]?._id || '',
       driverId: f.driverId || d.drivers[0]?.id || d.drivers[0]?._id || '',
     }));
-    if (!selectedScheduleId && s.schedules[0]) {
-      setSelectedScheduleId(s.schedules[0]._id);
-    }
+    setSelectedScheduleId((cur) => {
+      if (cur && s.schedules.some((x) => x._id === cur)) return cur;
+      return s.schedules[0]?._id || '';
+    });
   };
 
   const loadExceptions = async (scheduleId) => {
@@ -308,22 +309,35 @@ export default function TripScheduling({ embedded = false, onBindCreate }) {
     }
   };
 
+  const formatConflicts = (conflicts = []) =>
+    conflicts
+      .map((c) => `Conflict on ${new Date(c.serviceDate).toLocaleDateString()}: ${c.conflictTripCode || 'existing'}`)
+      .join(' · ');
+
   const generate = async (id) => {
     setError('');
     setInfo('');
     try {
       const res = await api(`/admin/trip-schedules/${id}/generate`, { method: 'POST', body: {} });
       setInfo(`Generated ${res.created} new instance(s); skipped ${res.skipped}.`);
-      if (res.conflicts?.length) {
-        setError(
-          res.conflicts
-            .map(
-              (c) =>
-                `Conflict on ${new Date(c.serviceDate).toLocaleDateString()}: ${c.conflictTripCode || 'existing'}`
-            )
-            .join(' · ')
-        );
-      }
+      if (res.conflicts?.length) setError(formatConflicts(res.conflicts));
+      await load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const activate = async (id) => {
+    if (!confirm('Activate this schedule and generate upcoming trip instances?')) return;
+    setError('');
+    setInfo('');
+    try {
+      const res = await api(`/admin/trip-schedules/${id}/activate`, { method: 'POST', body: {} });
+      const created = res.generation?.created ?? 0;
+      const revived = res.revivedCount || 0;
+      setInfo(`Schedule activated. ${created} new instance(s)${revived ? `, ${revived} restored` : ''}.`);
+      const conflicts = [...(res.conflicts || []), ...(res.generation?.conflicts || [])];
+      if (conflicts.length) setError(formatConflicts(conflicts));
       await load();
     } catch (err) {
       setError(err.message);
@@ -332,8 +346,28 @@ export default function TripScheduling({ embedded = false, onBindCreate }) {
 
   const deactivate = async (id) => {
     if (!confirm('Deactivate this schedule and cancel future instances?')) return;
-    await api(`/admin/trip-schedules/${id}`, { method: 'DELETE' });
-    await load();
+    setError('');
+    setInfo('');
+    try {
+      await api(`/admin/trip-schedules/${id}`, { method: 'DELETE' });
+      setInfo('Schedule deactivated. Future scheduled trips were cancelled.');
+      await load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const removeSchedule = async (id) => {
+    if (!confirm('Permanently delete this schedule and its scheduled/cancelled trips? Completed and live trips are kept.')) return;
+    setError('');
+    setInfo('');
+    try {
+      const res = await api(`/admin/trip-schedules/${id}?hard=true`, { method: 'DELETE' });
+      setInfo(`Schedule deleted${res.removedTrips ? ` (${res.removedTrips} trip(s) removed)` : ''}.`);
+      await load();
+    } catch (err) {
+      setError(err.message);
+    }
   };
 
   const addHoliday = async (e) => {
@@ -493,8 +527,15 @@ export default function TripScheduling({ embedded = false, onBindCreate }) {
                   </td>
                   <td className="sa-trips-sched-actions">
                     <button type="button" className="sa-text-link" onClick={() => startEdit(s)}>Edit</button>
-                    <button type="button" className="sa-text-link" onClick={() => generate(s._id)}>Generate</button>
-                    <button type="button" className="sa-text-link" onClick={() => deactivate(s._id)}>Deactivate</button>
+                    {s.active === false ? (
+                      <button type="button" className="sa-text-link" onClick={() => activate(s._id)}>Activate</button>
+                    ) : (
+                      <>
+                        <button type="button" className="sa-text-link" onClick={() => generate(s._id)}>Generate</button>
+                        <button type="button" className="sa-text-link" onClick={() => deactivate(s._id)}>Deactivate</button>
+                      </>
+                    )}
+                    <button type="button" className="sa-text-link is-danger" onClick={() => removeSchedule(s._id)}>Delete</button>
                   </td>
                 </tr>
               ))}
