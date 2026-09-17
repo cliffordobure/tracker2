@@ -719,11 +719,28 @@ router.post('/:id/complete', authenticate, requireRole('driver'), async (req, re
 
     const open = await openCheckIns(trip._id);
     if (open.length) {
-      return res.status(409).json({
-        error: 'Cannot complete trip while students are still checked in',
-        openCheckIns: open.length,
-        kidIds: open,
-      });
+      // Morning end-at-school: mark remaining on-board kids dropped off, then close.
+      if (!isEveningTrip(trip)) {
+        const loc = locationFromBody(req.body) || trip.latestLocation;
+        const lat = Number(loc?.lat);
+        const lng = Number(loc?.lng);
+        const location = Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : undefined;
+        await TripEvent.insertMany(
+          open.map((kidId) => ({
+            tripId: trip._id,
+            kidId,
+            type: 'dropped_off',
+            at: new Date(),
+            ...(location ? { location } : {}),
+          }))
+        );
+      } else {
+        return res.status(409).json({
+          error: 'Cannot complete trip while students are still checked in',
+          openCheckIns: open.length,
+          kidIds: open,
+        });
+      }
     }
 
     trip.status = 'completed';
