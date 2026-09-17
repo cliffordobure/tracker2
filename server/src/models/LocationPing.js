@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 
 const locationPingSchema = new mongoose.Schema(
   {
-    tripId: { type: mongoose.Schema.Types.ObjectId, ref: 'Trip', required: true, index: true },
+    tripId: { type: mongoose.Schema.Types.ObjectId, ref: 'Trip', required: true },
     lat: { type: Number, required: true },
     lng: { type: Number, required: true },
     heading: { type: Number },
@@ -11,5 +11,7 @@ const locationPingSchema = new mongoose.Schema(
   },
   { timestamps: false }
 );
+
+locationPingSchema.index({ tripId: 1, at: 1 });
 
 export const LocationPing = mongoose.model('LocationPing', locationPingSchema);

@@ -5,24 +5,92 @@ import { getIO } from '../socket.js';
 import { createAndEmitNotifications } from '../services/notifications.js';
 import { datesForSchedule } from '../services/tripScheduleService.js';
 import { isCloudinaryConfigured } from '../services/cloudinary.js';
-import { formatClock, formatDayClock } from '../lib/clock.js';
+import { formatClock, formatDateKey, formatDayClock, fromAppZonedDateTime } from '../lib/clock.js';
 import { stripApprovedLeaveFromKids } from '../lib/leave.js';
 
 const router = Router();
 router.use(authenticate, requireRole('driver'));
 
+const MORNING_SHOW_MS = 60 * 60 * 1000;
+
+function ymdAdd(ymd, days) {
+  const match = String(ymd || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return ymd;
+  const dt = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + days));
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+}
+
 function dayBounds(dateInput) {
-  let d;
-  if (!dateInput) d = new Date();
-  else if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
-    const [y, m, day] = dateInput.split('-').map(Number);
-    d = new Date(y, m - 1, day);
-  } else d = new Date(dateInput);
-  const start = new Date(d);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(d);
-  end.setHours(23, 59, 59, 999);
-  return { start, end };
+  let key;
+  if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+    key = dateInput;
+  } else if (dateInput) {
+    key = formatDateKey(new Date(dateInput));
+  } else {
+    key = formatDateKey(new Date());
+  }
+  const start = fromAppZonedDateTime(key, 0, 0, 0);
+  const end = fromAppZonedDateTime(key, 23, 59, 59);
+  if (end) end.setMilliseconds(999);
+  return { start, end, key };
+}
+
+function isEveningLikeTrip(trip) {
+  return trip?.direction === 'to_home' || trip?.period === 'evening' || trip?.period === 'afternoon';
+}
+
+function tripStartInstant(trip) {
+  if (trip?.startedAt) return new Date(trip.startedAt);
+  if (trip?.startAt) return new Date(trip.startAt);
+  const schedule = trip?.scheduleId && typeof trip.scheduleId === 'object' ? trip.scheduleId : null;
+  return combineServiceTime(
+    trip?.serviceDate,
+    schedule?.scheduledTime || trip?.scheduledTime,
+    trip?.scheduledFor
+  );
+}
+
+function morningScheduledReady(trip, now = Date.now()) {
+  if (!trip || trip.status === 'active') return true;
+  if (trip.status !== 'scheduled' || isEveningLikeTrip(trip)) return true;
+  const start = tripStartInstant(trip);
+  if (!start || Number.isNaN(start.getTime())) return true;
+  return now >= start.getTime() - MORNING_SHOW_MS;
+}
+
+function morningAlarmPayload(trip) {
+  const route = trip.routeId && typeof trip.routeId === 'object' ? trip.routeId.name : '';
+  return {
+    _id: trip._id,
+    startAt: trip.startAt,
+    startTime: trip.startTime || '',
+    tripCode: trip.tripCode || '',
+    routeName: route || trip.originName || '',
+    period: trip.period || 'morning',
+  };
+}
+
+async function loadUpcomingMorning(driverId, todayKey, todayCards = []) {
+  const tomorrow = dayBounds(ymdAdd(todayKey, 1));
+  const tomorrowDocs = await Trip.find({
+    driverId,
+    status: 'scheduled',
+    $and: [
+      { $or: [{ period: 'morning' }, { direction: 'to_school' }, { period: { $in: [null, ''] } }] },
+      {
+        $or: [
+          { serviceDate: { $gte: tomorrow.start, $lte: tomorrow.end } },
+          { serviceDate: null, scheduledFor: { $gte: tomorrow.start, $lte: tomorrow.end } },
+        ],
+      },
+    ],
+  })
+    .populate('routeId', 'name')
+    .populate('scheduleId', 'name scheduledTime');
+  const tomorrowCards = await Promise.all(tomorrowDocs.map((t) => serializeDriverTripCard(t)));
+  return [...todayCards, ...tomorrowCards]
+    .filter((t) => t.status === 'scheduled' && !isEveningLikeTrip(t))
+    .map(morningAlarmPayload);
 }
 
 function kmBetweenStops(a, b) {
@@ -264,12 +332,11 @@ function combineServiceTime(serviceDate, scheduledTime, scheduledFor) {
     const d = new Date(scheduledFor);
     if (!Number.isNaN(d.getTime())) return d;
   }
-  const base = serviceDate ? new Date(serviceDate) : new Date();
-  if (!scheduledTime) return Number.isNaN(base.getTime()) ? null : base;
+  const ymd = formatDateKey(serviceDate || new Date());
+  if (!ymd) return serviceDate ? new Date(serviceDate) : null;
+  if (!scheduledTime) return fromAppZonedDateTime(ymd, 0, 0, 0);
   const [hh, mm] = String(scheduledTime).split(':').map(Number);
-  const d = new Date(base);
-  d.setHours(Number.isFinite(hh) ? hh : 0, Number.isFinite(mm) ? mm : 0, 0, 0);
-  return d;
+  return fromAppZonedDateTime(ymd, Number.isFinite(hh) ? hh : 0, Number.isFinite(mm) ? mm : 0, 0);
 }
 
 function tripDurationMins(trip, stopCount) {
@@ -357,7 +424,7 @@ async function serializeDriverTripCard(trip) {
 
 router.get('/overview', async (req, res) => {
   try {
-    const { start, end } = dayBounds(req.query.date);
+    const { start, end, key } = dayBounds(req.query.date);
     const [user, profile, unread, todayDocs] = await Promise.all([
       User.findById(req.user.id).select('name photoUrl'),
       DriverProfile.findOne({ userId: req.user.id }).populate('busId', 'plate label seats'),
@@ -379,7 +446,9 @@ router.get('/overview', async (req, res) => {
         .sort({ period: 1, sequence: 1, scheduledFor: 1 }),
     ]);
 
-    const trips = await Promise.all(todayDocs.map((t) => serializeDriverTripCard(t)));
+    const todayCards = await Promise.all(todayDocs.map((t) => serializeDriverTripCard(t)));
+    const trips = todayCards.filter((t) => morningScheduledReady(t));
+    const upcomingMorning = await loadUpcomingMorning(req.user.id, key, todayCards);
     const currentTrip = trips.find((t) => t.status === 'active') || trips.find((t) => t.status === 'scheduled') || null;
     const nextTrip =
       trips.find((t) => currentTrip && String(t._id) !== String(currentTrip._id) && t.status === 'scheduled') || null;
@@ -391,6 +460,7 @@ router.get('/overview', async (req, res) => {
       profile,
       unread,
       trips,
+      upcomingMorning,
       currentTrip,
       nextTrip,
       stats: {
@@ -433,7 +503,7 @@ router.get('/settings', async (req, res) => {
       User.findById(req.user.id).select('schoolId'),
       driverMessageContacts(req.user.id),
     ]);
-    const trip = activeTrip || scheduledTrip;
+    const trip = activeTrip || (scheduledTrip && morningScheduledReady(scheduledTrip) ? scheduledTrip : null);
     let school = trip?.schoolId && typeof trip.schoolId === 'object' ? trip.schoolId : null;
     if (!school && user?.schoolId) {
       school = await School.findById(user.schoolId).select('name supportPhone supportEmail supportHours');
@@ -513,15 +583,20 @@ router.get('/vehicle', async (req, res) => {
       .sort({ startedAt: -1, scheduledFor: -1 })
       .limit(120);
     const tripIds = trips.map((t) => t._id);
-    const [pings, lastPing] = await Promise.all([
-      tripIds.length ? LocationPing.find({ tripId: { $in: tripIds } }).select('tripId lat lng at').sort({ at: 1 }) : [],
-      tripIds.length ? LocationPing.findOne({ tripId: { $in: tripIds } }).sort({ at: -1 }).select('at') : null,
-    ]);
-    const pingsByTrip = new Map();
-    for (const p of pings) {
-      const key = String(p.tripId);
-      if (!pingsByTrip.has(key)) pingsByTrip.set(key, []);
-      pingsByTrip.get(key).push(p);
+    let pingsByTrip = new Map();
+    let lastPing = null;
+    let pingCount = 0;
+    try {
+      const [byTrip, latest, counted] = await Promise.all([
+        loadPingsByTrip(tripIds),
+        latestPingForTrips(tripIds),
+        tripIds.length ? LocationPing.countDocuments({ tripId: { $in: tripIds } }) : 0,
+      ]);
+      pingsByTrip = byTrip;
+      lastPing = latest;
+      pingCount = counted;
+    } catch (pingErr) {
+      console.warn('vehicle pings skipped', pingErr.message);
     }
     let gpsKm = 0;
     for (const list of pingsByTrip.values()) gpsKm += pingPathKm(list);
@@ -578,7 +653,7 @@ router.get('/vehicle', async (req, res) => {
         windowDays: 90,
         tripCount: trips.length,
         completedCount: trips.filter((t) => t.status === 'completed').length,
-        pingCount: pings.length,
+        pingCount,
       },
       status: {
         gpsLive,
@@ -863,8 +938,8 @@ router.post('/incidents', async (req, res) => {
 
 router.get('/trips/today', async (req, res) => {
   try {
-    const { start, end } = dayBounds(req.query.date);
-    const trips = await Trip.find({
+    const { start, end, key } = dayBounds(req.query.date);
+    const docs = await Trip.find({
       driverId: req.user.id,
       status: { $in: ['scheduled', 'active'] },
       $or: [
@@ -879,7 +954,10 @@ router.get('/trips/today', async (req, res) => {
       .populate('scheduleId', 'name scheduledTime')
       .populate('kidIds', 'name grade')
       .sort({ period: 1, sequence: 1, scheduledFor: 1 });
-    res.json({ trips: await Promise.all(trips.map((t) => serializeDriverTripCard(t))) });
+    const cards = await Promise.all(docs.map((t) => serializeDriverTripCard(t)));
+    const trips = cards.filter((t) => morningScheduledReady(t));
+    const upcomingMorning = await loadUpcomingMorning(req.user.id, key, cards);
+    res.json({ trips, upcomingMorning });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1095,10 +1173,10 @@ router.get('/trips/history', async (req, res) => {
 
     const tripIds = trips.map((t) => t._id);
     const routeIds = [...new Set(trips.map((t) => String(t.routeId?._id || t.routeId)).filter((id) => id && id !== 'undefined'))];
-    const [events, stops, pings] = await Promise.all([
+    const [events, stops, pingsByTrip] = await Promise.all([
       tripIds.length ? TripEvent.find({ tripId: { $in: tripIds } }).select('tripId kidId type at') : [],
       routeIds.length ? Stop.find({ routeId: { $in: routeIds } }).sort({ order: 1 }) : [],
-      tripIds.length ? LocationPing.find({ tripId: { $in: tripIds } }).select('tripId lat lng at').sort({ at: 1 }) : [],
+      loadPingsByTrip(tripIds),
     ]);
     const eventsByTrip = new Map();
     for (const e of events) {
@@ -1111,12 +1189,6 @@ router.get('/trips/history', async (req, res) => {
       const key = String(s.routeId);
       if (!stopsByRoute.has(key)) stopsByRoute.set(key, []);
       stopsByRoute.get(key).push(s);
-    }
-    const pingsByTrip = new Map();
-    for (const p of pings) {
-      const key = String(p.tripId);
-      if (!pingsByTrip.has(key)) pingsByTrip.set(key, []);
-      pingsByTrip.get(key).push(p);
     }
 
     const rows = trips.map((trip) => {
@@ -1332,7 +1404,7 @@ router.get('/notifications', async (req, res) => {
         .sort({ sequence: 1, scheduledFor: 1 }),
     ]);
 
-    const tripDoc = activeDoc || scheduledDoc;
+    const tripDoc = activeDoc || (scheduledDoc && morningScheduledReady(scheduledDoc) ? scheduledDoc : null);
     const trip = tripDoc ? await serializeDriverTripCard(tripDoc) : null;
     const bus = trip?.busId || profile?.busId;
     const notifications = rows.map((n) => {
@@ -1735,6 +1807,39 @@ function pingPathKm(pings) {
   return km;
 }
 
+/** Load pings per trip with an indexed sort — never sort the whole collection in RAM. */
+async function loadPingsByTrip(tripIds, { limitPerTrip = 4000 } = {}) {
+  const map = new Map();
+  if (!tripIds.length) return map;
+  const batchSize = 8;
+  for (let i = 0; i < tripIds.length; i += batchSize) {
+    const slice = tripIds.slice(i, i + batchSize);
+    const rows = await Promise.all(
+      slice.map((tripId) =>
+        LocationPing.find({ tripId })
+          .select('tripId lat lng at')
+          .sort({ at: 1 })
+          .limit(limitPerTrip)
+          .lean()
+      )
+    );
+    slice.forEach((tripId, idx) => map.set(String(tripId), rows[idx] || []));
+  }
+  return map;
+}
+
+async function latestPingForTrips(tripIds) {
+  if (!tripIds.length) return null;
+  const rows = await Promise.all(
+    tripIds.map((tripId) => LocationPing.findOne({ tripId }).select('at').sort({ at: -1 }).lean())
+  );
+  return rows.reduce((best, row) => {
+    if (!row?.at) return best;
+    if (!best || new Date(row.at) > new Date(best.at)) return row;
+    return best;
+  }, null);
+}
+
 function orderedStopsForTrip(trip, kids, routeStops, direction) {
   const kidHomeIds = new Set(kids.map(kidHomeId).filter(Boolean));
   const school = routeStops.filter((s) => s.type === 'school');
@@ -1777,10 +1882,10 @@ router.get('/reports', async (req, res) => {
 
     const tripIds = trips.map((t) => t._id);
     const routeIds = [...new Set(trips.map((t) => String(t.routeId?._id || t.routeId)).filter((id) => id && id !== 'undefined'))];
-    const [events, stops, pings] = await Promise.all([
+    const [events, stops, pingsByTrip] = await Promise.all([
       tripIds.length ? TripEvent.find({ tripId: { $in: tripIds } }).sort({ at: 1 }) : [],
       routeIds.length ? Stop.find({ routeId: { $in: routeIds } }).sort({ order: 1 }) : [],
-      tripIds.length ? LocationPing.find({ tripId: { $in: tripIds } }).sort({ at: 1 }) : [],
+      loadPingsByTrip(tripIds),
     ]);
 
     const eventsByTrip = new Map();
@@ -1794,12 +1899,6 @@ router.get('/reports', async (req, res) => {
       const key = String(s.routeId);
       if (!stopsByRoute.has(key)) stopsByRoute.set(key, []);
       stopsByRoute.get(key).push(s);
-    }
-    const pingsByTrip = new Map();
-    for (const p of pings) {
-      const key = String(p.tripId);
-      if (!pingsByTrip.has(key)) pingsByTrip.set(key, []);
-      pingsByTrip.get(key).push(p);
     }
 
     const tripByDay = new Map();
