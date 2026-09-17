@@ -50,12 +50,28 @@ function tripStartInstant(trip) {
   );
 }
 
-function morningScheduledReady(trip, now = Date.now()) {
-  if (!trip || trip.status === 'active') return true;
-  if (trip.status !== 'scheduled' || isEveningLikeTrip(trip)) return true;
-  const start = tripStartInstant(trip);
-  if (!start || Number.isNaN(start.getTime())) return true;
-  return now >= start.getTime() - MORNING_SHOW_MS;
+function visibleScheduledCards(cards, now = Date.now()) {
+  const active = cards.filter((t) => t.status === 'active');
+  const scheduled = cards
+    .filter((t) => t.status === 'scheduled')
+    .slice()
+    .sort((a, b) => {
+      const aStart = tripStartInstant(a)?.getTime() || 0;
+      const bStart = tripStartInstant(b)?.getTime() || 0;
+      return aStart - bStart;
+    });
+  const visible = [];
+  for (let i = 0; i < scheduled.length; i += 1) {
+    const start = tripStartInstant(scheduled[i]);
+    if (!start || Number.isNaN(start.getTime())) continue;
+    if (now < start.getTime() - MORNING_SHOW_MS) continue;
+    const nextStart = scheduled[i + 1] ? tripStartInstant(scheduled[i + 1]) : null;
+    if (nextStart && !Number.isNaN(nextStart.getTime()) && now >= nextStart.getTime() - MORNING_SHOW_MS) {
+      continue;
+    }
+    visible.push(scheduled[i]);
+  }
+  return [...active, ...visible];
 }
 
 function morningAlarmPayload(trip) {
@@ -330,7 +346,15 @@ function formatDriverClock(d) {
 function combineServiceTime(serviceDate, scheduledTime, scheduledFor) {
   if (scheduledFor) {
     const d = new Date(scheduledFor);
-    if (!Number.isNaN(d.getTime())) return d;
+    if (!Number.isNaN(d.getTime())) {
+      if (scheduledTime && d.getUTCHours() === 0 && d.getUTCMinutes() === 0) {
+        const ymd = formatDateKey(d);
+        const [hh, mm] = String(scheduledTime).split(':').map(Number);
+        const zoned = fromAppZonedDateTime(ymd, Number.isFinite(hh) ? hh : 0, Number.isFinite(mm) ? mm : 0, 0);
+        if (zoned) return zoned;
+      }
+      return d;
+    }
   }
   const ymd = formatDateKey(serviceDate || new Date());
   if (!ymd) return serviceDate ? new Date(serviceDate) : null;
@@ -447,7 +471,7 @@ router.get('/overview', async (req, res) => {
     ]);
 
     const todayCards = await Promise.all(todayDocs.map((t) => serializeDriverTripCard(t)));
-    const trips = todayCards.filter((t) => morningScheduledReady(t));
+    const trips = visibleScheduledCards(todayCards);
     const upcomingMorning = await loadUpcomingMorning(req.user.id, key, todayCards);
     const currentTrip = trips.find((t) => t.status === 'active') || trips.find((t) => t.status === 'scheduled') || null;
     const nextTrip =
@@ -479,14 +503,14 @@ router.get('/overview', async (req, res) => {
 router.get('/settings', async (req, res) => {
   try {
     const { start, end } = dayBounds();
-    const [profile, activeTrip, scheduledTrip, devices, user, contacts] = await Promise.all([
+    const [profile, activeTrip, scheduledTrips, devices, user, contacts] = await Promise.all([
       DriverProfile.findOne({ userId: req.user.id }).populate('busId', 'plate label seats'),
       Trip.findOne({ driverId: req.user.id, status: 'active' })
         .populate('routeId', 'name')
         .populate('schoolId', 'name supportPhone supportEmail supportHours')
         .populate('scheduleId', 'scheduledTime period direction')
         .populate('busId', 'plate label seats'),
-      Trip.findOne({
+      Trip.find({
         driverId: req.user.id,
         status: 'scheduled',
         $or: [
@@ -503,7 +527,8 @@ router.get('/settings', async (req, res) => {
       User.findById(req.user.id).select('schoolId'),
       driverMessageContacts(req.user.id),
     ]);
-    const trip = activeTrip || (scheduledTrip && morningScheduledReady(scheduledTrip) ? scheduledTrip : null);
+    const visibleScheduled = visibleScheduledCards(scheduledTrips);
+    const trip = activeTrip || visibleScheduled[0] || null;
     let school = trip?.schoolId && typeof trip.schoolId === 'object' ? trip.schoolId : null;
     if (!school && user?.schoolId) {
       school = await School.findById(user.schoolId).select('name supportPhone supportEmail supportHours');
@@ -955,7 +980,7 @@ router.get('/trips/today', async (req, res) => {
       .populate('kidIds', 'name grade')
       .sort({ period: 1, sequence: 1, scheduledFor: 1 });
     const cards = await Promise.all(docs.map((t) => serializeDriverTripCard(t)));
-    const trips = cards.filter((t) => morningScheduledReady(t));
+    const trips = visibleScheduledCards(cards);
     const upcomingMorning = await loadUpcomingMorning(req.user.id, key, cards);
     res.json({ trips, upcomingMorning });
   } catch (err) {
@@ -1388,7 +1413,7 @@ router.get('/notifications', async (req, res) => {
         .populate('busId', 'plate label seats')
         .populate('scheduleId', 'name scheduledTime')
         .populate('kidIds', 'name grade'),
-      Trip.findOne({
+      Trip.find({
         driverId: req.user.id,
         status: 'scheduled',
         $or: [
@@ -1404,7 +1429,8 @@ router.get('/notifications', async (req, res) => {
         .sort({ sequence: 1, scheduledFor: 1 }),
     ]);
 
-    const tripDoc = activeDoc || (scheduledDoc && morningScheduledReady(scheduledDoc) ? scheduledDoc : null);
+    const visibleScheduled = visibleScheduledCards(scheduledDoc);
+    const tripDoc = activeDoc || visibleScheduled[0] || null;
     const trip = tripDoc ? await serializeDriverTripCard(tripDoc) : null;
     const bus = trip?.busId || profile?.busId;
     const notifications = rows.map((n) => {
