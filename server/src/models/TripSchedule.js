@@ -21,6 +21,8 @@ const tripScheduleSchema = new mongoose.Schema(
     busId: { type: mongoose.Schema.Types.ObjectId, ref: 'Bus', required: true },
     driverId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     scheduledTime: { type: String, default: '06:30' },
+    /** Planned length in minutes. Null means open-ended until the driver completes it. */
+    durationMinutes: { type: Number, default: null, min: 1, max: 24 * 60 },
     startDate: { type: Date, required: true },
     endDate: { type: Date, default: null },
     kidIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Kid' }],

@@ -46,6 +46,35 @@ export function normalizeClock(value, fallback = '06:30') {
   return `${String(hh).padStart(2, '0')}:${String(Number.isFinite(mm) ? mm : 0).padStart(2, '0')}`;
 }
 
+/** Planned trip length. Null / blank / 0 means open-ended. */
+export function parseDurationMinutes(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.min(24 * 60, Math.max(1, Math.round(n)));
+}
+
+export function minutesBetweenClocks(startClock, endClock) {
+  const start = normalizeClock(startClock, '');
+  const end = normalizeClock(endClock, '');
+  if (!start || !end) return null;
+  const [sh, sm] = start.split(':').map(Number);
+  const [eh, em] = end.split(':').map(Number);
+  const startM = sh * 60 + sm;
+  const endM = eh * 60 + em;
+  if (![startM, endM].every(Number.isFinite) || endM <= startM) return null;
+  return endM - startM;
+}
+
+export function plannedDurationFromBody(body = {}, scheduledTime = '') {
+  const endClock = body.scheduledEndTime || body.endTime;
+  if (endClock) {
+    const fromEnd = minutesBetweenClocks(scheduledTime || body.scheduledTime, endClock);
+    if (fromEnd) return fromEnd;
+  }
+  return parseDurationMinutes(body.durationMinutes);
+}
+
 /** Combine serviceDate + HH:mm into a Kenya-time instant for scheduledFor. */
 export function scheduledForFrom(serviceDate, scheduledTime = '06:30') {
   const ymd =
@@ -182,6 +211,7 @@ function instancePayload(schedule, serviceDate, exception) {
     serviceDate: startOfDay(serviceDate),
     scheduledTime: normalizeClock(time),
     scheduledFor: scheduledForFrom(serviceDate, time),
+    durationMinutes: parseDurationMinutes(schedule.durationMinutes),
     kidIds,
     sequence: 1,
   };
@@ -289,6 +319,7 @@ const PROPAGATE_FIELDS = [
   'period',
   'kidIds',
   'scheduledTime',
+  'durationMinutes',
 ];
 
 /**
@@ -315,6 +346,7 @@ export async function applyScheduleEdit(scheduleId, body = {}) {
     'busId',
     'driverId',
     'scheduledTime',
+    'durationMinutes',
     'startDate',
     'endDate',
     'kidIds',
@@ -374,6 +406,9 @@ export async function applyScheduleEdit(scheduleId, body = {}) {
         if (exception.kidIds?.length) trip.kidIds = exception.kidIds;
         trip.scheduledTime = normalizeClock(exception.scheduledTime || schedule.scheduledTime);
         trip.scheduledFor = scheduledForFrom(serviceDate, trip.scheduledTime);
+        if (body.durationMinutes !== undefined || body.scheduledEndTime || body.endTime) {
+          trip.durationMinutes = plannedDurationFromBody(body, trip.scheduledTime);
+        }
         await trip.save();
         updated.push(trip);
       }
@@ -387,6 +422,8 @@ export async function applyScheduleEdit(scheduleId, body = {}) {
     if (body[key] !== undefined) {
       if (key === 'startDate' || key === 'endDate') {
         schedule[key] = body[key] ? startOfDay(body[key]) : null;
+      } else if (key === 'durationMinutes') {
+        schedule[key] = plannedDurationFromBody(body, body.scheduledTime || schedule.scheduledTime);
       } else {
         schedule[key] = body[key];
       }
@@ -434,6 +471,7 @@ export async function applyScheduleEdit(scheduleId, body = {}) {
     trip.kidIds = schedule.kidIds || [];
     trip.scheduledTime = normalizeClock(schedule.scheduledTime);
     trip.scheduledFor = scheduledForFrom(trip.serviceDate, trip.scheduledTime);
+    trip.durationMinutes = parseDurationMinutes(schedule.durationMinutes);
     await trip.save();
     updated.push(trip);
   }

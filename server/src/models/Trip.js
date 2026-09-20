@@ -34,6 +34,8 @@ const tripSchema = new mongoose.Schema(
     scheduledFor: { type: Date, default: null },
     /** Wall-clock HH:mm as entered in school time (Africa/Nairobi). */
     scheduledTime: { type: String, default: '' },
+    /** Planned length in minutes. Null means open-ended until the driver completes it. */
+    durationMinutes: { type: Number, default: null, min: 1, max: 24 * 60 },
     kidIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Kid' }],
     startedAt: { type: Date },
     endedAt: { type: Date },

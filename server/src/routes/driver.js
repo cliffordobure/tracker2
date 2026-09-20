@@ -11,7 +11,17 @@ import { stripApprovedLeaveFromKids } from '../lib/leave.js';
 const router = Router();
 router.use(authenticate, requireRole('driver'));
 
-const MORNING_SHOW_MS = 60 * 60 * 1000;
+function serviceDayStartMs(trip) {
+  const start = tripStartInstant(trip);
+  const key = trip?.serviceDate
+    ? formatDateKey(new Date(trip.serviceDate))
+    : start
+      ? formatDateKey(start)
+      : '';
+  if (!key) return 0;
+  const dayStart = fromAppZonedDateTime(key, 0, 0, 0);
+  return dayStart ? dayStart.getTime() : 0;
+}
 
 function ymdAdd(ymd, days) {
   const match = String(ymd || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -53,25 +63,22 @@ function tripStartInstant(trip) {
 function visibleScheduledCards(cards, now = Date.now()) {
   const active = cards.filter((t) => t.status === 'active');
   const scheduled = cards
-    .filter((t) => t.status === 'scheduled')
+    .filter((t) => t.status === 'scheduled' && now >= serviceDayStartMs(t))
     .slice()
     .sort((a, b) => {
       const aStart = tripStartInstant(a)?.getTime() || 0;
       const bStart = tripStartInstant(b)?.getTime() || 0;
       return aStart - bStart;
     });
-  const visible = [];
-  for (let i = 0; i < scheduled.length; i += 1) {
+  if (!scheduled.length) return [...active];
+  let current = scheduled[0];
+  for (let i = 1; i < scheduled.length; i += 1) {
     const start = tripStartInstant(scheduled[i]);
-    if (!start || Number.isNaN(start.getTime())) continue;
-    if (now < start.getTime() - MORNING_SHOW_MS) continue;
-    const nextStart = scheduled[i + 1] ? tripStartInstant(scheduled[i + 1]) : null;
-    if (nextStart && !Number.isNaN(nextStart.getTime()) && now >= nextStart.getTime() - MORNING_SHOW_MS) {
-      continue;
+    if (start && !Number.isNaN(start.getTime()) && now >= start.getTime()) {
+      current = scheduled[i];
     }
-    visible.push(scheduled[i]);
   }
-  return [...active, ...visible];
+  return [...active, current];
 }
 
 function morningAlarmPayload(trip) {
@@ -159,7 +166,7 @@ function buildRouteDirectionPlan({ stops, kids, trip, direction, school, label, 
       ? new Date(trip.startedAt)
       : combineServiceTime(trip.serviceDate, trip.scheduleId?.scheduledTime, trip.scheduledFor)
     : null;
-  const durationMins = tripDurationMins(trip || {}, ordered.length);
+  const durationMins = tripDurationMins(trip || {});
   let distanceKm = 0;
   for (let i = 1; i < ordered.length; i += 1) {
     distanceKm += kmBetweenStops(ordered[i - 1], ordered[i]);
@@ -363,14 +370,17 @@ function combineServiceTime(serviceDate, scheduledTime, scheduledFor) {
   return fromAppZonedDateTime(ymd, Number.isFinite(hh) ? hh : 0, Number.isFinite(mm) ? mm : 0, 0);
 }
 
-function tripDurationMins(trip, stopCount) {
+function tripDurationMins(trip) {
   if (trip.startedAt && trip.endedAt) {
     const mins = Math.round((new Date(trip.endedAt) - new Date(trip.startedAt)) / 60000);
     if (Number.isFinite(mins) && mins > 0) return mins;
   }
-  const n = Number(stopCount) || 0;
-  if (n > 0) return Math.max(30, Math.min(90, n * 8));
-  return 60;
+  const planned = Number(trip.durationMinutes);
+  if (Number.isFinite(planned) && planned > 0) return planned;
+  const schedule = trip.scheduleId && typeof trip.scheduleId === 'object' ? trip.scheduleId : null;
+  const fromSchedule = Number(schedule?.durationMinutes);
+  if (Number.isFinite(fromSchedule) && fromSchedule > 0) return fromSchedule;
+  return null;
 }
 
 async function routeEnds(routeId, direction) {
@@ -411,10 +421,10 @@ async function serializeDriverTripCard(trip) {
   const start = obj.startedAt
     ? new Date(obj.startedAt)
     : combineServiceTime(obj.serviceDate, obj.scheduleId?.scheduledTime, obj.scheduledFor);
-  const durationMins = tripDurationMins(obj, ends.stopCount);
+  const durationMins = tripDurationMins(obj);
   const end = obj.endedAt
     ? new Date(obj.endedAt)
-    : start
+    : start && durationMins
       ? new Date(start.getTime() + durationMins * 60000)
       : null;
   const startLabel = formatDriverClock(start);
@@ -465,7 +475,7 @@ router.get('/overview', async (req, res) => {
         .populate('routeId', 'name')
         .populate('schoolId', 'name location address')
         .populate('busId', 'plate label seats')
-        .populate('scheduleId', 'name scheduledTime')
+        .populate('scheduleId', 'name scheduledTime durationMinutes')
         .populate('kidIds', 'name grade')
         .sort({ period: 1, sequence: 1, scheduledFor: 1 }),
     ]);
@@ -976,7 +986,7 @@ router.get('/trips/today', async (req, res) => {
       .populate('routeId', 'name')
       .populate('schoolId', 'name location address')
       .populate('busId', 'plate label seats')
-      .populate('scheduleId', 'name scheduledTime')
+      .populate('scheduleId', 'name scheduledTime durationMinutes')
       .populate('kidIds', 'name grade')
       .sort({ period: 1, sequence: 1, scheduledFor: 1 });
     const cards = await Promise.all(docs.map((t) => serializeDriverTripCard(t)));

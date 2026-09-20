@@ -210,6 +210,7 @@ const emptyCreate = {
   busId: '',
   serviceDate: todayInput(),
   scheduledTime: '06:30',
+  durationMinutes: '',
   period: 'morning',
   direction: 'to_school',
 };
@@ -242,7 +243,7 @@ export default function TripInstances() {
   const [panel, setPanel] = useState(null);
   const [createForm, setCreateForm] = useState(emptyCreate);
   const [editing, setEditing] = useState(null);
-  const [editForm, setEditForm] = useState({ busId: '', driverId: '', scheduledTime: '06:30' });
+  const [editForm, setEditForm] = useState({ busId: '', driverId: '', scheduledTime: '06:30', durationMinutes: '' });
   const [openScheduleCreate, setOpenScheduleCreate] = useState(null);
   const bindCreate = useCallback((fn) => {
     setOpenScheduleCreate(() => fn);
@@ -430,6 +431,7 @@ export default function TripInstances() {
       busId: busOf(t)?._id || t.busId || '',
       driverId: driverOf(t)?._id || driverOf(t)?.id || t.driverId || '',
       scheduledTime: t.scheduledTime || t.scheduleId?.scheduledTime || '06:30',
+      durationMinutes: t.plannedDurationMinutes || t.durationMinutes || t.scheduleId?.durationMinutes || '',
     });
     setPanel('edit');
   };
@@ -438,7 +440,13 @@ export default function TripInstances() {
     if (!editing) return;
     setError('');
     try {
-      await api(`/admin/trip-instances/${tripId(editing)}`, { method: 'PUT', body: editForm });
+      await api(`/admin/trip-instances/${tripId(editing)}`, {
+        method: 'PUT',
+        body: {
+          ...editForm,
+          durationMinutes: editForm.durationMinutes === '' ? null : Number(editForm.durationMinutes),
+        },
+      });
       setInfo('Trip updated.');
       setPanel(null);
       setEditing(null);
@@ -451,7 +459,13 @@ export default function TripInstances() {
   const createTrip = async () => {
     setError('');
     try {
-      await api('/admin/trip-instances', { method: 'POST', body: createForm });
+      await api('/admin/trip-instances', {
+        method: 'POST',
+        body: {
+          ...createForm,
+          durationMinutes: createForm.durationMinutes === '' ? null : Number(createForm.durationMinutes),
+        },
+      });
       setInfo('Trip created.');
       setPanel(null);
       setCreateForm(emptyCreate);
@@ -1021,7 +1035,7 @@ export default function TripInstances() {
               <div className="sa-stop-detail-field"><div><dt>Start</dt><dd>{startTime(detailTrip) || '—'}</dd></div></div>
               <div className="sa-stop-detail-field"><div><dt>End</dt><dd>{fmtTime(detailTrip.endedAt) || '—'}</dd></div></div>
               <div className="sa-stop-detail-field"><div><dt>Students</dt><dd>{studentCount}</dd></div></div>
-              <div className="sa-stop-detail-field"><div><dt>Duration</dt><dd>{detailTrip.durationMinutes != null ? `${detailTrip.durationMinutes} min` : '—'}</dd></div></div>
+              <div className="sa-stop-detail-field"><div><dt>Duration</dt><dd>{detailTrip.durationMinutes != null ? `${detailTrip.durationMinutes} min` : detailTrip.status === 'completed' ? '—' : 'Open'}</dd></div></div>
             </dl>
             {detailExtra?.stops?.length ? (
               <div className="sa-trip-detail-map">
@@ -1181,6 +1195,18 @@ export default function TripInstances() {
                   />
                 </div>
               </div>
+              <label className="sa-field">
+                <span>Duration (minutes)</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="1440"
+                  placeholder="Open — leave blank"
+                  value={createForm.durationMinutes}
+                  onChange={(e) => setCreateForm({ ...createForm, durationMinutes: e.target.value })}
+                />
+              </label>
+              <p className="sa-muted">Leave blank to keep the trip open until the driver completes it, or enter how long it should run.</p>
               <div className="sa-stu-form-row">
                 <label className="sa-field">
                   <span>Period</span>
@@ -1247,6 +1273,17 @@ export default function TripInstances() {
                   onChange={(scheduledTime) => setEditForm({ ...editForm, scheduledTime })}
                 />
               </div>
+              <label className="sa-field">
+                <span>Duration (minutes)</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="1440"
+                  placeholder="Open — leave blank"
+                  value={editForm.durationMinutes}
+                  onChange={(e) => setEditForm({ ...editForm, durationMinutes: e.target.value })}
+                />
+              </label>
             </div>
             <div className="sa-stop-form-foot">
               <button type="button" className="sa-btn sa-btn-outline" onClick={() => { setPanel(null); setEditing(null); }}>Cancel</button>

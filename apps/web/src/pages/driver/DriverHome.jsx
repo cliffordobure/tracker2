@@ -350,6 +350,19 @@ export default function DriverHome() {
 
   const completeTrip = async () => {
     try {
+      const roster = trip?.kidIds || [];
+      const unpicked = roster.filter((kid) => {
+        const id = kid._id || kid;
+        return !eventFor(id, 'picked_up') && !eventFor(id, 'dropped_off');
+      });
+      if (trip?.direction === 'to_school' && unpicked.length) {
+        const names = unpicked.map((k) => k.name || 'Student').slice(0, 8).join(', ');
+        const extra = unpicked.length > 8 ? ` and ${unpicked.length - 8} more` : '';
+        const ok = window.confirm(
+          `${unpicked.length} student${unpicked.length === 1 ? ' was' : 's were'} not picked up: ${names}${extra}.\n\nDrop off the students who are on the bus at school anyway?`
+        );
+        if (!ok) return;
+      }
       const body = driverLocation
         ? { lat: driverLocation.lat, lng: driverLocation.lng }
         : {};

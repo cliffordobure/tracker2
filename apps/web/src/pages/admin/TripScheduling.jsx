@@ -24,6 +24,7 @@ const empty = {
   busId: '',
   driverId: '',
   scheduledTime: '06:30',
+  durationMinutes: '',
   startDate: todayInput(),
   endDate: '',
   kidIds: [],
@@ -220,6 +221,7 @@ export default function TripScheduling({ embedded = false, onBindCreate }) {
       busId: s.busId?._id || s.busId || '',
       driverId: s.driverId?._id || s.driverId?.id || s.driverId || '',
       scheduledTime: s.scheduledTime || '06:30',
+      durationMinutes: s.durationMinutes || '',
       startDate: toDateInput(s.startDate) || todayInput(),
       endDate: toDateInput(s.endDate),
       kidIds: (s.kidIds || []).map((k) => k._id || k),
@@ -249,6 +251,7 @@ export default function TripScheduling({ embedded = false, onBindCreate }) {
       const baseBody = {
         ...form,
         endDate: form.endDate || null,
+        durationMinutes: form.durationMinutes === '' ? null : Number(form.durationMinutes),
         kidIds: form.kidIds.length ? form.kidIds : routeKids.map((k) => k._id),
       };
 
@@ -760,10 +763,24 @@ export default function TripScheduling({ embedded = false, onBindCreate }) {
                 </select>
               </label>
             </div>
-            <label className="sa-field">
-              <span>Time</span>
-              <input type="time" value={form.scheduledTime} onChange={(e) => setForm({ ...form, scheduledTime: e.target.value })} />
-            </label>
+            <div className="sa-stu-form-row">
+              <label className="sa-field">
+                <span>Time</span>
+                <input type="time" value={form.scheduledTime} onChange={(e) => setForm({ ...form, scheduledTime: e.target.value })} />
+              </label>
+              <label className="sa-field">
+                <span>Duration (minutes)</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="1440"
+                  placeholder="Open — leave blank"
+                  value={form.durationMinutes}
+                  onChange={(e) => setForm({ ...form, durationMinutes: e.target.value })}
+                />
+              </label>
+            </div>
+            <p className="sa-muted">Leave duration blank to keep trips open until the driver completes them.</p>
             <label className="sa-field">
               <span>Route <b className="sa-req">*</b></span>
               <select required value={form.routeId} onChange={(e) => setForm({ ...form, routeId: e.target.value, kidIds: [] })}>

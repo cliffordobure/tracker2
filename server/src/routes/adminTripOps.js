@@ -25,6 +25,7 @@ import {
   findPeriodConflict,
   nextTripCode,
   normalizeClock,
+  plannedDurationFromBody,
 } from '../services/tripScheduleService.js';
 import { formatClock } from '../lib/clock.js';
 import { notifyTripCancelled, createAndEmitNotifications, NOTIFICATION_TYPES } from '../services/notifications.js';
@@ -61,7 +62,7 @@ function populateTrip(q) {
     .populate('routeId', 'name estimatedMinutes')
     .populate('busId', 'plate label seats')
     .populate('driverId', 'name email phone photoUrl')
-    .populate('scheduleId', 'name period scheduleType scheduledTime')
+    .populate('scheduleId', 'name period scheduleType scheduledTime durationMinutes')
     .populate('outingId', 'title location startAt endAt')
     .populate('kidIds', 'name grade homeStopId photoUrl');
 }
@@ -127,7 +128,8 @@ function serializeTrip(t, pathByRoute = {}) {
       : null,
     path: pathByRoute[rid] || outing?.location || '',
     studentCount: Array.isArray(json.kidIds) ? json.kidIds.length : 0,
-    durationMinutes: durationMinutesOf(json),
+    durationMinutes: durationMinutesOf(json) ?? (Number(json.durationMinutes) > 0 ? Number(json.durationMinutes) : null),
+    plannedDurationMinutes: Number(json.durationMinutes) > 0 ? Number(json.durationMinutes) : null,
     scheduledTime: plannedClockOf(json),
   };
 }
@@ -166,6 +168,7 @@ router.post('/trip-schedules', async (req, res) => {
       kidIds,
       active,
       generate,
+      durationMinutes,
     } = req.body;
 
     if (!name || !scheduleType || !period || !direction || !routeId || !busId || !driverId || !startDate) {
@@ -209,6 +212,7 @@ router.post('/trip-schedules', async (req, res) => {
       scheduledTime: scheduledTime || '06:30',
       startDate: startOfDay(startDate),
       endDate: endDate ? startOfDay(endDate) : null,
+      durationMinutes: plannedDurationFromBody({ durationMinutes, scheduledEndTime: req.body.scheduledEndTime, endTime: req.body.endTime }, scheduledTime || '06:30'),
       kidIds: resolvedKids,
       active: active !== false,
     });
@@ -530,6 +534,7 @@ router.post('/trip-schedules/:id/activate', async (req, res) => {
       trip.period = existing.period;
       trip.scheduledTime = normalizeClock(existing.scheduledTime);
       trip.scheduledFor = scheduledForFrom(trip.serviceDate, trip.scheduledTime);
+      trip.durationMinutes = existing.durationMinutes ?? trip.durationMinutes;
       await trip.save();
       revived.push(trip);
     }
@@ -760,6 +765,7 @@ router.post('/trip-instances', async (req, res) => {
       serviceDate,
       scheduledTime,
       scheduledFor: scheduledForFrom(serviceDate, scheduledTime),
+      durationMinutes: plannedDurationFromBody(req.body, scheduledTime),
       kidIds,
       tripCode: await nextTripCode(),
       status: 'scheduled',
@@ -823,6 +829,13 @@ router.put('/trip-instances/:id', async (req, res) => {
     const driverId = req.body.driverId ?? trip.driverId;
     const kidIds = req.body.kidIds ?? trip.kidIds;
     const scheduledTime = req.body.scheduledTime;
+    const nextDuration =
+      req.body.durationMinutes !== undefined || req.body.scheduledEndTime || req.body.endTime
+        ? plannedDurationFromBody(
+            req.body,
+            normalizeClock(scheduledTime || trip.scheduledTime || trip.scheduleId?.scheduledTime || '06:30')
+          )
+        : undefined;
 
     if (!trip.scheduleId || !trip.serviceDate) {
       const conflict = await findPeriodConflict({
@@ -847,6 +860,7 @@ router.put('/trip-instances/:id', async (req, res) => {
         trip.scheduledTime = clock;
         trip.scheduledFor = scheduledForFrom(trip.serviceDate, clock);
       }
+      if (nextDuration !== undefined) trip.durationMinutes = nextDuration;
       await trip.save();
       const populated = await populateTrip(Trip.findById(trip._id));
       return res.json({ trip: populated });
@@ -890,6 +904,7 @@ router.put('/trip-instances/:id', async (req, res) => {
     trip.busId = busId;
     trip.driverId = driverId;
     trip.kidIds = kidIds;
+    if (nextDuration !== undefined) trip.durationMinutes = nextDuration;
     trip.scheduledTime = overrideTime;
     trip.scheduledFor = scheduledForFrom(day, overrideTime);
     await trip.save();
@@ -1907,7 +1922,10 @@ function tripStartAt(t) {
 
 function tripEndAt(start, t) {
   if (t.endedAt) return new Date(t.endedAt);
-  const mins = durationMinutesOf(t) || (t.routeId?.estimatedMinutes > 0 ? t.routeId.estimatedMinutes : null);
+  const mins =
+    durationMinutesOf(t) ||
+    (Number(t.durationMinutes) > 0 ? Number(t.durationMinutes) : null) ||
+    (t.routeId?.estimatedMinutes > 0 ? t.routeId.estimatedMinutes : null);
   if (start && mins) return new Date(start.getTime() + Number(mins) * 60000);
   return null;
 }
