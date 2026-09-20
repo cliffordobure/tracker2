@@ -9,7 +9,7 @@ import {
 } from '../models/index.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { getIO } from '../socket.js';
-import { createAndEmitNotifications } from '../services/notifications.js';
+import { createAndEmitNotifications, createAndEmitNotificationsLater } from '../services/notifications.js';
 import { formatClock, formatDateTime } from '../lib/clock.js';
 import { stripApprovedLeaveFromKids } from '../lib/leave.js';
 
@@ -408,39 +408,35 @@ router.post('/:id/kids/:kidId/check-in', authenticate, requireRole('driver'), as
       location,
     });
 
-    const boarded = await boardedKidIds(trip._id);
     const expected = (trip.kidIds || []).length;
-    const missed = await TripEvent.countDocuments({ tripId: trip._id, type: 'not_picked_up' });
+    res.json({ event, expected });
 
-    // Boarding at school stays silent. Parents are only notified after the
-    // driver starts the trip (or if a student boards once the route is already live).
+    // Boarding at school stays silent until the driver starts. Do not block the tap.
     if (trip.status === 'active') {
-      const kid = await Kid.findById(kidId);
-      const io = getIO();
-      const when = formatDateTime(event.at || new Date());
-      const notifications = (kid?.parentIds || []).map((parentId) => ({
-        userId: parentId,
-        type: 'kid_picked_up',
-        title: 'Leaving school',
-        body: `The bus/van is now leaving school for dropping your child ${kid.name} at ${when}`,
-        tripId: trip._id,
-        kidId: kid._id,
-      }));
-      if (notifications.length) await createAndEmitNotifications(io, notifications);
-      const payload = { tripId: trip._id.toString(), kidId, event };
-      io?.to(`trip:${trip._id}`).emit('kid:picked_up', payload);
-      for (const parentId of kid?.parentIds || []) {
-        io?.to(`user:${parentId}`).emit('kid:picked_up', payload);
-      }
+      setImmediate(async () => {
+        try {
+          const kid = await Kid.findById(kidId);
+          const io = getIO();
+          const when = formatDateTime(event.at || new Date());
+          const notifications = (kid?.parentIds || []).map((parentId) => ({
+            userId: parentId,
+            type: 'kid_picked_up',
+            title: 'Leaving school',
+            body: `The bus/van is now leaving school for dropping your child ${kid.name} at ${when}`,
+            tripId: trip._id,
+            kidId: kid._id,
+          }));
+          createAndEmitNotificationsLater(io, notifications);
+          const payload = { tripId: trip._id.toString(), kidId, event };
+          io?.to(`trip:${trip._id}`).emit('kid:picked_up', payload);
+          for (const parentId of kid?.parentIds || []) {
+            io?.to(`user:${parentId}`).emit('kid:picked_up', payload);
+          }
+        } catch (err) {
+          console.warn('[trip] check-in notify failed:', err.message);
+        }
+      });
     }
-
-    res.json({
-      event,
-      boarded: boarded.length,
-      expected,
-      missed,
-      remaining: Math.max(0, expected - boarded.length - missed),
-    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -506,39 +502,44 @@ router.post('/:id/kids/:kidId/pickup', authenticate, requireRole('driver'), asyn
       location,
     });
 
-    const kid = await Kid.findById(kidId).populate('homeStopId', 'name');
-    const io = getIO();
-    const stopName = kid?.homeStopId?.name ? String(kid.homeStopId.name) : '';
-    const when = formatDateTime(event.at || new Date());
-    const notifications = (kid?.parentIds || []).map((parentId) => ({
-      userId: parentId,
-      type: 'kid_picked_up',
-      title: 'Picked up',
-      body: `Your child ${kid.name} has been picked up for school at ${stopPhrase(stopName)} at ${when}`,
-      tripId: trip._id,
-      kidId: kid._id,
-    }));
-    const driverId = trip.driverId?._id || trip.driverId;
-    if (driverId && kid) {
-      notifications.push({
-        userId: driverId,
-        type: 'kid_picked_up',
-        title: 'Student picked up',
-        body: stopName ? `${kid.name} was picked up at ${stopName}.` : `${kid.name} was picked up.`,
-        tripId: trip._id,
-        kidId: kid._id,
-        key: `${driverId}:pickup:${trip._id}:${kid._id}`,
-      });
-    }
-    await createAndEmitNotifications(io, notifications);
-
-    const payload = { tripId: trip._id.toString(), kidId, event };
-    io?.to(`trip:${trip._id}`).emit('kid:picked_up', payload);
-    for (const parentId of kid?.parentIds || []) {
-      io?.to(`user:${parentId}`).emit('kid:picked_up', payload);
-    }
-
     res.json({ event });
+
+    setImmediate(async () => {
+      try {
+        const kid = await Kid.findById(kidId).populate('homeStopId', 'name');
+        const io = getIO();
+        const stopName = kid?.homeStopId?.name ? String(kid.homeStopId.name) : '';
+        const when = formatDateTime(event.at || new Date());
+        const notifications = (kid?.parentIds || []).map((parentId) => ({
+          userId: parentId,
+          type: 'kid_picked_up',
+          title: 'Picked up',
+          body: `Your child ${kid.name} has been picked up for school at ${stopPhrase(stopName)} at ${when}`,
+          tripId: trip._id,
+          kidId: kid._id,
+        }));
+        const driverId = trip.driverId?._id || trip.driverId;
+        if (driverId && kid) {
+          notifications.push({
+            userId: driverId,
+            type: 'kid_picked_up',
+            title: 'Student picked up',
+            body: stopName ? `${kid.name} was picked up at ${stopName}.` : `${kid.name} was picked up.`,
+            tripId: trip._id,
+            kidId: kid._id,
+            key: `${driverId}:pickup:${trip._id}:${kid._id}`,
+          });
+        }
+        createAndEmitNotificationsLater(io, notifications);
+        const payload = { tripId: trip._id.toString(), kidId, event };
+        io?.to(`trip:${trip._id}`).emit('kid:picked_up', payload);
+        for (const parentId of kid?.parentIds || []) {
+          io?.to(`user:${parentId}`).emit('kid:picked_up', payload);
+        }
+      } catch (err) {
+        console.warn('[trip] pickup notify failed:', err.message);
+      }
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -579,26 +580,33 @@ router.post('/:id/kids/:kidId/miss', authenticate, requireRole('driver'), async 
       location,
     });
 
-    const kid = await Kid.findById(kidId).populate('homeStopId', 'name');
-    const driverId = trip.driverId?._id || trip.driverId;
-    if (trip.status === 'active' && driverId && kid) {
-      const stopName = kid.homeStopId?.name ? String(kid.homeStopId.name) : '';
-      await createAndEmitNotifications(getIO(), [
-        {
-          userId: driverId,
-          type: 'attendance_alert',
-          title: 'Student not picked up',
-          body: stopName
-            ? `${kid.name} was not picked up at ${stopName}.`
-            : `${kid.name} was marked not picked up.`,
-          tripId: trip._id,
-          kidId: kid._id,
-          key: `${driverId}:miss:${trip._id}:${kid._id}`,
-        },
-      ]);
-    }
-
     res.json({ event });
+
+    const driverId = trip.driverId?._id || trip.driverId;
+    if (trip.status === 'active' && driverId) {
+      setImmediate(async () => {
+        try {
+          const kid = await Kid.findById(kidId).populate('homeStopId', 'name');
+          if (!kid) return;
+          const stopName = kid.homeStopId?.name ? String(kid.homeStopId.name) : '';
+          createAndEmitNotificationsLater(getIO(), [
+            {
+              userId: driverId,
+              type: 'attendance_alert',
+              title: 'Student not picked up',
+              body: stopName
+                ? `${kid.name} was not picked up at ${stopName}.`
+                : `${kid.name} was marked not picked up.`,
+              tripId: trip._id,
+              kidId: kid._id,
+              key: `${driverId}:miss:${trip._id}:${kid._id}`,
+            },
+          ]);
+        } catch (err) {
+          console.warn('[trip] miss notify failed:', err.message);
+        }
+      });
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -671,42 +679,47 @@ router.post('/:id/kids/:kidId/dropoff', authenticate, requireRole('driver'), asy
       location,
     });
 
-    const kid = await Kid.findById(kidId).populate('homeStopId', 'name');
-    const place = trip.direction === 'to_school' ? 'school' : stopPhrase(kid?.homeStopId?.name);
-    const when = formatDateTime(event.at || new Date());
-    const io = getIO();
-    const evening = isEveningTrip(trip);
-    const notifications = (kid?.parentIds || []).map((parentId) => ({
-      userId: parentId,
-      type: 'kid_dropped_off',
-      title: evening ? 'Dropped off' : 'Reached school',
-      body: evening
-        ? `Your child ${kid.name} has been dropped at ${childPossessive(kid)} ${place} at ${when}`
-        : `The bus/van has reached school with your child ${kid.name} at ${when}`,
-      tripId: trip._id,
-      kidId: kid._id,
-    }));
-    const driverId = trip.driverId?._id || trip.driverId;
-    if (driverId && kid) {
-      notifications.push({
-        userId: driverId,
-        type: 'kid_dropped_off',
-        title: 'Student dropped off',
-        body: `${kid.name} was dropped off at ${place}.`,
-        tripId: trip._id,
-        kidId: kid._id,
-        key: `${driverId}:drop:${trip._id}:${kid._id}`,
-      });
-    }
-    await createAndEmitNotifications(io, notifications);
-
-    const payload = { tripId: trip._id.toString(), kidId, event };
-    io?.to(`trip:${trip._id}`).emit('kid:dropped_off', payload);
-    for (const parentId of kid?.parentIds || []) {
-      io?.to(`user:${parentId}`).emit('kid:dropped_off', payload);
-    }
-
     res.json({ event });
+
+    setImmediate(async () => {
+      try {
+        const kid = await Kid.findById(kidId).populate('homeStopId', 'name');
+        const place = trip.direction === 'to_school' ? 'school' : stopPhrase(kid?.homeStopId?.name);
+        const when = formatDateTime(event.at || new Date());
+        const io = getIO();
+        const evening = isEveningTrip(trip);
+        const notifications = (kid?.parentIds || []).map((parentId) => ({
+          userId: parentId,
+          type: 'kid_dropped_off',
+          title: evening ? 'Dropped off' : 'Reached school',
+          body: evening
+            ? `Your child ${kid.name} has been dropped at ${childPossessive(kid)} ${place} at ${when}`
+            : `The bus/van has reached school with your child ${kid.name} at ${when}`,
+          tripId: trip._id,
+          kidId: kid._id,
+        }));
+        const driverId = trip.driverId?._id || trip.driverId;
+        if (driverId && kid) {
+          notifications.push({
+            userId: driverId,
+            type: 'kid_dropped_off',
+            title: 'Student dropped off',
+            body: `${kid.name} was dropped off at ${place}.`,
+            tripId: trip._id,
+            kidId: kid._id,
+            key: `${driverId}:drop:${trip._id}:${kid._id}`,
+          });
+        }
+        createAndEmitNotificationsLater(io, notifications);
+        const payload = { tripId: trip._id.toString(), kidId, event };
+        io?.to(`trip:${trip._id}`).emit('kid:dropped_off', payload);
+        for (const parentId of kid?.parentIds || []) {
+          io?.to(`user:${parentId}`).emit('kid:dropped_off', payload);
+        }
+      } catch (err) {
+        console.warn('[trip] dropoff notify failed:', err.message);
+      }
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

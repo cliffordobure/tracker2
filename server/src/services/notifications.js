@@ -33,6 +33,16 @@ function emitAndPush(io, userId, payload) {
   }).catch((err) => console.warn('[push] notify error:', err.message));
 }
 
+/** Persist + push after the HTTP response so driver check-in is not blocked. */
+export function createAndEmitNotificationsLater(io, items) {
+  if (!items?.length) return;
+  setImmediate(() => {
+    createAndEmitNotifications(io, items).catch((err) =>
+      console.warn('[notify] background failed:', err.message)
+    );
+  });
+}
+
 export async function createAndEmitNotifications(io, items) {
   if (!items.length) return [];
 

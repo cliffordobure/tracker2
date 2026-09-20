@@ -51,7 +51,61 @@ export function stopsForTripKids(stops, kids = []) {
 }
 
 export function nextPendingStop(orderedStops, visitedStopIds = new Set()) {
-  return orderedStops.find((s) => !visitedStopIds.has(s._id));
+  const visited = new Set([...visitedStopIds].map(String));
+  return orderedStops.find((s) => !visited.has(String(s._id || s.id)));
+}
+
+export const MAP_LEAVE_M = 180;
+
+function stopId(stop) {
+  return String(stop?._id || stop?.id || '');
+}
+
+function kidHomeId(kid) {
+  return String(kid?.homeStopId?._id || kid?.homeStopId || '');
+}
+
+/** Current/next stop from GPS + map pins. Still-at-stop uses leave radius. */
+export function currentMapStop(orderedStops, location, visitedStopIds = [], leaveM = MAP_LEAVE_M) {
+  const list = orderedStops || [];
+  if (!list.length) return null;
+  const visited = new Set((visitedStopIds || []).map(String));
+  const lastVisited = [...list].reverse().find((s) => visited.has(stopId(s)));
+  if (lastVisited && location && haversineMeters(location, lastVisited.location) <= leaveM) {
+    return lastVisited;
+  }
+  return nextPendingStop(list, visited) || lastVisited || list[0] || null;
+}
+
+export function kidsForHomeStop(stop, kids = []) {
+  if (!stop) return [];
+  if (stop.type === 'school') return kids;
+  const id = stopId(stop);
+  return kids.filter((k) => kidHomeId(k) === id);
+}
+
+export function leftoverKidsBeforeStop(orderedStops, currentStop, kids, events = [], direction) {
+  const list = orderedStops || [];
+  const currentId = stopId(currentStop);
+  const currentIdx = list.findIndex((s) => stopId(s) === currentId);
+  const end = currentIdx < 0 ? list.length : currentIdx;
+  const toHome = direction === 'to_home';
+  const leftover = [];
+  for (let i = 0; i < end; i += 1) {
+    const stop = list[i];
+    if (stop.type === 'school') continue;
+    for (const kid of kidsForHomeStop(stop, kids)) {
+      const id = String(kid._id || kid);
+      const picked = events.some((e) => String(e.kidId?._id || e.kidId) === id && e.type === 'picked_up');
+      const dropped = events.some((e) => String(e.kidId?._id || e.kidId) === id && e.type === 'dropped_off');
+      if (toHome) {
+        if (picked && !dropped) leftover.push(kid);
+      } else if (!picked && !dropped) {
+        leftover.push(kid);
+      }
+    }
+  }
+  return leftover;
 }
 
 function kidHomeStopId(kid) {

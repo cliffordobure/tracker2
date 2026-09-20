@@ -6,6 +6,9 @@ import { useAuth } from '../../context/AuthContext';
 import {
   formatDistance,
   haversineMeters,
+  currentMapStop,
+  kidsForHomeStop,
+  leftoverKidsBeforeStop,
   nextPendingStop,
   orderedStopsForDirection,
   stopsForTripKids,
@@ -60,8 +63,8 @@ export default function DriverHome() {
   }, [orderedStops, trip?.direction]);
 
   const nextStop = useMemo(
-    () => nextPendingStop(orderedStops, new Set(visitedStopIds)),
-    [orderedStops, visitedStopIds]
+    () => currentMapStop(orderedStops, driverLocation, visitedStopIds),
+    [orderedStops, driverLocation, visitedStopIds]
   );
 
   const distanceToNext = useMemo(() => {
@@ -145,12 +148,58 @@ export default function DriverHome() {
       const list = orderedRef.current;
       if (!location || !list.length) return;
 
-      const stop = nextPendingStop(list, new Set(visitedRef.current));
+      const pending = nextPendingStop(list, new Set(visitedRef.current));
+      const morning = directionRef.current !== 'to_home';
+
+      // Arrive at any later map pin (or skip earlier ones) — not by picking kids.
+      let arrivedIdx = -1;
+      let nearestIdx = -1;
+      let nearestD = Infinity;
+      list.forEach((s, i) => {
+        if (morning && s.type === 'school') return;
+        const d = haversineMeters(location, s.location);
+        if (d <= ARRIVE_M && i > arrivedIdx) arrivedIdx = i;
+        if (d < nearestD) {
+          nearestD = d;
+          nearestIdx = i;
+        }
+      });
+      if (nearestIdx > 0 && nearestD + 50 < haversineMeters(location, list[0].location)) {
+        const firstUnvisited = list.findIndex((s) => !visitedRef.current.includes(s._id));
+        if (firstUnvisited >= 0 && firstUnvisited < nearestIdx && nearestD + 50 < haversineMeters(location, list[firstUnvisited].location)) {
+          arrivedIdx = Math.max(arrivedIdx, nearestIdx - 1);
+        }
+      }
+
+      if (arrivedIdx >= 0) {
+        const newly = [];
+        for (let i = 0; i <= arrivedIdx; i += 1) {
+          const id = list[i]._id;
+          if (!visitedRef.current.includes(id)) newly.push(id);
+        }
+        if (newly.length) {
+          const arrived = list[arrivedIdx];
+          const arriveKey = `arrive:${arrived._id}`;
+          if (!notifiedRef.current.has(arriveKey)) {
+            notifiedRef.current.add(arriveKey);
+            showToast(`Arrived at stop: ${arrived.name}`, 'success');
+          }
+          setVisitedStopIds((prev) => {
+            const next = [...prev];
+            newly.forEach((id) => {
+              if (!next.includes(id)) next.push(id);
+            });
+            visitedRef.current = next;
+            return next;
+          });
+        }
+      }
+
+      const stop = pending;
       if (!stop) return;
 
       const dist = haversineMeters(location, stop.location);
       const approachKey = `approach:${stop._id}`;
-      const arriveKey = `arrive:${stop._id}`;
 
       if (dist <= APPROACH_M && !notifiedRef.current.has(approachKey)) {
         notifiedRef.current.add(approachKey);
@@ -163,17 +212,6 @@ export default function DriverHome() {
               ? 'pickup kids at school'
               : 'drop-off kids';
         showToast(`Approaching ${stop.name} — prepare to ${action}`, 'success');
-      }
-
-      if (dist <= ARRIVE_M && !notifiedRef.current.has(arriveKey)) {
-        notifiedRef.current.add(arriveKey);
-        showToast(`Arrived at stop: ${stop.name}`, 'success');
-        setVisitedStopIds((prev) => {
-          if (prev.includes(stop._id)) return prev;
-          const next = [...prev, stop._id];
-          visitedRef.current = next;
-          return next;
-        });
       }
     },
     [showToast]
@@ -340,6 +378,36 @@ export default function DriverHome() {
   const kids = trip?.kidIds || [];
   const boarding = trip?.status === 'scheduled' && isEveningTrip(trip);
   const boardedCount = kids.filter((kid) => eventFor(kid._id || kid, 'picked_up')).length;
+  const leftoverKids = useMemo(
+    () => (boarding ? [] : leftoverKidsBeforeStop(orderedStops, nextStop, kids, events, trip?.direction)),
+    [boarding, orderedStops, nextStop, kids, events, trip?.direction]
+  );
+  const leftoverIds = useMemo(
+    () => new Set(leftoverKids.map((k) => String(k._id || k))),
+    [leftoverKids]
+  );
+  const currentStopKids = useMemo(() => {
+    if (boarding || !nextStop) return kids;
+    if (nextStop.type === 'school' && trip?.direction !== 'to_home') {
+      return kids.filter((k) => {
+        const id = k._id || k;
+        return eventFor(id, 'picked_up') && !eventFor(id, 'dropped_off');
+      });
+    }
+    return kidsForHomeStop(nextStop, kids).filter((k) => !leftoverIds.has(String(k._id || k)));
+  }, [boarding, nextStop, kids, leftoverIds, trip?.direction, events]);
+  const currentIds = useMemo(
+    () => new Set(currentStopKids.map((k) => String(k._id || k))),
+    [currentStopKids]
+  );
+  const onboardElse = useMemo(() => {
+    if (boarding) return [];
+    return kids.filter((k) => {
+      const id = String(k._id || k);
+      if (currentIds.has(id) || leftoverIds.has(id)) return false;
+      return eventFor(k._id || k, 'picked_up') && !eventFor(k._id || k, 'dropped_off');
+    });
+  }, [boarding, kids, currentIds, leftoverIds, events]);
 
   const unreadAlerts = notifications.filter((n) => !n.read).length;
 
@@ -461,7 +529,11 @@ export default function DriverHome() {
             {nextStop && (
               <div className="next-stop-banner">
                 <div>
-                  <span className="eyebrow">Next stop</span>
+                  <span className="eyebrow">
+                    {driverLocation && haversineMeters(driverLocation, nextStop.location) <= 180
+                      ? 'This stop'
+                      : 'Next stop'}
+                  </span>
                   <strong>{nextStop.name}</strong>
                   <p className="muted">
                     {nextStop.type === 'school' ? 'School' : 'Home stop'} ·{' '}
@@ -504,29 +576,58 @@ export default function DriverHome() {
           <div className="stack">
             <h3>{boarding ? 'Check in at school' : 'Kids on trip'}</h3>
             <ul className="kid-list">
-              {kids.map((kid) => {
-                const id = kid._id || kid;
-                const name = kid.name || 'Kid';
-                const picked = !!eventFor(id, 'picked_up');
-                const dropped = !!eventFor(id, 'dropped_off');
-                return (
-                  <li key={id} className="kid-row">
-                    <div>
-                      <strong>{name}</strong>
-                      <div className="muted">
-                        {dropped ? 'Dropped off' : picked ? 'On board' : boarding ? 'Waiting at school' : 'Waiting'}
+              {boarding &&
+                kids.map((kid) => {
+                  const id = kid._id || kid;
+                  const picked = !!eventFor(id, 'picked_up');
+                  return (
+                    <li key={id} className="kid-row">
+                      <div>
+                        <strong>{kid.name || 'Kid'}</strong>
+                        <div className="muted">{picked ? 'On board' : 'Waiting at school'}</div>
                       </div>
-                    </div>
-                    <div className="row-actions">
-                      <button
-                        type="button"
-                        className="btn btn-secondary"
-                        disabled={picked}
-                        onClick={() => markPickup(id)}
-                      >
-                        {boarding ? 'Check in' : 'Pick up'}
-                      </button>
-                      {!boarding && (
+                      <div className="row-actions">
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          disabled={picked}
+                          onClick={() => markPickup(id)}
+                        >
+                          Check in
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              {!boarding && currentStopKids.length > 0 && (
+                <li className="kid-group-label">
+                  {nextStop?.type === 'school' && trip?.direction !== 'to_home'
+                    ? 'At school now'
+                    : `At this stop${nextStop?.name ? ` · ${nextStop.name}` : ''}`}
+                </li>
+              )}
+              {!boarding &&
+                currentStopKids.map((kid) => {
+                  const id = kid._id || kid;
+                  const picked = !!eventFor(id, 'picked_up');
+                  const dropped = !!eventFor(id, 'dropped_off');
+                  return (
+                    <li key={id} className="kid-row">
+                      <div>
+                        <strong>{kid.name || 'Kid'}</strong>
+                        <div className="muted">
+                          {dropped ? 'Dropped off' : picked ? 'On board' : 'Waiting here'}
+                        </div>
+                      </div>
+                      <div className="row-actions">
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          disabled={picked}
+                          onClick={() => markPickup(id)}
+                        >
+                          Pick up
+                        </button>
                         <button
                           type="button"
                           className="btn btn-primary"
@@ -535,11 +636,82 @@ export default function DriverHome() {
                         >
                           Drop off
                         </button>
-                      )}
-                    </div>
-                  </li>
-                );
-              })}
+                      </div>
+                    </li>
+                  );
+                })}
+              {!boarding && onboardElse.length > 0 && (
+                <li className="kid-group-label">On board</li>
+              )}
+              {!boarding &&
+                onboardElse.map((kid) => {
+                  const id = kid._id || kid;
+                  const dropped = !!eventFor(id, 'dropped_off');
+                  return (
+                    <li key={id} className="kid-row">
+                      <div>
+                        <strong>{kid.name || 'Kid'}</strong>
+                        <div className="muted">On board</div>
+                      </div>
+                      <div className="row-actions">
+                        <button type="button" className="btn btn-secondary" disabled>
+                          Pick up
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          disabled={dropped}
+                          onClick={() => markDropoff(id)}
+                        >
+                          Drop off
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              {!boarding && leftoverKids.length > 0 && (
+                <li className="kid-group-label leftover">Not picked up · earlier stops</li>
+              )}
+              {!boarding &&
+                leftoverKids.map((kid) => {
+                  const id = kid._id || kid;
+                  const picked = !!eventFor(id, 'picked_up');
+                  const dropped = !!eventFor(id, 'dropped_off');
+                  const homeName =
+                    kid.homeStopId?.name ||
+                    orderedStops.find((s) => String(s._id) === String(kid.homeStopId?._id || kid.homeStopId))
+                      ?.name ||
+                    'Earlier stop';
+                  return (
+                    <li key={id} className="kid-row leftover">
+                      <div>
+                        <strong>{kid.name || 'Kid'}</strong>
+                        <div className="muted leftover-caption">{homeName} · not picked</div>
+                      </div>
+                      <div className="row-actions">
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          disabled={picked}
+                          onClick={() => markPickup(id)}
+                        >
+                          Pick up
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          disabled={!picked || dropped}
+                          onClick={() => markDropoff(id)}
+                        >
+                          Drop off
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              {!boarding && !currentStopKids.length && !leftoverKids.length && !onboardElse.length && (
+                <li className="muted">No students to show at this stop.</li>
+              )}
             </ul>
           </div>
         </div>
