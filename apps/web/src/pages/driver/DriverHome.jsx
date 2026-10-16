@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../lib/api';
 import { connectSocket } from '../../lib/socket';
 import MapView from '../../components/MapView';
@@ -421,6 +421,23 @@ export default function DriverHome() {
       return eventFor(k._id || k, 'picked_up') && !eventFor(k._id || k, 'dropped_off');
     });
   }, [boarding, kids, currentIds, leftoverIds, events]);
+  const boardingGroups = useMemo(() => {
+    if (boarding || trip?.direction === 'to_home') return [];
+    if (nextStop?.type === 'school') return [];
+    const used = new Set();
+    const groups = (orderedStops || [])
+      .filter((s) => s.type !== 'school')
+      .map((stop) => {
+        const stopKids = kidsForHomeStop(stop, kids);
+        stopKids.forEach((k) => used.add(String(k._id || k)));
+        return { stop, kids: stopKids };
+      })
+      .filter((g) => g.kids.length);
+    const rest = kids.filter((k) => !used.has(String(k._id || k)));
+    if (rest.length) groups.push({ stop: { _id: 'other', name: 'Other stop' }, kids: rest });
+    return groups;
+  }, [boarding, trip?.direction, nextStop, orderedStops, kids]);
+  const showGroupedMorning = boardingGroups.length > 0;
 
   const unreadAlerts = notifications.filter((n) => !n.read).length;
 
@@ -587,7 +604,7 @@ export default function DriverHome() {
             />
           </div>
           <div className="stack">
-            <h3>{boarding ? 'Check in at school' : 'Kids on trip'}</h3>
+            <h3>{boarding ? 'Check in at school' : showGroupedMorning ? 'Students by boarding stop' : 'Kids on trip'}</h3>
             <ul className="kid-list">
               {boarding &&
                 kids.map((kid) => {
@@ -612,14 +629,53 @@ export default function DriverHome() {
                     </li>
                   );
                 })}
-              {!boarding && currentStopKids.length > 0 && (
+              {showGroupedMorning &&
+                boardingGroups.map(({ stop, kids: stopKids }) => (
+                  <Fragment key={stop._id || stop.name}>
+                    <li className="kid-group-label">{stop.name || 'Boarding stop'}</li>
+                    {stopKids.map((kid) => {
+                      const id = kid._id || kid;
+                      const picked = !!eventFor(id, 'picked_up');
+                      const dropped = !!eventFor(id, 'dropped_off');
+                      return (
+                        <li key={id} className="kid-row">
+                          <div>
+                            <strong>{kid.name || 'Kid'}</strong>
+                            <div className="muted">
+                              {dropped ? 'Dropped off' : picked ? 'On board' : 'Waiting here'}
+                            </div>
+                          </div>
+                          <div className="row-actions">
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              disabled={picked}
+                              onClick={() => markPickup(id)}
+                            >
+                              Pick up
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-primary"
+                              disabled={!picked || dropped}
+                              onClick={() => markDropoff(id)}
+                            >
+                              Drop off
+                            </button>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </Fragment>
+                ))}
+              {!showGroupedMorning && !boarding && currentStopKids.length > 0 && (
                 <li className="kid-group-label">
                   {nextStop?.type === 'school' && trip?.direction !== 'to_home'
                     ? 'At school now'
                     : `At this stop${nextStop?.name ? ` · ${nextStop.name}` : ''}`}
                 </li>
               )}
-              {!boarding &&
+              {!showGroupedMorning && !boarding &&
                 currentStopKids.map((kid) => {
                   const id = kid._id || kid;
                   const picked = !!eventFor(id, 'picked_up');
@@ -653,10 +709,10 @@ export default function DriverHome() {
                     </li>
                   );
                 })}
-              {!boarding && onboardElse.length > 0 && (
+              {!showGroupedMorning && !boarding && onboardElse.length > 0 && (
                 <li className="kid-group-label">On board</li>
               )}
-              {!boarding &&
+              {!showGroupedMorning && !boarding &&
                 onboardElse.map((kid) => {
                   const id = kid._id || kid;
                   const dropped = !!eventFor(id, 'dropped_off');
@@ -682,10 +738,10 @@ export default function DriverHome() {
                     </li>
                   );
                 })}
-              {!boarding && leftoverKids.length > 0 && (
+              {!showGroupedMorning && !boarding && leftoverKids.length > 0 && (
                 <li className="kid-group-label leftover">Not picked up · earlier stops</li>
               )}
-              {!boarding &&
+              {!showGroupedMorning && !boarding &&
                 leftoverKids.map((kid) => {
                   const id = kid._id || kid;
                   const picked = !!eventFor(id, 'picked_up');
@@ -722,7 +778,7 @@ export default function DriverHome() {
                     </li>
                   );
                 })}
-              {!boarding && !currentStopKids.length && !leftoverKids.length && !onboardElse.length && (
+              {!showGroupedMorning && !boarding && !currentStopKids.length && !leftoverKids.length && !onboardElse.length && (
                 <li className="muted">No students to show at this stop.</li>
               )}
             </ul>

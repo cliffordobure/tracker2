@@ -731,19 +731,22 @@ router.post('/:id/complete', authenticate, requireRole('driver'), async (req, re
     if (!trip) return res.status(404).json({ error: 'Active trip not found' });
 
     const open = await openCheckIns(trip._id);
+    let justDropped = [];
     if (open.length) {
-      // Morning end-at-school: mark remaining on-board kids dropped off, then close.
+      // Morning drop-off at school is the end of the trip: mark everyone still
+      // on the bus as dropped off, then close.
       if (!isEveningTrip(trip)) {
         const loc = locationFromBody(req.body) || trip.latestLocation;
         const lat = Number(loc?.lat);
         const lng = Number(loc?.lng);
         const location = Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : undefined;
-        await TripEvent.insertMany(
+        const at = new Date();
+        justDropped = await TripEvent.insertMany(
           open.map((kidId) => ({
             tripId: trip._id,
             kidId,
             type: 'dropped_off',
-            at: new Date(),
+            at,
             ...(location ? { location } : {}),
           }))
         );
@@ -770,23 +773,22 @@ router.post('/:id/complete', authenticate, requireRole('driver'), async (req, re
     const notifyKids = boardedIds
       ? kids.filter((k) => boardedIds.has(String(k._id)))
       : kids;
-    const droppedIds = new Set(
-      (await TripEvent.find({ tripId: trip._id, type: 'dropped_off' }).select('kidId'))
-        .map((e) => String(e.kidId))
-    );
     const when = formatDateTime(trip.endedAt || new Date());
-    // Evening/afternoon return to school: no parent messages — the journey is closed.
-    if (!evening) {
-      for (const kid of notifyKids) {
-        if (droppedIds.has(String(kid._id))) continue;
+    // Parents of students dropped one-by-one already got "Reached school".
+    // Notify only the students this drop-off-at-school just marked off the bus.
+    const justDroppedIds = new Set(justDropped.map((e) => String(e.kidId)));
+    if (!evening && justDroppedIds.size) {
+      for (const kid of kids) {
+        if (!justDroppedIds.has(String(kid._id))) continue;
         for (const parentId of kid.parentIds || []) {
           notifications.push({
             userId: parentId,
-            type: 'trip_completed',
+            type: 'kid_dropped_off',
             title: 'Reached school',
             body: `The bus/van has reached school with your child ${kid.name} at ${when}`,
             tripId: trip._id,
             kidId: kid._id,
+            key: `${parentId}:school_drop:${trip._id}:${kid._id}`,
           });
         }
       }
@@ -805,6 +807,15 @@ router.post('/:id/complete', authenticate, requireRole('driver'), async (req, re
     await createAndEmitNotifications(io, notifications);
 
     const payload = { tripId: trip._id.toString() };
+    for (const event of justDropped) {
+      const kidId = String(event.kidId);
+      const dropPayload = { tripId: payload.tripId, kidId, event };
+      io?.to(`trip:${trip._id}`).emit('kid:dropped_off', dropPayload);
+      const kid = kids.find((k) => String(k._id) === kidId);
+      for (const parentId of kid?.parentIds || []) {
+        io?.to(`user:${parentId}`).emit('kid:dropped_off', dropPayload);
+      }
+    }
     io?.to(`trip:${trip._id}`).emit('trip:completed', payload);
     if (driverId) io?.to(`user:${driverId}`).emit('trip:completed', payload);
     for (const kid of notifyKids) {
