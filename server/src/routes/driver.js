@@ -3,7 +3,7 @@ import { DriverProfile, Route, Stop, Kid, Trip, TripEvent, LocationPing, Notific
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { getIO } from '../socket.js';
 import { createAndEmitNotifications } from '../services/notifications.js';
-import { datesForSchedule } from '../services/tripScheduleService.js';
+import { datesForSchedule, generateInstancesForSchedule } from '../services/tripScheduleService.js';
 import { isCloudinaryConfigured } from '../services/cloudinary.js';
 import { formatClock, formatDateKey, formatDayClock, fromAppZonedDateTime } from '../lib/clock.js';
 import { stripApprovedLeaveFromKids } from '../lib/leave.js';
@@ -58,6 +58,32 @@ function tripStartInstant(trip) {
     schedule?.scheduledTime || trip?.scheduledTime,
     trip?.scheduledFor
   );
+}
+
+const ensuredDriverDays = new Map();
+
+/** Create today and tomorrow's trip rows from the driver's active schedules when they are missing. */
+async function ensureDriverDayInstances(driverId) {
+  const key = String(driverId || '');
+  if (!key) return;
+  const prev = ensuredDriverDays.get(key) || 0;
+  if (Date.now() - prev < 60_000) return;
+  const schedules = await TripSchedule.find({ driverId, active: { $ne: false } }).select('_id');
+  if (!schedules.length) {
+    ensuredDriverDays.set(key, Date.now());
+    return;
+  }
+  const from = new Date();
+  const to = new Date();
+  to.setDate(to.getDate() + 1);
+  for (const schedule of schedules) {
+    try {
+      await generateInstancesForSchedule(schedule._id, { from, to, notify: false });
+    } catch (err) {
+      console.warn('[driver] ensure trip instances failed:', err.message);
+    }
+  }
+  ensuredDriverDays.set(key, Date.now());
 }
 
 function periodRank(trip) {
@@ -469,6 +495,7 @@ async function serializeDriverTripCard(trip) {
 
 router.get('/overview', async (req, res) => {
   try {
+    await ensureDriverDayInstances(req.user.id);
     const { start, end, key } = dayBounds(req.query.date);
     const [user, profile, unread, todayDocs] = await Promise.all([
       User.findById(req.user.id).select('name photoUrl'),
@@ -984,6 +1011,7 @@ router.post('/incidents', async (req, res) => {
 
 router.get('/trips/today', async (req, res) => {
   try {
+    await ensureDriverDayInstances(req.user.id);
     const { start, end, key } = dayBounds(req.query.date);
     const docs = await Trip.find({
       driverId: req.user.id,

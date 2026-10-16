@@ -141,6 +141,16 @@ router.get('/trip-schedules', async (req, res) => {
     const schoolId = resolveSchoolId(req);
     if (schoolId) filter.schoolId = schoolId;
     const schedules = await populateSchedule(TripSchedule.find(filter).sort({ createdAt: -1 }));
+    const active = (Array.isArray(schedules) ? schedules : []).filter((s) => s.active !== false);
+    await Promise.all(
+      active.map(async (schedule) => {
+        try {
+          await generateInstancesForSchedule(schedule._id, { notify: false });
+        } catch (err) {
+          console.warn('[schedules] auto-generate failed:', err.message);
+        }
+      })
+    );
     res.json({ schedules });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -167,7 +177,6 @@ router.post('/trip-schedules', async (req, res) => {
       endDate,
       kidIds,
       active,
-      generate,
       durationMinutes,
     } = req.body;
 
@@ -217,10 +226,7 @@ router.post('/trip-schedules', async (req, res) => {
       active: active !== false,
     });
 
-    let generation = null;
-    if (generate !== false) {
-      generation = await generateInstancesForSchedule(schedule._id);
-    }
+    const generation = await generateInstancesForSchedule(schedule._id);
 
     const populated = await populateSchedule(TripSchedule.findById(schedule._id));
     res.status(201).json({

@@ -317,19 +317,6 @@ export default function TripScheduling({ embedded = false, onBindCreate }) {
       .map((c) => `Conflict on ${new Date(c.serviceDate).toLocaleDateString()}: ${c.conflictTripCode || 'existing'}`)
       .join(' · ');
 
-  const generate = async (id) => {
-    setError('');
-    setInfo('');
-    try {
-      const res = await api(`/admin/trip-schedules/${id}/generate`, { method: 'POST', body: {} });
-      setInfo(`Generated ${res.created} new instance(s); skipped ${res.skipped}.`);
-      if (res.conflicts?.length) setError(formatConflicts(res.conflicts));
-      await load();
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
   const activate = async (id) => {
     if (!confirm('Activate this schedule and generate upcoming trip instances?')) return;
     setError('');
@@ -446,7 +433,7 @@ export default function TripScheduling({ embedded = false, onBindCreate }) {
   const exceptionRows = [...exceptions].sort((a, b) => byDate(a, b, 'serviceDate'));
   const schedKpis = [
     { key: 'schedules', label: 'Schedules', value: schedules.length, hint: 'Recurring templates', tint: 'purple', icon: 'calendar', spark: '#6366f1', bar: 72 },
-    { key: 'active', label: 'Active', value: activeCount, hint: 'Will generate trips', tint: 'green', icon: 'check', spark: '#22c55e', bar: activeCount ? 80 : 18 },
+    { key: 'active', label: 'Active', value: activeCount, hint: 'Daily trips are created', tint: 'green', icon: 'check', spark: '#22c55e', bar: activeCount ? 80 : 18 },
     { key: 'holidays', label: 'Holidays', value: holidays.length, hint: 'No trips generated', tint: 'orange', icon: 'sun', spark: '#f97316', bar: holidays.length ? 64 : 16 },
     { key: 'exceptions', label: 'Exceptions', value: exceptions.length, hint: 'Selected schedule', tint: 'rose', icon: 'clock', spark: '#e11d48', bar: exceptions.length ? 58 : 14 },
   ];
@@ -533,10 +520,7 @@ export default function TripScheduling({ embedded = false, onBindCreate }) {
                     {s.active === false ? (
                       <button type="button" className="sa-text-link" onClick={() => activate(s._id)}>Activate</button>
                     ) : (
-                      <>
-                        <button type="button" className="sa-text-link" onClick={() => generate(s._id)}>Generate</button>
-                        <button type="button" className="sa-text-link" onClick={() => deactivate(s._id)}>Deactivate</button>
-                      </>
+                      <button type="button" className="sa-text-link" onClick={() => deactivate(s._id)}>Deactivate</button>
                     )}
                     <button type="button" className="sa-text-link is-danger" onClick={() => removeSchedule(s._id)}>Delete</button>
                   </td>
@@ -831,7 +815,7 @@ export default function TripScheduling({ embedded = false, onBindCreate }) {
             <div className="sa-stop-form-foot">
               <button type="button" className="sa-btn sa-btn-outline" onClick={cancelEdit}>Cancel</button>
               <button className="sa-btn sa-btn-primary" type="submit" disabled={busy}>
-                {busy ? 'Saving...' : editingId ? 'Save with scope' : 'Create & generate'}
+                {busy ? 'Saving...' : editingId ? 'Save with scope' : 'Create schedule'}
               </button>
             </div>
           </form>
