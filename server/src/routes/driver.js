@@ -60,25 +60,36 @@ function tripStartInstant(trip) {
   );
 }
 
+function periodRank(trip) {
+  const period = trip?.period || (isEveningLikeTrip(trip) ? 'evening' : 'morning');
+  if (period === 'morning') return 0;
+  if (period === 'afternoon') return 1;
+  if (period === 'evening') return 2;
+  return isEveningLikeTrip(trip) ? 2 : 0;
+}
+
+/**
+ * One trip at a time, in the day's order.
+ * Morning stays until it is completed. The evening trip then shows immediately,
+ * without waiting for its clock time. After that trip is completed, nothing
+ * shows until midnight, when the next morning's service day begins.
+ * Completed trips are already excluded from `cards`.
+ */
 function visibleScheduledCards(cards, now = Date.now()) {
   const active = cards.filter((t) => t.status === 'active');
+  if (active.length) return active;
   const scheduled = cards
     .filter((t) => t.status === 'scheduled' && now >= serviceDayStartMs(t))
     .slice()
     .sort((a, b) => {
+      const byPeriod = periodRank(a) - periodRank(b);
+      if (byPeriod) return byPeriod;
       const aStart = tripStartInstant(a)?.getTime() || 0;
       const bStart = tripStartInstant(b)?.getTime() || 0;
       return aStart - bStart;
     });
-  if (!scheduled.length) return [...active];
-  let current = scheduled[0];
-  for (let i = 1; i < scheduled.length; i += 1) {
-    const start = tripStartInstant(scheduled[i]);
-    if (start && !Number.isNaN(start.getTime()) && now >= start.getTime()) {
-      current = scheduled[i];
-    }
-  }
-  return [...active, current];
+  if (!scheduled.length) return [];
+  return [scheduled[0]];
 }
 
 function morningAlarmPayload(trip) {
