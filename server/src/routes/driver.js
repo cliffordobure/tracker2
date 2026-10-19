@@ -94,10 +94,15 @@ function periodRank(trip) {
   return isEveningLikeTrip(trip) ? 2 : 0;
 }
 
+/** How early a later trip replaces an earlier one that was never started. */
+const NEXT_TRIP_LEAD_MS = 60 * 60 * 1000;
+
 /**
  * One trip at a time, in the day's order.
- * Morning stays until it is completed. The evening trip then shows immediately,
- * without waiting for its clock time. After that trip is completed, nothing
+ * A scheduled morning trip stays until it is completed, then the next trip
+ * shows immediately. If that morning trip was never started, it drops off
+ * once the next trip is within an hour of its start, and that next trip shows.
+ * An active trip is never replaced. After the last trip is completed, nothing
  * shows until midnight, when the next morning's service day begins.
  * Completed trips are already excluded from `cards`.
  */
@@ -115,7 +120,12 @@ function visibleScheduledCards(cards, now = Date.now()) {
       return aStart - bStart;
     });
   if (!scheduled.length) return [];
-  return [scheduled[0]];
+  let chosen = scheduled[0];
+  for (let i = 1; i < scheduled.length; i += 1) {
+    const start = tripStartInstant(scheduled[i])?.getTime();
+    if (start && now >= start - NEXT_TRIP_LEAD_MS) chosen = scheduled[i];
+  }
+  return [chosen];
 }
 
 function morningAlarmPayload(trip) {
