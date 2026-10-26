@@ -2,8 +2,8 @@ import 'dotenv/config';
 import http from 'http';
 import express from 'express';
 import cors from 'cors';
-import mongoose from 'mongoose';
 import { Server } from 'socket.io';
+import { connectMongo } from './lib/mongo.js';
 import { initSocket } from './socket.js';
 import authRoutes from './routes/auth.js';
 import adminRoutes from './routes/admin.js';
@@ -76,7 +76,7 @@ const port = Number(process.env.PORT || 4001);
 const mongoUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/school_kids_tracker';
 
 async function start() {
-  await mongoose.connect(mongoUri);
+  await connectMongo(mongoUri);
   console.log('Connected to MongoDB');
   // One-time role rename for existing databases
   const { User, School } = await import('./models/index.js');

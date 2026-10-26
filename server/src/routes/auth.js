@@ -5,6 +5,7 @@ import { User } from '../models/index.js';
 import { authenticate } from '../middleware/auth.js';
 import { schoolAllowsLogin } from '../lib/schoolAccess.js';
 import { normalizeMenuRights } from '../lib/staffAccess.js';
+import { clientErrorMessage, isStalePrimaryError } from '../lib/mongo.js';
 
 const router = Router();
 
@@ -51,6 +52,11 @@ router.post('/login', async (req, res) => {
     const token = signToken(user);
     return res.json({ token, user: user.toSafeJSON() });
   } catch (err) {
+    if (isStalePrimaryError(err)) {
+      console.error('Login failed because MongoDB rejected the primary', err);
+      return res.status(503).json({ error: clientErrorMessage(err) });
+    }
+    console.error('Login failed', err);
     return res.status(500).json({ error: err.message });
   }
 });
