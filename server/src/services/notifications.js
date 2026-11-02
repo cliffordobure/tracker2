@@ -29,6 +29,7 @@ function emitAndPush(io, userId, payload) {
       tripId: payload.tripId || '',
       kidId: payload.kidId || '',
       createdAt: payload.createdAt,
+      ...(payload.tag ? { tag: payload.tag } : {}),
     },
   }).catch((err) => console.warn('[push] notify error:', err.message));
 }
@@ -50,23 +51,37 @@ export async function createAndEmitNotifications(io, items) {
   for (const item of items) {
     if (!item?.userId || !item?.title) continue;
     let doc = null;
+    let isNew = true;
     try {
       if (item.key) {
-        doc = await Notification.findOneAndUpdate(
-          { userId: item.userId, key: String(item.key) },
-          { $setOnInsert: { ...item, key: String(item.key) } },
-          { upsert: true, new: true }
-        );
+        const key = String(item.key);
+        doc = await Notification.findOne({ userId: item.userId, key });
+        if (doc) {
+          isNew = false;
+        } else {
+          try {
+            doc = await Notification.create({ ...item, key });
+          } catch (err) {
+            if (err?.code === 11000) {
+              doc = await Notification.findOne({ userId: item.userId, key });
+              isNew = false;
+            } else {
+              throw err;
+            }
+          }
+        }
       } else {
         doc = await Notification.create(item);
       }
     } catch (err) {
-      if (item.key) {
-        doc = await Notification.findOne({ userId: item.userId, key: String(item.key) });
-      }
-      if (!doc) console.warn('[notify] save failed:', err.message);
+      console.warn('[notify] save failed:', err.message);
+    }
+    if (!isNew) {
+      if (doc) created.push(doc);
+      continue;
     }
     const payload = notificationPayload(doc, item);
+    if (item.key) payload.tag = String(item.key);
     emitAndPush(io, item.userId, payload);
     if (doc) created.push(doc);
   }

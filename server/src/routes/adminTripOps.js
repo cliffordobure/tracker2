@@ -23,6 +23,7 @@ import {
   dateKey,
   scheduledForFrom,
   findPeriodConflict,
+  conflictMessage,
   nextTripCode,
   normalizeClock,
   plannedDurationFromBody,
@@ -356,11 +357,13 @@ router.post('/trip-schedules/:id/exceptions', async (req, res) => {
         driverId: nextDriver,
         serviceDate: day,
         period: schedule.period,
+        scheduledTime: scheduledTime || schedule.scheduledTime,
+        durationMinutes: trip.durationMinutes ?? schedule.durationMinutes,
         excludeTripId: trip._id,
       });
       if (conflict) {
         return res.status(409).json({
-          error: 'Override conflicts with another trip that day/period',
+          error: conflictMessage(conflict),
           exception,
           conflictTripCode: conflict.tripCode,
         });
@@ -521,6 +524,8 @@ router.post('/trip-schedules/:id/activate', async (req, res) => {
         driverId: existing.driverId,
         serviceDate: trip.serviceDate,
         period: existing.period || trip.period,
+        scheduledTime: trip.scheduledTime || existing.scheduledTime,
+        durationMinutes: trip.durationMinutes ?? existing.durationMinutes,
         excludeTripId: trip._id,
       });
       if (conflict) {
@@ -741,16 +746,19 @@ router.post('/trip-instances', async (req, res) => {
     const driverId = req.body.driverId;
     if (!driverId) return res.status(400).json({ error: 'driverId is required' });
 
+    const durationMinutes = plannedDurationFromBody(req.body, scheduledTime);
     const conflict = await findPeriodConflict({
       schoolId,
       busId,
       driverId,
       serviceDate,
       period,
+      scheduledTime,
+      durationMinutes,
     });
     if (conflict) {
       return res.status(409).json({
-        error: 'Conflict with another trip that day/period',
+        error: conflictMessage(conflict),
         conflictTripCode: conflict.tripCode,
       });
     }
@@ -771,7 +779,7 @@ router.post('/trip-instances', async (req, res) => {
       serviceDate,
       scheduledTime,
       scheduledFor: scheduledForFrom(serviceDate, scheduledTime),
-      durationMinutes: plannedDurationFromBody(req.body, scheduledTime),
+      durationMinutes,
       kidIds,
       tripCode: await nextTripCode(),
       status: 'scheduled',
@@ -844,17 +852,20 @@ router.put('/trip-instances/:id', async (req, res) => {
         : undefined;
 
     if (!trip.scheduleId || !trip.serviceDate) {
+      const nextClock = normalizeClock(scheduledTime || trip.scheduledTime || '06:30');
       const conflict = await findPeriodConflict({
         schoolId: trip.schoolId,
         busId,
         driverId,
         serviceDate: trip.serviceDate || trip.scheduledFor || new Date(),
         period: trip.period,
+        scheduledTime: scheduledTime ? nextClock : trip.scheduledTime,
+        durationMinutes: nextDuration !== undefined ? nextDuration : trip.durationMinutes,
         excludeTripId: trip._id,
       });
       if (conflict) {
         return res.status(409).json({
-          error: 'Conflict with another trip that day/period',
+          error: conflictMessage(conflict),
           conflictTripCode: conflict.tripCode,
         });
       }
@@ -882,11 +893,13 @@ router.put('/trip-instances/:id', async (req, res) => {
       driverId,
       serviceDate: trip.serviceDate,
       period: trip.period || schedule.period,
+      scheduledTime: overrideTime,
+      durationMinutes: nextDuration !== undefined ? nextDuration : trip.durationMinutes,
       excludeTripId: trip._id,
     });
     if (conflict) {
       return res.status(409).json({
-        error: 'Conflict with another trip that day/period',
+        error: conflictMessage(conflict),
         conflictTripCode: conflict.tripCode,
       });
     }
@@ -978,11 +991,13 @@ router.post('/trip-instances/:id/restore', async (req, res) => {
       driverId: trip.driverId,
       serviceDate: trip.serviceDate || trip.scheduledFor || new Date(),
       period: trip.period,
+      scheduledTime: trip.scheduledTime || formatClock(trip.scheduledFor),
+      durationMinutes: trip.durationMinutes,
       excludeTripId: trip._id,
     });
     if (conflict) {
       return res.status(409).json({
-        error: 'Conflict with another trip that day/period',
+        error: conflictMessage(conflict),
         conflictTripCode: conflict.tripCode,
       });
     }
@@ -2451,9 +2466,13 @@ async function createTransportForOuting({ schoolId, outing, routeId, driverId, b
     driverId,
     serviceDate,
     period,
+    scheduledTime: formatClock(outing.startAt),
+    durationMinutes: outing.endAt
+      ? Math.max(1, Math.round((new Date(outing.endAt) - new Date(outing.startAt)) / 60000))
+      : null,
   });
   if (conflict) {
-    const err = new Error(`Transport conflict with ${conflict.tripCode || 'another trip'} that day/period`);
+    const err = new Error(conflictMessage(conflict));
     err.status = 409;
     err.conflictTripCode = conflict.tripCode;
     throw err;
@@ -2618,11 +2637,15 @@ router.put('/outings/:id', async (req, res) => {
             driverId: payload.driverId,
             serviceDate,
             period,
+            scheduledTime: formatClock(payload.startAt),
+            durationMinutes: payload.endAt
+              ? Math.max(1, Math.round((new Date(payload.endAt) - new Date(payload.startAt)) / 60000))
+              : null,
             excludeTripId: trip._id,
           });
           if (conflict) {
             return res.status(409).json({
-              error: `Transport conflict with ${conflict.tripCode || 'another trip'} that day/period`,
+              error: conflictMessage(conflict),
               conflictTripCode: conflict.tripCode,
             });
           }

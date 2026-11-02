@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import fs from 'fs';
 import webpush from 'web-push';
 import { initializeApp, cert, getApps, applicationDefault } from 'firebase-admin/app';
@@ -74,6 +75,13 @@ async function sendFcm(messaging, tokenDoc, payload) {
     payload.data?.type === 'late_pickup_request'
       ? 'schoolkids_driver_alerts'
       : 'schoolkids_alerts';
+  // Android replaces a notification that reuses the same tag. The full key is
+  // longer than 64 characters and the child id sits at the end, so three
+  // siblings were collapsing into one alert. Hash the whole key instead.
+  const rawTag = String(payload.data?.tag || '');
+  const tag = rawTag
+    ? createHash('sha1').update(rawTag).digest('hex').slice(0, 32)
+    : '';
 
   await messaging.send({
     token: tokenDoc.token,
@@ -81,8 +89,10 @@ async function sendFcm(messaging, tokenDoc, payload) {
     data,
     android: {
       priority: 'high',
+      ...(tag ? { collapseKey: tag } : {}),
       notification: {
         channelId,
+        ...(tag ? { tag } : {}),
         priority: 'high',
         defaultSound: true,
         defaultVibrateTimings: true,

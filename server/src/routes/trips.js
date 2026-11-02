@@ -16,7 +16,7 @@ import { stripApprovedLeaveFromKids } from '../lib/leave.js';
 const router = Router();
 
 function isEveningTrip(trip) {
-  return trip?.direction === 'to_home' || trip?.period === 'evening' || trip?.period === 'afternoon';
+  return trip?.direction === 'to_home' || trip?.period === 'evening';
 }
 
 function stopPhrase(name) {
@@ -30,6 +30,62 @@ function childPossessive(kid) {
   if (gender === 'female') return 'her';
   if (gender === 'male') return 'his';
   return 'their';
+}
+
+function parentNotesForKids(kids, build) {
+  const notes = [];
+  for (const kid of kids) {
+    for (const parentId of kid.parentIds || []) {
+      notes.push(build(parentId, kid));
+    }
+  }
+  return notes;
+}
+
+function morningLeaveNotes(trip, kids, when) {
+  return parentNotesForKids(kids, (parentId, kid) => ({
+    userId: parentId,
+    type: 'trip_started',
+    title: 'Leaving school',
+    body: `The bus/van is now leaving school to pick your child ${kid.name} at ${when}`,
+    tripId: trip._id,
+    kidId: kid._id,
+    key: `${parentId}:morning_leave:${trip._id}:${kid._id}`,
+  }));
+}
+
+function pickupParentNotes(trip, kid, when, stopName = '') {
+  if (!kid) return [];
+  const goingHome = trip?.direction === 'to_home' || trip?.period === 'afternoon' || trip?.period === 'evening';
+  const title = 'Picked up';
+  const body = goingHome && trip?.direction !== 'to_school'
+    ? `Your child ${kid.name} has been picked up from school at ${when}`
+    : `Your child ${kid.name} has been picked up${trip?.period === 'afternoon' ? ' this afternoon' : ' for school'} at ${stopPhrase(stopName)} at ${when}`;
+  return (kid?.parentIds || []).map((parentId) => ({
+    userId: parentId,
+    type: 'kid_picked_up',
+    title,
+    body,
+    tripId: trip._id,
+    kidId: kid._id,
+    key: `${parentId}:pickup:${trip._id}:${kid._id}`,
+  }));
+}
+
+async function morningReachedSchoolNotes(trip, when) {
+  const dropped = await TripEvent.find({ tripId: trip._id, type: 'dropped_off' }).select('kidId');
+  const droppedIds = [...new Set(dropped.map((event) => String(event.kidId)))];
+  if (!droppedIds.length) return [];
+  const kids = await Kid.find({ _id: { $in: droppedIds }, active: true });
+  return parentNotesForKids(kids, (parentId, kid) => ({
+    userId: parentId,
+    type: 'kid_dropped_off',
+    title: 'Reached school',
+    body: `The bus/van has reached school with your child ${kid.name} at ${when}`,
+    tripId: trip._id,
+    kidId: kid._id,
+    key: `${parentId}:morning_reach:${trip._id}:${kid._id}`,
+  }));
 }
 
 function startOfToday() {
@@ -60,17 +116,11 @@ async function emitTripStarted(trip, kids, { eveningBoard = false } = {}) {
           kidId: kid._id,
           key: `${parentId}:evening_start:${trip._id}:${kid._id}`,
         });
-      } else {
-        notifications.push({
-          userId: parentId,
-          type: 'trip_started',
-          title: 'Leaving school',
-          body: `The bus/van is now leaving school to pick your child ${kid.name} at ${when}`,
-          tripId: trip._id,
-          kidId: kid._id,
-        });
       }
     }
+  }
+  if (!eveningBoard) {
+    notifications.push(...morningLeaveNotes(trip, kids, when));
   }
   const driverId = trip.driverId?._id || trip.driverId;
   if (driverId) {
@@ -411,21 +461,25 @@ router.post('/:id/kids/:kidId/check-in', authenticate, requireRole('driver'), as
     const expected = (trip.kidIds || []).length;
     res.json({ event, expected });
 
-    // Boarding at school stays silent until the driver starts. Do not block the tap.
-    if (trip.status === 'active') {
+    // Evening boarding stays quiet until the driver starts. Afternoon pickup
+    // tells that child's parents immediately, even before Start.
+    if (trip.status === 'active' || trip.period === 'afternoon') {
       setImmediate(async () => {
         try {
           const kid = await Kid.findById(kidId);
           const io = getIO();
           const when = formatDateTime(event.at || new Date());
-          const notifications = (kid?.parentIds || []).map((parentId) => ({
-            userId: parentId,
-            type: 'kid_picked_up',
-            title: 'Leaving school',
-            body: `The bus/van is now leaving school for dropping your child ${kid.name} at ${when}`,
-            tripId: trip._id,
-            kidId: kid._id,
-          }));
+          const notifications = trip.period === 'afternoon'
+            ? pickupParentNotes(trip, kid, when)
+            : (kid?.parentIds || []).map((parentId) => ({
+                userId: parentId,
+                type: 'kid_picked_up',
+                title: 'Leaving school',
+                body: `The bus/van is now leaving school for dropping your child ${kid.name} at ${when}`,
+                tripId: trip._id,
+                kidId: kid._id,
+                key: `${parentId}:pickup:${trip._id}:${kid._id}`,
+              }));
           createAndEmitNotificationsLater(io, notifications);
           const payload = { tripId: trip._id.toString(), kidId, event };
           io?.to(`trip:${trip._id}`).emit('kid:picked_up', payload);
@@ -510,14 +564,7 @@ router.post('/:id/kids/:kidId/pickup', authenticate, requireRole('driver'), asyn
         const io = getIO();
         const stopName = kid?.homeStopId?.name ? String(kid.homeStopId.name) : '';
         const when = formatDateTime(event.at || new Date());
-        const notifications = (kid?.parentIds || []).map((parentId) => ({
-          userId: parentId,
-          type: 'kid_picked_up',
-          title: 'Picked up',
-          body: `Your child ${kid.name} has been picked up for school at ${stopPhrase(stopName)} at ${when}`,
-          tripId: trip._id,
-          kidId: kid._id,
-        }));
+        const notifications = pickupParentNotes(trip, kid, when, stopName);
         const driverId = trip.driverId?._id || trip.driverId;
         if (driverId && kid) {
           notifications.push({
@@ -688,16 +735,17 @@ router.post('/:id/kids/:kidId/dropoff', authenticate, requireRole('driver'), asy
         const when = formatDateTime(event.at || new Date());
         const io = getIO();
         const evening = isEveningTrip(trip);
-        const notifications = (kid?.parentIds || []).map((parentId) => ({
-          userId: parentId,
-          type: 'kid_dropped_off',
-          title: evening ? 'Dropped off' : 'Reached school',
-          body: evening
-            ? `Your child ${kid.name} has been dropped at ${childPossessive(kid)} ${place} at ${when}`
-            : `The bus/van has reached school with your child ${kid.name} at ${when}`,
-          tripId: trip._id,
-          kidId: kid._id,
-        }));
+        const notifications = evening
+          ? (kid?.parentIds || []).map((parentId) => ({
+              userId: parentId,
+              type: 'kid_dropped_off',
+              title: 'Dropped off',
+              body: `Your child ${kid.name} has been dropped at ${childPossessive(kid)} ${place} at ${when}`,
+              tripId: trip._id,
+              kidId: kid._id,
+              key: `${parentId}:evening_drop:${trip._id}:${kid._id}`,
+            }))
+          : await morningReachedSchoolNotes(trip, when);
         const driverId = trip.driverId?._id || trip.driverId;
         if (driverId && kid) {
           notifications.push({
@@ -774,24 +822,8 @@ router.post('/:id/complete', authenticate, requireRole('driver'), async (req, re
       ? kids.filter((k) => boardedIds.has(String(k._id)))
       : kids;
     const when = formatDateTime(trip.endedAt || new Date());
-    // Parents of students dropped one-by-one already got "Reached school".
-    // Notify only the students this drop-off-at-school just marked off the bus.
-    const justDroppedIds = new Set(justDropped.map((e) => String(e.kidId)));
-    if (!evening && justDroppedIds.size) {
-      for (const kid of kids) {
-        if (!justDroppedIds.has(String(kid._id))) continue;
-        for (const parentId of kid.parentIds || []) {
-          notifications.push({
-            userId: parentId,
-            type: 'kid_dropped_off',
-            title: 'Reached school',
-            body: `The bus/van has reached school with your child ${kid.name} at ${when}`,
-            tripId: trip._id,
-            kidId: kid._id,
-            key: `${parentId}:school_drop:${trip._id}:${kid._id}`,
-          });
-        }
-      }
+    if (!evening) {
+      notifications.push(...(await morningReachedSchoolNotes(trip, when)));
     }
     const driverId = trip.driverId?._id || trip.driverId;
     if (driverId) {

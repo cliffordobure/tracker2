@@ -7,7 +7,7 @@ import {
 import { notifyTripAssigned } from './notifications.js';
 import { getIO } from '../socket.js';
 import { EDIT_SCOPES } from '@school-tracker/shared';
-import { fromAppZonedDateTime } from '../lib/clock.js';
+import { formatClock, fromAppZonedDateTime } from '../lib/clock.js';
 import { stripApprovedLeaveFromKids } from '../lib/leave.js';
 
 function parseDateInput(dateInput) {
@@ -143,14 +143,50 @@ export async function nextTripCode() {
   return `TRIP-${n}`;
 }
 
+function clockToMinutes(value) {
+  const match = String(value || '').trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+  const hh = Number(match[1]);
+  const mm = Number(match[2]);
+  if (hh > 23 || mm > 59) return null;
+  return hh * 60 + mm;
+}
+
+function tripStartMinutes(trip) {
+  const fromClock = clockToMinutes(trip?.scheduledTime);
+  if (fromClock != null) return fromClock;
+  if (trip?.scheduledFor) return clockToMinutes(formatClock(trip.scheduledFor));
+  return null;
+}
+
+/** Same start time clashes. Planned lengths clash only when the windows overlap. */
+function windowsOverlap(aStart, aDuration, bStart, bDuration) {
+  if (aStart == null || bStart == null) return false;
+  if (aDuration == null || bDuration == null) return aStart === bStart;
+  return aStart < bStart + bDuration && bStart < aStart + aDuration;
+}
+
+export function conflictMessage(conflict) {
+  const code = conflict?.tripCode || 'another trip';
+  const when = conflict?.scheduledTime ? ` at ${conflict.scheduledTime}` : '';
+  return `This driver or bus is already on ${code}${when}. Choose a different time, driver, or bus.`;
+}
+
 export async function findPeriodConflict({
   schoolId,
   busId,
   driverId,
   serviceDate,
   period,
+  scheduledTime,
+  durationMinutes,
   excludeTripId,
 }) {
+  const resourceOr = [];
+  if (busId) resourceOr.push({ busId });
+  if (driverId) resourceOr.push({ driverId });
+  if (!resourceOr.length) return null;
+
   const dayStart = startOfDay(serviceDate);
   const dayEnd = endOfDay(serviceDate);
   const filter = {
@@ -158,13 +194,21 @@ export async function findPeriodConflict({
     period,
     serviceDate: { $gte: dayStart, $lte: dayEnd },
     status: { $in: ['scheduled', 'active'] },
-    $or: [{ busId }, { driverId }],
+    $or: resourceOr,
   };
   if (excludeTripId) filter._id = { $ne: excludeTripId };
-  return Trip.findOne(filter)
+  const candidates = await Trip.find(filter)
     .populate('busId', 'plate label')
     .populate('driverId', 'name')
     .populate('routeId', 'name');
+
+  const start = clockToMinutes(scheduledTime);
+  const duration = parseDurationMinutes(durationMinutes);
+  return (
+    candidates.find((trip) =>
+      windowsOverlap(start, duration, tripStartMinutes(trip), parseDurationMinutes(trip.durationMinutes))
+    ) || null
+  );
 }
 
 async function loadHolidayKeys(schoolId, from, to) {
@@ -276,6 +320,8 @@ export async function generateInstancesForSchedule(
       driverId: payload.driverId,
       serviceDate,
       period: payload.period,
+      scheduledTime: payload.scheduledTime,
+      durationMinutes: payload.durationMinutes,
     });
     if (conflict) {
       conflicts.push({
@@ -391,6 +437,8 @@ export async function applyScheduleEdit(scheduleId, body = {}) {
         driverId: nextDriver,
         serviceDate,
         period: schedule.period,
+        scheduledTime: exception.scheduledTime || schedule.scheduledTime,
+        durationMinutes: trip.durationMinutes ?? schedule.durationMinutes,
         excludeTripId: trip._id,
       });
       if (conflict) {
@@ -450,6 +498,8 @@ export async function applyScheduleEdit(scheduleId, body = {}) {
       driverId: nextDriver,
       serviceDate: trip.serviceDate,
       period: schedule.period,
+      scheduledTime: schedule.scheduledTime,
+      durationMinutes: schedule.durationMinutes,
       excludeTripId: trip._id,
     });
     if (conflict) {

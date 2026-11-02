@@ -130,7 +130,6 @@ export default function ParentHome() {
     socket.on('trip:started', onTripStarted);
     socket.on('kid:picked_up', onPickedUp);
     socket.on('kid:dropped_off', () => {
-      showToast('Your child was dropped off');
       refresh();
     });
     socket.on('trip:completed', () => {
