@@ -42,8 +42,11 @@ function stillOnTheRoad(trip, now = Date.now()) {
  */
 export async function closeStaleActiveTrips(driverId, now = Date.now()) {
   const todayKey = formatDateKey(new Date(now));
-  const active = await Trip.find({ driverId, status: 'active' });
+  const active = await Trip.find({ driverId, status: 'active' }).select(
+    'status serviceDate scheduledFor startedAt createdAt latestLocation endedAt routeId scheduleId period direction'
+  );
   const still = [];
+  const staleIds = [];
   for (const trip of active) {
     const startedKey = formatDateKey(trip.startedAt);
     const dayKey = serviceDayKey(trip);
@@ -52,9 +55,13 @@ export async function closeStaleActiveTrips(driverId, now = Date.now()) {
       still.push(trip);
       continue;
     }
-    trip.status = 'completed';
-    trip.endedAt = trip.endedAt || new Date(now);
-    await trip.save();
+    staleIds.push(trip._id);
+  }
+  if (staleIds.length) {
+    await Trip.updateMany(
+      { _id: { $in: staleIds } },
+      { $set: { status: 'completed', endedAt: new Date(now) } }
+    );
   }
   return still;
 }

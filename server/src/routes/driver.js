@@ -670,7 +670,8 @@ async function serializeDriverTripCard(trip) {
 
 router.get('/overview', async (req, res) => {
   try {
-    await ensureDriverDayInstances(req.user.id);
+    // Do not make the phone wait while today's rows are created.
+    void ensureDriverDayInstances(req.user.id);
     const { start, end, key } = dayBounds(req.query.date);
     const [user, profile, unread, todayDocs, completedDocs] = await Promise.all([
       User.findById(req.user.id).select('name photoUrl'),
@@ -1173,7 +1174,7 @@ router.post('/incidents', async (req, res) => {
 
 router.get('/trips/today', async (req, res) => {
   try {
-    await ensureDriverDayInstances(req.user.id);
+    void ensureDriverDayInstances(req.user.id);
     const { start, end, key } = dayBounds(req.query.date);
     const [docs, completedDocs] = await Promise.all([
       findDriverOpenTrips(req.user.id, start, end),
