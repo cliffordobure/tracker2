@@ -7,7 +7,7 @@ import { datesForSchedule, generateInstancesForSchedule } from '../services/trip
 import { isCloudinaryConfigured } from '../services/cloudinary.js';
 import { formatClock, formatDateKey, formatDayClock, fromAppZonedDateTime } from '../lib/clock.js';
 import { closeStaleActiveTrips } from '../lib/activeTrip.js';
-import { stripApprovedLeaveFromKids } from '../lib/leave.js';
+import { approvedLeaveIdSet, withoutLeaveKids } from '../lib/leave.js';
 
 const router = Router();
 router.use(authenticate, requireRole('driver'));
@@ -62,6 +62,7 @@ function tripStartInstant(trip) {
 }
 
 const ensuredDriverDays = new Map();
+const ensuringDriverDays = new Map();
 
 /** Create today and tomorrow's trip rows from the driver's active schedules when they are missing. */
 async function ensureDriverDayInstances(driverId) {
@@ -69,22 +70,44 @@ async function ensureDriverDayInstances(driverId) {
   if (!key) return;
   const prev = ensuredDriverDays.get(key) || 0;
   if (Date.now() - prev < 60_000) return;
-  const schedules = await TripSchedule.find({ driverId, active: { $ne: false } }).select('_id');
-  if (!schedules.length) {
-    ensuredDriverDays.set(key, Date.now());
-    return;
-  }
-  const from = new Date();
-  const to = new Date();
-  to.setDate(to.getDate() + 1);
-  for (const schedule of schedules) {
-    try {
-      await generateInstancesForSchedule(schedule._id, { from, to, notify: false });
-    } catch (err) {
-      console.warn('[driver] ensure trip instances failed:', err.message);
+  const running = ensuringDriverDays.get(key);
+  if (running) return running;
+
+  const job = (async () => {
+    const schedules = await TripSchedule.find({ driverId, active: { $ne: false } }).select('_id');
+    if (!schedules.length) return;
+    const today = dayBounds();
+    const tomorrow = dayBounds(ymdAdd(today.key, 1));
+    const existing = await Trip.find({
+      scheduleId: { $in: schedules.map((s) => s._id) },
+      serviceDate: { $gte: today.start, $lte: tomorrow.end },
+    }).select('scheduleId serviceDate');
+    const have = new Set(existing.map((t) => `${t.scheduleId}:${formatDateKey(t.serviceDate)}`));
+    for (const schedule of schedules) {
+      const hasToday = have.has(`${schedule._id}:${today.key}`);
+      const hasTomorrow = have.has(`${schedule._id}:${tomorrow.key}`);
+      if (hasToday && hasTomorrow) continue;
+      try {
+        await generateInstancesForSchedule(schedule._id, {
+          from: hasToday ? tomorrow.start : today.start,
+          to: tomorrow.end,
+          notify: false,
+        });
+      } catch (err) {
+        console.warn('[driver] ensure trip instances failed:', err.message);
+      }
     }
-  }
-  ensuredDriverDays.set(key, Date.now());
+  })()
+    .catch((err) => {
+      console.warn('[driver] ensure trip instances failed:', err.message);
+    })
+    .finally(() => {
+      ensuredDriverDays.set(key, Date.now());
+      ensuringDriverDays.delete(key);
+    });
+
+  ensuringDriverDays.set(key, job);
+  return job;
 }
 
 function periodRank(trip) {
@@ -225,7 +248,7 @@ async function loadUpcomingMorning(driverId, todayKey, todayCards = []) {
   })
     .populate('routeId', 'name')
     .populate('scheduleId', 'name scheduledTime');
-  const tomorrowCards = await Promise.all(tomorrowDocs.map((t) => serializeDriverTripCard(t)));
+  const tomorrowCards = await serializeDriverTripCards(tomorrowDocs);
   return [...todayCards, ...tomorrowCards]
     .filter((t) => t.status === 'scheduled' && !isEveningLikeTrip(t))
     .map(morningAlarmPayload);
@@ -356,70 +379,91 @@ router.get('/routes', async (req, res) => {
       routeIds.add(id.toString());
     }
 
+    const ids = [...routeIds];
     const routes = await Route.find({
-      _id: { $in: [...routeIds] },
+      _id: { $in: ids },
       active: true,
     }).populate('schoolId', 'name location address');
 
-    const enriched = await Promise.all(
-      routes.map(async (route) => {
-        const [stops, kids, activeTrip, scheduledTrips] = await Promise.all([
-          Stop.find({ routeId: route._id }).sort({ order: 1 }),
-          Kid.find({ routeId: route._id, active: true })
-            .select('name grade house photoUrl homeStopId')
-            .populate('parentIds', 'name phone'),
-          Trip.findOne({ routeId: route._id, driverId: req.user.id, status: 'active' })
-            .populate('scheduleId', 'name scheduledTime scheduleType customDays period direction')
-            .populate('busId', 'plate label seats')
-            .populate('kidIds', 'name grade homeStopId'),
-          Trip.find({
-            routeId: route._id,
-            driverId: req.user.id,
-            status: 'scheduled',
-            $or: [
-              { serviceDate: { $gte: start, $lte: end } },
-              { scheduledFor: { $gte: start, $lte: end } },
-            ],
-          })
-            .populate('scheduleId', 'name scheduledTime scheduleType customDays period direction')
-            .populate('busId', 'plate label seats')
-            .populate('kidIds', 'name grade homeStopId')
-            .sort({ sequence: 1 }),
-        ]);
-        const school = route.schoolId && typeof route.schoolId === 'object' ? route.schoolId : null;
-        const allTrips = [...(activeTrip ? [activeTrip] : []), ...scheduledTrips];
-        const morningTrip =
-          allTrips.find((t) => t.direction === 'to_school' || t.period === 'morning') || null;
-        const afternoonTrip =
-          allTrips.find((t) => t.direction === 'to_home' || t.period === 'afternoon' || t.period === 'evening') ||
-          null;
-        return {
-          ...route.toObject(),
+    const [allStops, allKids, allTrips] = await Promise.all([
+      Stop.find({ routeId: { $in: ids } }).sort({ order: 1 }),
+      Kid.find({ routeId: { $in: ids }, active: true })
+        .select('name grade house photoUrl homeStopId routeId')
+        .populate('parentIds', 'name phone'),
+      Trip.find({
+        routeId: { $in: ids },
+        driverId: req.user.id,
+        status: { $in: ['scheduled', 'active'] },
+        $or: [
+          { serviceDate: { $gte: start, $lte: end } },
+          { scheduledFor: { $gte: start, $lte: end } },
+          { status: 'active' },
+        ],
+      })
+        .populate('scheduleId', 'name scheduledTime scheduleType customDays period direction')
+        .populate('busId', 'plate label seats')
+        .populate('kidIds', 'name grade homeStopId')
+        .sort({ sequence: 1 }),
+    ]);
+    const stopsByRoute = new Map();
+    for (const stop of allStops) {
+      const id = String(stop.routeId);
+      if (!stopsByRoute.has(id)) stopsByRoute.set(id, []);
+      stopsByRoute.get(id).push(stop);
+    }
+    const kidsByRoute = new Map();
+    for (const kid of allKids) {
+      const id = String(kid.routeId);
+      if (!kidsByRoute.has(id)) kidsByRoute.set(id, []);
+      kidsByRoute.get(id).push(kid);
+    }
+    const tripsByRoute = new Map();
+    for (const trip of allTrips) {
+      const id = String(trip.routeId?._id || trip.routeId);
+      if (!tripsByRoute.has(id)) tripsByRoute.set(id, []);
+      tripsByRoute.get(id).push(trip);
+    }
+
+    const enriched = routes.map((route) => {
+      const id = String(route._id);
+      const stops = stopsByRoute.get(id) || [];
+      const kids = kidsByRoute.get(id) || [];
+      const routeTrips = tripsByRoute.get(id) || [];
+      const activeTrip = routeTrips.find((t) => t.status === 'active') || null;
+      const scheduledTrips = routeTrips.filter((t) => t.status === 'scheduled');
+      const school = route.schoolId && typeof route.schoolId === 'object' ? route.schoolId : null;
+      const allRouteTrips = [...(activeTrip ? [activeTrip] : []), ...scheduledTrips];
+      const morningTrip =
+        allRouteTrips.find((t) => t.direction === 'to_school' || t.period === 'morning') || null;
+      const afternoonTrip =
+        allRouteTrips.find((t) => t.direction === 'to_home' || t.period === 'afternoon' || t.period === 'evening') ||
+        null;
+      return {
+        ...route.toObject(),
+        stops,
+        kids,
+        activeTrip,
+        scheduledTrips,
+        morning: buildRouteDirectionPlan({
           stops,
           kids,
-          activeTrip,
-          scheduledTrips,
-          morning: buildRouteDirectionPlan({
-            stops,
-            kids,
-            trip: morningTrip,
-            direction: 'to_school',
-            school,
-            label: 'Morning Route',
-            description: route.description,
-          }),
-          afternoon: buildRouteDirectionPlan({
-            stops,
-            kids,
-            trip: afternoonTrip,
-            direction: 'to_home',
-            school,
-            label: 'Afternoon Route',
-            description: route.description,
-          }),
-        };
-      })
-    );
+          trip: morningTrip,
+          direction: 'to_school',
+          school,
+          label: 'Morning Route',
+          description: route.description,
+        }),
+        afternoon: buildRouteDirectionPlan({
+          stops,
+          kids,
+          trip: afternoonTrip,
+          direction: 'to_home',
+          school,
+          label: 'Afternoon Route',
+          description: route.description,
+        }),
+      };
+    });
 
     const bus = profile?.busId && typeof profile.busId === 'object' ? profile.busId : null;
     res.json({
@@ -498,41 +542,89 @@ function tripDurationMins(trip) {
   return null;
 }
 
-async function routeEnds(routeId, direction) {
-  if (!routeId) return { originName: '', destinationName: '', stopCount: 0 };
-  const stops = await Stop.find({ routeId }).sort({ order: 1 });
-  const school = stops.find((s) => s.type === 'school');
-  const homes = stops.filter((s) => s.type !== 'school');
+function routeEndsFromStops(stops, direction) {
+  const list = stops || [];
+  const school = list.find((s) => s.type === 'school');
+  const homes = list.filter((s) => s.type !== 'school');
   const toHome = direction === 'to_home';
   const origin = toHome ? school?.name || 'School' : homes[0]?.name || 'Pickup';
   const dest = toHome
     ? homes[homes.length - 1]?.name || homes[0]?.name || 'Home'
     : school?.name || 'School';
-  return { originName: origin, destinationName: dest, stopCount: stops.length };
+  return { originName: origin, destinationName: dest, stopCount: list.length };
 }
 
-async function boardingForTrip(trip) {
-  const kidIds = (trip.kidIds || []).map((k) => (k?._id || k)?.toString()).filter(Boolean);
-  const studentCount = kidIds.length;
-  const events = await TripEvent.find({ tripId: trip._id }).select('kidId type');
-  const picked = new Set(events.filter((e) => e.type === 'picked_up').map((e) => e.kidId.toString()));
-  const dropped = new Set(events.filter((e) => e.type === 'dropped_off').map((e) => e.kidId.toString()));
-  let onBoard = 0;
-  for (const id of picked) {
-    if (!dropped.has(id)) onBoard += 1;
+async function routeEnds(routeId, direction) {
+  if (!routeId) return { originName: '', destinationName: '', stopCount: 0 };
+  const stops = await Stop.find({ routeId }).sort({ order: 1 }).select('name type order').lean();
+  return routeEndsFromStops(stops, direction);
+}
+
+async function serializeDriverTripCards(docs) {
+  if (!docs.length) return [];
+  const routeIds = [
+    ...new Set(docs.map((t) => String(t.routeId?._id || t.routeId || '')).filter(Boolean)),
+  ];
+  const tripIds = docs.map((t) => t._id);
+  const [stopDocs, eventDocs] = await Promise.all([
+    routeIds.length
+      ? Stop.find({ routeId: { $in: routeIds } }).select('routeId name type order').sort({ order: 1 }).lean()
+      : [],
+    TripEvent.find({ tripId: { $in: tripIds }, type: { $in: ['picked_up', 'dropped_off'] } })
+      .select('tripId kidId type')
+      .lean(),
+  ]);
+  const stopsByRoute = new Map();
+  for (const stop of stopDocs) {
+    const id = String(stop.routeId);
+    if (!stopsByRoute.has(id)) stopsByRoute.set(id, []);
+    stopsByRoute.get(id).push(stop);
   }
-  return { studentCount, studentsOnBoard: onBoard, pendingCheckouts: onBoard };
+  const picked = new Map();
+  const dropped = new Map();
+  for (const event of eventDocs) {
+    const id = String(event.tripId);
+    const bag = event.type === 'picked_up' ? picked : dropped;
+    if (!bag.has(id)) bag.set(id, new Set());
+    bag.get(id).add(String(event.kidId));
+  }
+  const groups = new Map();
+  for (const trip of docs) {
+    const key = formatDateKey(trip.serviceDate || trip.scheduledFor || trip.startedAt || new Date());
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(trip);
+  }
+  const leaveByDate = new Map();
+  await Promise.all(
+    [...groups.entries()].map(async ([key, group]) => {
+      const kids = group.flatMap((t) => t.kidIds || []);
+      const onDate = group[0].serviceDate || group[0].scheduledFor || group[0].startedAt || new Date();
+      leaveByDate.set(key, await approvedLeaveIdSet(kids, onDate));
+    })
+  );
+
+  return docs.map((trip) => {
+    const obj = typeof trip.toObject === 'function' ? trip.toObject() : { ...trip };
+    const key = formatDateKey(obj.serviceDate || obj.scheduledFor || obj.startedAt || new Date());
+    obj.kidIds = withoutLeaveKids(obj.kidIds, leaveByDate.get(key));
+    const routeId = String(obj.routeId?._id || obj.routeId || '');
+    const ends = routeEndsFromStops(stopsByRoute.get(routeId), obj.direction);
+    const pick = picked.get(String(obj._id)) || new Set();
+    const drop = dropped.get(String(obj._id)) || new Set();
+    let onBoard = 0;
+    for (const id of pick) {
+      if (!drop.has(id)) onBoard += 1;
+    }
+    const board = {
+      studentCount: Array.isArray(obj.kidIds) ? obj.kidIds.length : 0,
+      studentsOnBoard: onBoard,
+      pendingCheckouts: onBoard,
+    };
+    return finishDriverTripCard(obj, ends, board);
+  });
 }
 
-async function serializeDriverTripCard(trip) {
-  const obj = typeof trip.toObject === 'function' ? trip.toObject() : { ...trip };
-  obj.kidIds = await stripApprovedLeaveFromKids(
-    obj.kidIds,
-    obj.serviceDate || obj.scheduledFor || obj.startedAt || new Date()
-  );
-  const routeId = obj.routeId?._id || obj.routeId;
-  const ends = await routeEnds(routeId, obj.direction);
-  const board = await boardingForTrip(obj);
+function finishDriverTripCard(obj, ends, board) {
   const start = obj.startedAt
     ? new Date(obj.startedAt)
     : combineServiceTime(obj.serviceDate, obj.scheduleId?.scheduledTime, obj.scheduledFor);
@@ -571,6 +663,11 @@ async function serializeDriverTripCard(trip) {
   };
 }
 
+async function serializeDriverTripCard(trip) {
+  const [card] = await serializeDriverTripCards([trip]);
+  return card;
+}
+
 router.get('/overview', async (req, res) => {
   try {
     await ensureDriverDayInstances(req.user.id);
@@ -583,7 +680,7 @@ router.get('/overview', async (req, res) => {
       findCompletedToday(req.user.id, start, end),
     ]);
 
-    const todayCards = await Promise.all(todayDocs.map((t) => serializeDriverTripCard(t)));
+    const todayCards = await serializeDriverTripCards(todayDocs);
     const trips = visibleScheduledCards(todayCards, Date.now(), completedDocs);
     const upcomingMorning = await loadUpcomingMorning(req.user.id, key, todayCards);
     const currentTrip = trips.find((t) => t.status === 'active') || trips.find((t) => t.status === 'scheduled') || null;
@@ -1082,7 +1179,7 @@ router.get('/trips/today', async (req, res) => {
       findDriverOpenTrips(req.user.id, start, end),
       findCompletedToday(req.user.id, start, end),
     ]);
-    const cards = await Promise.all(docs.map((t) => serializeDriverTripCard(t)));
+    const cards = await serializeDriverTripCards(docs);
     const trips = visibleScheduledCards(cards, Date.now(), completedDocs);
     const upcomingMorning = await loadUpcomingMorning(req.user.id, key, cards);
     res.json({ trips, upcomingMorning });
