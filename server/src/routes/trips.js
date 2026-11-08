@@ -11,6 +11,7 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 import { getIO } from '../socket.js';
 import { createAndEmitNotifications, createAndEmitNotificationsLater } from '../services/notifications.js';
 import { formatClock, formatDateTime } from '../lib/clock.js';
+import { activeConflict } from '../lib/activeTrip.js';
 import { stripApprovedLeaveFromKids } from '../lib/leave.js';
 
 const router = Router();
@@ -231,6 +232,27 @@ function locationFromBody(body) {
   };
 }
 
+function populateDriverTrip(id) {
+  return Trip.findById(id)
+    .populate('routeId', 'name')
+    .populate('schoolId', 'name location address supportPhone')
+    .populate('busId', 'plate label seats')
+    .populate('kidIds');
+}
+
+/** @returns {Promise<boolean>} true when a response was already sent. */
+async function respondToActiveConflict(res, driverId, target) {
+  const conflict = await activeConflict(driverId, target);
+  if (!conflict) return false;
+  if (conflict.resume) {
+    const populated = await populateDriverTrip(conflict.resume._id);
+    res.status(200).json({ trip: populated, resumed: true });
+    return true;
+  }
+  res.status(409).json({ error: 'You already have an active trip', trip: conflict.block });
+  return true;
+}
+
 async function openCheckIns(tripId) {
   const events = await TripEvent.find({ tripId });
   const picked = new Set(
@@ -249,11 +271,6 @@ async function openCheckIns(tripId) {
 /** Start a scheduled dispatch trip assigned to this driver. */
 router.post('/:id/start', authenticate, requireRole('driver'), async (req, res) => {
   try {
-    const existing = await Trip.findOne({ driverId: req.user.id, status: 'active' });
-    if (existing) {
-      return res.status(409).json({ error: 'You already have an active trip', trip: existing });
-    }
-
     const trip = await Trip.findOne({
       _id: req.params.id,
       driverId: req.user.id,
@@ -266,11 +283,13 @@ router.post('/:id/start', authenticate, requireRole('driver'), async (req, res) 
       return res.status(400).json({ error: 'Cannot start a completed trip' });
     }
     if (trip.status === 'active') {
-      return res.status(409).json({ error: 'Trip is already active', trip });
+      const populated = await populateDriverTrip(trip._id);
+      return res.json({ trip: populated });
     }
     if (trip.status !== 'scheduled') {
       return res.status(400).json({ error: `Cannot start trip with status ${trip.status}` });
     }
+    if (await respondToActiveConflict(res, req.user.id, trip)) return;
 
     const populated = await activateTrip(trip, req);
     res.json({ trip: populated });
@@ -286,16 +305,19 @@ router.post('/', authenticate, requireRole('driver'), async (req, res) => {
 
     // Prefer starting a pre-dispatched scheduled trip
     if (tripId) {
-      const existing = await Trip.findOne({ driverId: req.user.id, status: 'active' });
-      if (existing) {
-        return res.status(409).json({ error: 'You already have an active trip', trip: existing });
-      }
       const scheduled = await Trip.findOne({
         _id: tripId,
         driverId: req.user.id,
-        status: 'scheduled',
       });
       if (!scheduled) return res.status(404).json({ error: 'Scheduled trip not found' });
+      if (scheduled.status === 'active') {
+        const populated = await populateDriverTrip(scheduled._id);
+        return res.status(200).json({ trip: populated });
+      }
+      if (scheduled.status !== 'scheduled') {
+        return res.status(400).json({ error: `Cannot start trip with status ${scheduled.status}` });
+      }
+      if (await respondToActiveConflict(res, req.user.id, scheduled)) return;
       if (isEveningTrip(scheduled)) {
         const boarded = await boardedKidIds(scheduled._id);
         if (!boarded.length) {
@@ -315,9 +337,14 @@ router.post('/', authenticate, requireRole('driver'), async (req, res) => {
       return res.status(400).json({ error: 'routeId and valid direction are required' });
     }
 
-    const existing = await Trip.findOne({ driverId: req.user.id, status: 'active' });
-    if (existing) {
-      return res.status(409).json({ error: 'You already have an active trip', trip: existing });
+    if (
+      await respondToActiveConflict(res, req.user.id, {
+        routeId,
+        direction,
+        period: direction === 'to_home' ? 'evening' : 'morning',
+      })
+    ) {
+      return;
     }
 
     const route = await Route.findById(routeId);

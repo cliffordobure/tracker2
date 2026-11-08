@@ -6,6 +6,7 @@ import { createAndEmitNotifications } from '../services/notifications.js';
 import { datesForSchedule, generateInstancesForSchedule } from '../services/tripScheduleService.js';
 import { isCloudinaryConfigured } from '../services/cloudinary.js';
 import { formatClock, formatDateKey, formatDayClock, fromAppZonedDateTime } from '../lib/clock.js';
+import { closeStaleActiveTrips } from '../lib/activeTrip.js';
 import { stripApprovedLeaveFromKids } from '../lib/leave.js';
 
 const router = Router();
@@ -97,20 +98,45 @@ function periodRank(trip) {
 /** How early a later trip replaces an earlier one that was never started. */
 const NEXT_TRIP_LEAD_MS = 60 * 60 * 1000;
 
+function scheduleKey(trip) {
+  const id = trip?.scheduleId?._id || trip?.scheduleId;
+  return id ? String(id) : '';
+}
+
+/** A later completed run, or this same schedule already completed, replaces an earlier card. */
+function supersededByCompleted(trip, completed) {
+  if (!completed?.length) return false;
+  const rank = periodRank(trip);
+  const scheduleId = scheduleKey(trip);
+  return completed.some((done) => {
+    const doneRank = periodRank(done);
+    if (doneRank > rank) return true;
+    return doneRank === rank && scheduleId && scheduleId === scheduleKey(done);
+  });
+}
+
 /**
  * One trip at a time, in the day's order.
+ * An active trip is the only card, on Home and on Trips.
+ * A scheduled trip the driver has already checked students into stays put,
+ * so the morning start button cannot replace it.
  * A scheduled morning trip stays until it is completed, then the next trip
  * shows immediately. If that morning trip was never started, it drops off
- * once the next trip is within an hour of its start, and that next trip shows.
- * An active trip is never replaced. After the last trip is completed, nothing
- * shows until midnight, when the next morning's service day begins.
- * Completed trips are already excluded from `cards`.
+ * once the next trip is within an hour of its start.
+ * Once a later trip (or the same schedule) is completed, the earlier
+ * unstarted card does not come back. After the last trip is completed,
+ * nothing shows until midnight.
  */
-function visibleScheduledCards(cards, now = Date.now()) {
+function visibleScheduledCards(cards, now = Date.now(), completed = []) {
   const active = cards.filter((t) => t.status === 'active');
   if (active.length) return active;
   const scheduled = cards
-    .filter((t) => t.status === 'scheduled' && now >= serviceDayStartMs(t))
+    .filter(
+      (t) =>
+        t.status === 'scheduled' &&
+        now >= serviceDayStartMs(t) &&
+        !supersededByCompleted(t, completed)
+    )
     .slice()
     .sort((a, b) => {
       const byPeriod = periodRank(a) - periodRank(b);
@@ -120,12 +146,54 @@ function visibleScheduledCards(cards, now = Date.now()) {
       return aStart - bStart;
     });
   if (!scheduled.length) return [];
+  const boarding = scheduled.filter((t) => Number(t.studentsOnBoard) > 0);
+  if (boarding.length) return [boarding[boarding.length - 1]];
   let chosen = scheduled[0];
   for (let i = 1; i < scheduled.length; i += 1) {
     const start = tripStartInstant(scheduled[i])?.getTime();
     if (start && now >= start - NEXT_TRIP_LEAD_MS) chosen = scheduled[i];
   }
   return [chosen];
+}
+
+const driverTripPopulate = [
+  ['routeId', 'name'],
+  ['schoolId', 'name location address'],
+  ['busId', 'plate label seats'],
+  ['scheduleId', 'name scheduledTime durationMinutes'],
+  ['kidIds', 'name grade'],
+];
+
+function withDriverTripPopulate(query) {
+  for (const [path, select] of driverTripPopulate) query = query.populate(path, select);
+  return query;
+}
+
+/** Today's open trips, plus any active trip that is still the driver's current run. */
+async function findDriverOpenTrips(driverId, start, end) {
+  await closeStaleActiveTrips(driverId);
+  return withDriverTripPopulate(
+    Trip.find({
+      driverId,
+      status: { $in: ['scheduled', 'active'] },
+      $or: [
+        { serviceDate: { $gte: start, $lte: end } },
+        { serviceDate: null, scheduledFor: { $gte: start, $lte: end } },
+        { status: 'active' },
+      ],
+    }).sort({ period: 1, sequence: 1, scheduledFor: 1 })
+  );
+}
+
+async function findCompletedToday(driverId, start, end) {
+  return Trip.find({
+    driverId,
+    status: 'completed',
+    $or: [
+      { serviceDate: { $gte: start, $lte: end } },
+      { endedAt: { $gte: start, $lte: end } },
+    ],
+  }).select('period direction scheduleId serviceDate scheduledFor startedAt status');
 }
 
 function morningAlarmPayload(trip) {
@@ -507,29 +575,16 @@ router.get('/overview', async (req, res) => {
   try {
     await ensureDriverDayInstances(req.user.id);
     const { start, end, key } = dayBounds(req.query.date);
-    const [user, profile, unread, todayDocs] = await Promise.all([
+    const [user, profile, unread, todayDocs, completedDocs] = await Promise.all([
       User.findById(req.user.id).select('name photoUrl'),
       DriverProfile.findOne({ userId: req.user.id }).populate('busId', 'plate label seats'),
       Notification.countDocuments({ userId: req.user.id, read: { $ne: true } }),
-      Trip.find({
-        driverId: req.user.id,
-        status: { $in: ['scheduled', 'active'] },
-        $or: [
-          { serviceDate: { $gte: start, $lte: end } },
-          { serviceDate: null, scheduledFor: { $gte: start, $lte: end } },
-          { serviceDate: null, scheduledFor: null, status: 'active' },
-        ],
-      })
-        .populate('routeId', 'name')
-        .populate('schoolId', 'name location address')
-        .populate('busId', 'plate label seats')
-        .populate('scheduleId', 'name scheduledTime durationMinutes')
-        .populate('kidIds', 'name grade')
-        .sort({ period: 1, sequence: 1, scheduledFor: 1 }),
+      findDriverOpenTrips(req.user.id, start, end),
+      findCompletedToday(req.user.id, start, end),
     ]);
 
     const todayCards = await Promise.all(todayDocs.map((t) => serializeDriverTripCard(t)));
-    const trips = visibleScheduledCards(todayCards);
+    const trips = visibleScheduledCards(todayCards, Date.now(), completedDocs);
     const upcomingMorning = await loadUpcomingMorning(req.user.id, key, todayCards);
     const currentTrip = trips.find((t) => t.status === 'active') || trips.find((t) => t.status === 'scheduled') || null;
     const nextTrip =
@@ -1023,23 +1078,12 @@ router.get('/trips/today', async (req, res) => {
   try {
     await ensureDriverDayInstances(req.user.id);
     const { start, end, key } = dayBounds(req.query.date);
-    const docs = await Trip.find({
-      driverId: req.user.id,
-      status: { $in: ['scheduled', 'active'] },
-      $or: [
-        { serviceDate: { $gte: start, $lte: end } },
-        { serviceDate: null, scheduledFor: { $gte: start, $lte: end } },
-        { serviceDate: null, scheduledFor: null, status: 'active' },
-      ],
-    })
-      .populate('routeId', 'name')
-      .populate('schoolId', 'name location address')
-      .populate('busId', 'plate label seats')
-      .populate('scheduleId', 'name scheduledTime durationMinutes')
-      .populate('kidIds', 'name grade')
-      .sort({ period: 1, sequence: 1, scheduledFor: 1 });
+    const [docs, completedDocs] = await Promise.all([
+      findDriverOpenTrips(req.user.id, start, end),
+      findCompletedToday(req.user.id, start, end),
+    ]);
     const cards = await Promise.all(docs.map((t) => serializeDriverTripCard(t)));
-    const trips = visibleScheduledCards(cards);
+    const trips = visibleScheduledCards(cards, Date.now(), completedDocs);
     const upcomingMorning = await loadUpcomingMorning(req.user.id, key, cards);
     res.json({ trips, upcomingMorning });
   } catch (err) {
@@ -1386,6 +1430,7 @@ router.get('/trips/history', async (req, res) => {
 
 router.get('/trips/active', async (req, res) => {
   try {
+    await closeStaleActiveTrips(req.user.id);
     const trip = await Trip.findOne({ driverId: req.user.id, status: 'active' })
       .populate('routeId', 'name')
       .populate('schoolId', 'name location address supportPhone')
